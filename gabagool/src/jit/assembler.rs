@@ -19,9 +19,24 @@ fn immediate_for_op(op: Op) -> OpImmediate {
             imm0: value as u64,
             imm1: 0,
         },
-        Op::LocalGet { local_idx } | Op::LocalSet { local_idx } => OpImmediate {
-            imm0: local_idx as u64,
+        Op::LocalGet {
+            local_idx: local_idx_a,
+        }
+        | Op::LocalSet {
+            local_idx: local_idx_a,
+        }
+        | Op::LocalTee {
+            local_idx: local_idx_a,
+        } => OpImmediate {
+            imm0: local_idx_a as u64,
             imm1: 0,
+        },
+        Op::LocalGet2 {
+            local_idx_a,
+            local_idx_b,
+        } => OpImmediate {
+            imm0: local_idx_a as u64,
+            imm1: local_idx_b as u64,
         },
         Op::Jump { target, keep, drop }
         | Op::JumpIf { target, keep, drop }

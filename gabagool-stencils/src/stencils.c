@@ -5,18 +5,15 @@ void nop(StencilContext *ctx) {
   ctx->pc += 1;
 
   CHECK_SNAPSHOT(ctx);
-
   __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
 }
 
 void i32_const(StencilContext *ctx) {
   ctx->stack[ctx->stack_pointer] = (uint32_t)ctx->imm_table[ctx->pc].imm0;
-
   ctx->stack_pointer += 1;
   ctx->pc += 1;
 
   CHECK_SNAPSHOT(ctx);
-
   __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
 }
 
@@ -28,7 +25,20 @@ void local_get(StencilContext *ctx) {
   ctx->pc += 1;
 
   CHECK_SNAPSHOT(ctx);
+  __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
+}
 
+void local_get2(StencilContext *ctx) {
+  uint32_t idx0 = (uint32_t)ctx->imm_table[ctx->pc].imm0;
+  uint32_t idx1 = (uint32_t)ctx->imm_table[ctx->pc].imm1;
+
+  ctx->stack[ctx->stack_pointer] = ctx->locals[idx0];
+  ctx->stack[ctx->stack_pointer + 1] = ctx->locals[idx1];
+
+  ctx->stack_pointer += 2;
+  ctx->pc += 1;
+
+  CHECK_SNAPSHOT(ctx);
   __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
 }
 
@@ -36,11 +46,18 @@ void local_set(StencilContext *ctx) {
   uint32_t idx = (uint32_t)ctx->imm_table[ctx->pc].imm0;
   ctx->stack_pointer -= 1;
   ctx->locals[idx] = ctx->stack[ctx->stack_pointer];
-
   ctx->pc += 1;
 
   CHECK_SNAPSHOT(ctx);
+  __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
+}
 
+void local_tee(StencilContext *ctx) {
+  uint32_t idx = (uint32_t)ctx->imm_table[ctx->pc].imm0;
+  ctx->locals[idx] = ctx->stack[ctx->stack_pointer - 1];
+  ctx->pc += 1;
+
+  CHECK_SNAPSHOT(ctx);
   __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
 }
 
