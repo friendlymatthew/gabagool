@@ -45,9 +45,9 @@ fn bench_fibonacci(c: &mut Criterion) {
     //             .unwrap()
     //             .start(&mut store)
     //             .unwrap();
-    //         let fib = instance.get_typed_func::<i32, i32>(&store, "fib").unwrap();
-    //         let result = fib.call(&mut store, 30).unwrap();
-    //         assert_eq!(result, 832040);
+    //         let fib = instance.get_typed_func::<i32, i32>(&store,
+    // "fib").unwrap();         let result = fib.call(&mut store,
+    // 30).unwrap();         assert_eq!(result, 832040);
     //     });
     // });
 }
