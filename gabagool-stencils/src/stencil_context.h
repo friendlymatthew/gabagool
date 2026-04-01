@@ -33,10 +33,22 @@ struct StencilContext {
 #define EXIT_SNAPSHOT 0
 #define EXIT_RETURN 1
 
-#define CHECK_SNAPSHOT(ctx) \
-  if ((ctx)->snapshot_flag) { \
-    (ctx)->exit_reason = EXIT_SNAPSHOT; \
-    return; \
+#define CHECK_SNAPSHOT(ctx)                                                    \
+  if ((ctx)->snapshot_flag) {                                                  \
+    (ctx)->exit_reason = EXIT_SNAPSHOT;                                        \
+    return;                                                                    \
+  }
+
+#define STACK_KEEP_DROP(ctx, keep, drop)                                       \
+  if ((drop) > 0) {                                                            \
+    uint64_t _src = (ctx)->stack_pointer - (keep);                             \
+    uint64_t _dst = _src - (drop);                                             \
+                                                                               \
+    for (uint32_t _i = 0; _i < (keep); _i++) {                                 \
+      (ctx)->stack[_dst + _i] = (ctx)->stack[_src + _i];                       \
+    }                                                                          \
+                                                                               \
+    (ctx)->stack_pointer -= (drop);                                            \
   }
 
 #endif

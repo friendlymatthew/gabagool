@@ -12,16 +12,22 @@ pub struct JitFunction {
     pub imm_table: Vec<OpImmediate>,
 }
 
-fn immediate_for_op(op: &Op) -> OpImmediate {
+fn immediate_for_op(op: Op) -> OpImmediate {
     match op {
         Op::Nop => OpImmediate::default(),
         Op::I32Const { value } => OpImmediate {
-            imm0: *value as u64,
+            imm0: value as u64,
             imm1: 0,
         },
         Op::LocalGet { local_idx } | Op::LocalSet { local_idx } => OpImmediate {
-            imm0: *local_idx as u64,
+            imm0: local_idx as u64,
             imm1: 0,
+        },
+        Op::Jump { target, keep, drop }
+        | Op::JumpIf { target, keep, drop }
+        | Op::JumpIfNot { target, keep, drop } => OpImmediate {
+            imm0: target as u64,
+            imm1: ((keep as u64) << 32) | (drop as u64),
         },
         Op::Return => OpImmediate::default(),
         _ => OpImmediate::default(),
@@ -61,7 +67,7 @@ pub fn assemble(ops: &[Op]) -> Option<JitFunction> {
         .map(|&offset| unsafe { mem::transmute(code.as_ptr().add(offset)) })
         .collect::<Vec<_>>();
 
-    let imm_table = ops.iter().map(immediate_for_op).collect();
+    let imm_table = ops.iter().cloned().map(immediate_for_op).collect();
 
     Some(JitFunction {
         code,

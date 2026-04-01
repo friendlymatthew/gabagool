@@ -111,4 +111,54 @@ void i32_eq_zero(StencilContext *ctx) {
   __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
 }
 
+void jump(StencilContext *ctx) {
+  uint32_t target = (uint32_t)ctx->imm_table[ctx->pc].imm0;
+  uint32_t keep = (uint32_t)(ctx->imm_table[ctx->pc].imm1 >> 32);
+  uint32_t drop = (uint32_t)(ctx->imm_table[ctx->pc].imm1);
+
+  STACK_KEEP_DROP(ctx, keep, drop);
+  ctx->pc = target;
+
+  CHECK_SNAPSHOT(ctx);
+  __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
+}
+
+void jump_if(StencilContext *ctx) {
+  ctx->stack_pointer -= 1;
+  uint32_t cond = (uint32_t)ctx->stack[ctx->stack_pointer];
+
+  if (cond == 0) {
+    ctx->pc += 1;
+  } else {
+    uint32_t target = (uint32_t)ctx->imm_table[ctx->pc].imm0;
+    uint32_t keep = (uint32_t)(ctx->imm_table[ctx->pc].imm1 >> 32);
+    uint32_t drop = (uint32_t)(ctx->imm_table[ctx->pc].imm1);
+
+    STACK_KEEP_DROP(ctx, keep, drop);
+    ctx->pc = target;
+  }
+
+  CHECK_SNAPSHOT(ctx);
+  __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
+}
+
+void jump_if_not(StencilContext *ctx) {
+  ctx->stack_pointer -= 1;
+  uint32_t cond = (uint32_t)ctx->stack[ctx->stack_pointer];
+
+  if (cond == 0) {
+    uint32_t target = (uint32_t)ctx->imm_table[ctx->pc].imm0;
+    uint32_t keep = (uint32_t)(ctx->imm_table[ctx->pc].imm1 >> 32);
+    uint32_t drop = (uint32_t)(ctx->imm_table[ctx->pc].imm1);
+
+    STACK_KEEP_DROP(ctx, keep, drop);
+    ctx->pc = target;
+  } else {
+    ctx->pc += 1;
+  }
+
+  CHECK_SNAPSHOT(ctx);
+  __attribute__((musttail)) return ctx->fn_table[ctx->pc](ctx);
+}
+
 void return_(StencilContext *ctx) { ctx->exit_reason = EXIT_RETURN; }
