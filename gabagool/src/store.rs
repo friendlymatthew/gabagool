@@ -1072,9 +1072,9 @@ impl Store {
 
     #[cfg(feature = "jit")]
     fn run_jit(&mut self) -> Result<RunOutcome> {
-        loop {
-            use crate::jit::{Exit, StencilContext};
+        use crate::jit::{Exit, StencilContext};
 
+        loop {
             let depth = match self.call_stack.len() {
                 0 => return Ok(RunOutcome::Completed),
                 n => n - 1,

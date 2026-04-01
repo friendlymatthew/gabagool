@@ -48,3 +48,19 @@ fn local_set_and_get() {
     );
     assert_eq!(result[0].as_i32(), 67);
 }
+
+#[test]
+fn i32_add_and_sub() {
+    let result = jit_run(
+        r#"(module (func (export "f") (result i32)
+            i32.const 67
+            i32.const 3
+            i32.add
+            i32.const 1
+            i32.sub
+        ))"#,
+        "f",
+        vec![],
+    );
+    assert_eq!(result[0].as_i32(), 69);
+}
