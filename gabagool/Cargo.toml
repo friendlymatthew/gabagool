@@ -7,11 +7,6 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-
-[dev-dependencies]
-insta = "1"
-wat = "1"
-
 [dependencies]
 libc = { version = "0.2.183", optional = true }
 
@@ -20,9 +15,18 @@ wast = { version = "245.0.1", optional = true }
 cc = { version = "1.2.57", optional = true }
 object = { version = "0.38.1", optional = true }
 
-
 [features]
 core-tests = ["wast"]
 component-tests = []
 debugger = []
 jit = ["cc", "libc", "object"]
+
+[dev-dependencies]
+insta = "1"
+wat = "1"
+criterion = "0.8.2"
+wasmi = "1.0.9"
+
+[[bench]]
+name = "programs"
+harness = false
