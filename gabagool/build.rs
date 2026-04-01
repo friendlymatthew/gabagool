@@ -627,6 +627,21 @@ mod jit {
 
     use object::{Object, ObjectSection, ObjectSymbol, SymbolKind};
 
+    fn snake_to_pascal(name: &str) -> String {
+        let name = name.strip_suffix('_').unwrap_or(name);
+
+        name.split('_')
+            .map(|part| {
+                let mut chars = part.chars();
+
+                match chars.next() {
+                    Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect()
+    }
+
     pub fn generate() {
         println!("cargo::rerun-if-changed=../gabagool-stencils/src/stencils.c");
         println!("cargo::rerun-if-changed=../gabagool-stencils/src/stencil_context.h");
@@ -664,17 +679,22 @@ mod jit {
 
         sym_addrs.sort_by_key(|&(_, a)| a);
 
-        let stencils = sym_addrs.iter().enumerate().filter_map(|(i, (name, _))| {
-            let clean = name.strip_prefix('_').unwrap_or(name);
-            let should_strip =
-                clean.starts_with("ltmp") || clean.starts_with("Ltmp") || clean.starts_with('.');
+        let stencils = sym_addrs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (name, _))| {
+                let clean = name.strip_prefix('_').unwrap_or(name);
+                let should_strip = clean.starts_with("ltmp")
+                    || clean.starts_with("Ltmp")
+                    || clean.starts_with('.');
 
-            (!should_strip).then_some((clean, i))
-        });
+                (!should_strip).then_some((clean, i))
+            })
+            .collect::<Vec<_>>();
 
         let mut generated = String::new();
 
-        for (stencil, sym_idx) in stencils {
+        for &(stencil, sym_idx) in &stencils {
             let addr = sym_addrs[sym_idx].1;
             let next_addr = sym_addrs
                 .get(sym_idx + 1)
@@ -692,6 +712,23 @@ mod jit {
                 bs,
             ));
         }
+
+        generated.push_str(
+            "\npub const fn stencil_for_op(op: &crate::ir::Op) -> Option<&'static [u8]> {\n",
+        );
+        generated.push_str("    match op {\n");
+
+        for &(stencil, _) in &stencils {
+            generated.push_str(&format!(
+                "        crate::ir::Op::{} {{ .. }} => Some(STENCIL_{}),\n",
+                snake_to_pascal(stencil),
+                stencil.to_uppercase(),
+            ));
+        }
+
+        generated.push_str("        _ => None,\n");
+        generated.push_str("    }\n");
+        generated.push_str("}\n");
 
         fs::write(Path::new(&out_dir).join("stencils_generated.rs"), generated).unwrap();
     }

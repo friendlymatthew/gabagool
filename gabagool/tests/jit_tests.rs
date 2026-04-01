@@ -33,3 +33,18 @@ fn nop_then_const() {
     );
     assert_eq!(result[0].as_i32(), 7);
 }
+
+#[test]
+fn local_set_and_get() {
+    let result = jit_run(
+        r#"(module (func (export "f") (result i32)
+            (local i32)
+            i32.const 67
+            local.set 0
+            local.get 0
+        ))"#,
+        "f",
+        vec![],
+    );
+    assert_eq!(result[0].as_i32(), 67);
+}

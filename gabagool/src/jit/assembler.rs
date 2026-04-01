@@ -2,7 +2,7 @@ use std::mem;
 
 use crate::{
     ir::Op,
-    jit::{CodeBuffer, OpImmediate, StencilFn, STENCIL_I32_CONST, STENCIL_NOP, STENCIL_RETURN_},
+    jit::{stencil_for_op, CodeBuffer, OpImmediate, StencilFn},
 };
 
 #[derive(Debug)]
@@ -12,20 +12,15 @@ pub struct JitFunction {
     pub imm_table: Vec<OpImmediate>,
 }
 
-const fn stencil_for_op(op: &Op) -> Option<&'static [u8]> {
-    match op {
-        Op::Nop => Some(STENCIL_NOP),
-        Op::I32Const { .. } => Some(STENCIL_I32_CONST),
-        Op::Return => Some(STENCIL_RETURN_),
-        _ => None,
-    }
-}
-
 fn immediate_for_op(op: &Op) -> OpImmediate {
     match op {
         Op::Nop => OpImmediate::default(),
         Op::I32Const { value } => OpImmediate {
             imm0: *value as u64,
+            imm1: 0,
+        },
+        Op::LocalGet { local_idx } | Op::LocalSet { local_idx } => OpImmediate {
+            imm0: *local_idx as u64,
             imm1: 0,
         },
         Op::Return => OpImmediate::default(),

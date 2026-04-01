@@ -33,4 +33,10 @@ struct StencilContext {
 #define EXIT_SNAPSHOT 0
 #define EXIT_RETURN 1
 
+#define CHECK_SNAPSHOT(ctx) \
+  if ((ctx)->snapshot_flag) { \
+    (ctx)->exit_reason = EXIT_SNAPSHOT; \
+    return; \
+  }
+
 #endif
