@@ -44,7 +44,7 @@ https://webassembly.github.io/spec/core/<br>
 https://github.com/bytecodealliance/wasmtime/issues/3017<br>
 https://github.com/bytecodealliance/wasmtime/issues/4002<br>
 
-## Wasm Component Model<br>
+## Wasm Component Model
 
 https://www.infoq.com/podcasts/web-assembly-component-model/<br>
 https://blog.sunfishcode.online/what-is-a-wasm-component/<br>
@@ -53,6 +53,11 @@ https://github.com/WebAssembly/component-model/blob/main/design/mvp/Explainer.md
 https://github.com/WebAssembly/component-model/blob/main/design/mvp/Binary.md<br>
 https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md<br>
 
-## Time travel debugging <br>
+## Copy and patch compilation
+
+https://fredrikbk.com/publications/copy-and-patch.pdf<br>
+https://www.youtube.com/watch?v=HxSHIpEQRjs<br>
+
+## Time travel debugging
 
 https://awelonblue.wordpress.com/2013/01/24/exponential-decay-of-history-improved/<br>
