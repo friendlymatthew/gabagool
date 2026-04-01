@@ -74,3 +74,16 @@ pub fn assemble(ops: &[Op]) -> Option<JitFunction> {
         imm_table,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assemble_simple_program() {
+        let ops = vec![Op::I32Const { value: 42 }, Op::Return];
+        let jit_fn = assemble(&ops);
+
+        assert!(jit_fn.is_some());
+    }
+}

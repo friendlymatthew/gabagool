@@ -627,8 +627,6 @@ mod jit {
 
     use object::{Object, ObjectSection, ObjectSymbol, SymbolKind};
 
-    const STENCIL_NAMES: &[&str] = &["nop", "i32_const", "return_"];
-
     pub fn generate() {
         println!("cargo::rerun-if-changed=../gabagool-stencils/src/stencils.c");
         println!("cargo::rerun-if-changed=../gabagool-stencils/src/stencil_context.h");
@@ -666,18 +664,20 @@ mod jit {
 
         sym_addrs.sort_by_key(|&(_, a)| a);
 
+        let stencils = sym_addrs.iter().enumerate().filter_map(|(i, (name, _))| {
+            let clean = name.strip_prefix('_').unwrap_or(name);
+            let should_strip =
+                clean.starts_with("ltmp") || clean.starts_with("Ltmp") || clean.starts_with('.');
+
+            (!should_strip).then_some((clean, i))
+        });
+
         let mut generated = String::new();
 
-        for stencil in STENCIL_NAMES {
-            let prefixed = format!("_{}", stencil);
-            let idx = sym_addrs
-                .iter()
-                .position(|&(name, _addr)| name == *stencil || name == prefixed)
-                .unwrap_or_else(|| panic!("symbol {stencil} not found"));
-
-            let addr = sym_addrs[idx].1;
+        for (stencil, sym_idx) in stencils {
+            let addr = sym_addrs[sym_idx].1;
             let next_addr = sym_addrs
-                .get(idx + 1)
+                .get(sym_idx + 1)
                 .map(|s| s.1)
                 .unwrap_or(text_addr + text_data.len() as u64);
 
