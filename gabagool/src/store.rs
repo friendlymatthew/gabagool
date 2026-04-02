@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use crate::compiler::ModuleCode;
 use crate::component::binary_grammar::{
-    ComponentFuncResult, ComponentTypeDef, ComponentValueKind, PrimitiveValueKind,
+    ComponentDefinedKind, ComponentFuncResult, ComponentTypeDef, ComponentValueKind,
+    PrimitiveValueKind,
 };
 use crate::component::flatten::Initializer;
 use crate::error::{Error, Result};
@@ -266,7 +267,7 @@ pub struct Store {
     fuel: Option<u64>,
     pending_arity: Option<usize>,
     pending_suspension: Option<(String, String, Vec<RawValue>)>,
-    pending_lifted: Option<LiftedFunc>,
+    pending_lifted: Option<(LiftedFunc, Vec<ComponentTypeDef>)>,
 
     component_instances: Vec<InstantiatedComponent>,
 }
@@ -972,16 +973,11 @@ impl Store {
                     let memory_addr = opts.memory.map(|i| core_memories[i as usize]);
                     let realloc_addr = opts.realloc.map(|i| core_funcs[i as usize]);
 
-                    let result_types = match &flattened.types[*type_i as usize] {
-                        ComponentTypeDef::Func(ComponentFuncKind { results, .. }) => {
-                            match results {
-                                ComponentFuncResult::Unnamed(kind) => vec![kind.clone()],
-                                ComponentFuncResult::Named(named) => {
-                                    named.iter().map(|(_, kind)| kind.clone()).collect()
-                                }
-                            }
+                    let func_type = match &flattened.types[*type_i as usize] {
+                        ComponentTypeDef::Func(ft) => ft.clone(),
+                        other => {
+                            instantiation_err!("canon lift type_i points to non-func: {other:?}")
                         }
-                        _ => vec![],
                     };
 
                     component_funcs.push(LiftedFunc {
@@ -989,7 +985,7 @@ impl Store {
                         memory_addr,
                         realloc_addr,
                         string_encoding: opts.string_encoding,
-                        result_types,
+                        func_type,
                     });
                 }
                 Initializer::Export { name, func_i } => {
@@ -1001,6 +997,7 @@ impl Store {
 
         self.component_instances.push(InstantiatedComponent {
             exports: component_exports,
+            types: flattened.types.clone(),
             may_leave: true,
         });
 
@@ -1026,21 +1023,21 @@ impl Store {
         I: IntoIterator,
         I::Item: Into<ComponentValue>,
     {
-        let lifted = self.component_instances[instance.0]
+        let instance = &self.component_instances[instance.0];
+        let lifted = instance
             .exports
             .get(name)
             .ok_or_else(|| Error::Instantiation(format!("export '{name}' not found")))?
             .clone();
 
+        let types = instance.types.clone();
+
         let component_args = args.into_iter().map(Into::into);
 
-        let mut raw_args = self.lower_values(component_args, &lifted)?;
+        let mut raw_args = self.lower_values(component_args, &lifted, &types)?;
 
-        let flat_result_count = lifted
-            .result_types
-            .iter()
-            .map(ComponentValueKind::flat_count)
-            .sum();
+        let result_types = lifted.func_type.results.types();
+        let flat_result_count = result_types.iter().map(|ty| ty.flat_count(&types)).sum();
 
         let retptr = (flat_result_count > MAX_FLAT_RESULTS)
             .then(|| {
@@ -1080,10 +1077,10 @@ impl Store {
                     raw_values
                 };
 
-                ExecutionState::Completed(self.lift_values(&flat, &lifted)?)
+                ExecutionState::Completed(self.lift_values(&flat, &lifted, &types)?)
             }
             ExecutionState::FuelExhausted => {
-                self.pending_lifted = Some(lifted);
+                self.pending_lifted = Some((lifted.clone(), types.clone()));
                 ExecutionState::FuelExhausted
             }
             ExecutionState::Suspended {
@@ -1091,7 +1088,7 @@ impl Store {
                 func_name,
                 args,
             } => {
-                self.pending_lifted = Some(lifted);
+                self.pending_lifted = Some((lifted.clone(), types.clone()));
                 ExecutionState::Suspended {
                     module_name,
                     func_name,
@@ -1127,13 +1124,25 @@ impl Store {
         Ok(out)
     }
 
-    fn lower_values<I>(&mut self, args: I, lifted: &LiftedFunc) -> Result<Vec<RawValue>>
+    fn lower_values<I>(
+        &mut self,
+        args: I,
+        lifted: &LiftedFunc,
+        types: &[ComponentTypeDef],
+    ) -> Result<Vec<RawValue>>
     where
         I: IntoIterator<Item = ComponentValue>,
     {
         let mut flat = Vec::new();
+        let param_types = lifted
+            .func_type
+            .params
+            .iter()
+            .map(|(_, ty)| ty)
+            .collect::<Vec<_>>();
 
-        for arg in args {
+        for (param_i, arg) in args.into_iter().enumerate() {
+            let _param_ty = param_types.get(param_i);
             match arg {
                 ComponentValue::Bool(v) => flat.push(RawValue::from(v as i32)),
                 ComponentValue::S8(v) => flat.push(RawValue::from(v as i32)),
@@ -1168,6 +1177,86 @@ impl Store {
                     flat.push(RawValue::from(ptr));
                     flat.push(RawValue::from(len as i32));
                 }
+                ComponentValue::List(elements) => {
+                    let mem_addr = lifted
+                        .memory_addr
+                        .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
+
+                    let realloc_addr = lifted
+                        .realloc_addr
+                        .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
+
+                    let elem_size = match _param_ty {
+                        Some(ComponentValueKind::Type(i)) => match &types[*i as usize] {
+                            ComponentTypeDef::Defined(ComponentDefinedKind::List(
+                                ComponentValueKind::Primitive(p),
+                            )) => primitive_byte_size(p),
+                            _ => elements.first().map_or(1, component_value_byte_size),
+                        },
+                        _ => elements.first().map_or(1, component_value_byte_size),
+                    };
+
+                    let len = elements.len();
+                    let byte_len = len * elem_size;
+                    let ptr =
+                        self.call_realloc(realloc_addr, 0, 0, elem_size as i32, byte_len as i32)?;
+
+                    let dest = ptr as usize;
+                    for (i, elem) in elements.iter().enumerate() {
+                        match elem {
+                            ComponentValue::U8(v) => {
+                                self.memories[mem_addr].data[dest + i] = *v;
+                            }
+                            ComponentValue::S8(v) => {
+                                self.memories[mem_addr].data[dest + i] = *v as u8;
+                            }
+                            ComponentValue::U16(v) => {
+                                let offset = dest + i * 2;
+                                self.memories[mem_addr].data[off..off + 2]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::S16(v) => {
+                                let offset = dest + i * 2;
+                                self.memories[mem_addr].data[off..off + 2]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::U32(v) => {
+                                let offset = dest + i * 4;
+                                self.memories[mem_addr].data[off..off + 4]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::S32(v) => {
+                                let offset = dest + i * 4;
+                                self.memories[mem_addr].data[off..off + 4]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::U64(v) => {
+                                let offset = dest + i * 8;
+                                self.memories[mem_addr].data[off..off + 8]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::S64(v) => {
+                                let offset = dest + i * 8;
+                                self.memories[mem_addr].data[off..off + 8]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::F32(v) => {
+                                let offset = dest + i * 4;
+                                self.memories[mem_addr].data[off..off + 4]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            ComponentValue::F64(v) => {
+                                let offset = dest + i * 8;
+                                self.memories[mem_addr].data[off..off + 8]
+                                    .copy_from_slice(&v.to_le_bytes());
+                            }
+                            _ => todo!("lower list element {:?}", elem),
+                        }
+                    }
+
+                    flat.push(RawValue::from(ptr));
+                    flat.push(RawValue::from(len as i32));
+                }
                 _ => todo!("lower {:?}", arg),
             }
         }
@@ -1175,12 +1264,17 @@ impl Store {
         Ok(flat)
     }
 
-    fn lift_values(&self, flat: &[RawValue], lifted: &LiftedFunc) -> Result<Vec<ComponentValue>> {
+    fn lift_values(
+        &self,
+        flat: &[RawValue],
+        lifted: &LiftedFunc,
+        types: &[ComponentTypeDef],
+    ) -> Result<Vec<ComponentValue>> {
         let mut results = Vec::new();
         let mut cursor = 0;
 
-        for ty in &lifted.result_types {
-            match ty {
+        for kind in lifted.func_type.results.types() {
+            match kind {
                 ComponentValueKind::Primitive(p) => {
                     let val = flat[cursor];
                     cursor += 1;
@@ -1221,7 +1315,78 @@ impl Store {
                         }
                     });
                 }
-                _ => todo!("lift type {:?}", ty),
+                ComponentValueKind::Type(i) => match &types[*i as usize] {
+                    ComponentTypeDef::Defined(ComponentDefinedKind::List(elem_ty)) => {
+                        let ptr = flat[cursor].as_i32() as usize;
+                        let len = flat[cursor + 1].as_i32() as usize;
+                        cursor += 2;
+
+                        let mem_addr = lifted.memory_addr.ok_or_else(|| {
+                            Error::Instantiation("canon lift missing memory".into())
+                        })?;
+
+                        let mem = &self.memories[mem_addr];
+
+                        let elem_prim = match elem_ty {
+                            ComponentValueKind::Primitive(p) => p,
+                            _ => todo!("lift list of non-primitive"),
+                        };
+
+                        let size = primitive_byte_size(elem_prim);
+                        let read_elem: fn(&[u8], usize) -> ComponentValue = match elem_prim {
+                            PrimitiveValueKind::U8 => |d, o| ComponentValue::U8(d[o]),
+                            PrimitiveValueKind::S8 => |d, o| ComponentValue::S8(d[o] as i8),
+                            PrimitiveValueKind::U16 => |d, o| {
+                                ComponentValue::U16(u16::from_le_bytes(
+                                    d[o..o + 2].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::S16 => |d, o| {
+                                ComponentValue::S16(i16::from_le_bytes(
+                                    d[o..o + 2].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::U32 => |d, o| {
+                                ComponentValue::U32(u32::from_le_bytes(
+                                    d[o..o + 4].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::S32 => |d, o| {
+                                ComponentValue::S32(i32::from_le_bytes(
+                                    d[o..o + 4].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::U64 => |d, o| {
+                                ComponentValue::U64(u64::from_le_bytes(
+                                    d[o..o + 8].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::S64 => |d, o| {
+                                ComponentValue::S64(i64::from_le_bytes(
+                                    d[o..o + 8].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::F32 => |d, o| {
+                                ComponentValue::F32(f32::from_le_bytes(
+                                    d[o..o + 4].try_into().unwrap(),
+                                ))
+                            },
+                            PrimitiveValueKind::F64 => |d, o| {
+                                ComponentValue::F64(f64::from_le_bytes(
+                                    d[o..o + 8].try_into().unwrap(),
+                                ))
+                            },
+                            _ => todo!("lift list element {:?}", elem_prim),
+                        };
+
+                        let elements = (0..len)
+                            .map(|j| read_elem(&mem.data, ptr + j * size))
+                            .collect();
+
+                        results.push(ComponentValue::List(elements));
+                    }
+                    other => todo!("lift type {:?}", other),
+                },
             }
         }
 
@@ -1237,7 +1402,7 @@ impl Store {
     }
 
     pub fn resume_component(&mut self) -> Result<ExecutionState<ComponentValue>> {
-        let lifted = self
+        let (lifted, types) = self
             .pending_lifted
             .clone()
             .ok_or_else(|| Error::Instantiation("no pending component execution".into()))?;
@@ -1247,7 +1412,7 @@ impl Store {
         Ok(match result {
             ExecutionState::Completed(raw_values) => {
                 self.pending_lifted = None;
-                ExecutionState::Completed(self.lift_values(&raw_values, &lifted)?)
+                ExecutionState::Completed(self.lift_values(&raw_values, &lifted, &types)?)
             }
             ExecutionState::FuelExhausted => ExecutionState::FuelExhausted,
             ExecutionState::Suspended {
@@ -3019,6 +3184,26 @@ impl Store {
 
 const fn limits_match(actual: &Limit, expected: &Limit) -> bool {
     actual.min >= expected.min && (expected.max == u64::MAX || actual.max <= expected.max)
+}
+
+fn component_value_byte_size(v: &ComponentValue) -> usize {
+    match v {
+        ComponentValue::Bool(_) | ComponentValue::S8(_) | ComponentValue::U8(_) => 1,
+        ComponentValue::S16(_) | ComponentValue::U16(_) => 2,
+        ComponentValue::S32(_) | ComponentValue::U32(_) | ComponentValue::F32(_) => 4,
+        ComponentValue::S64(_) | ComponentValue::U64(_) | ComponentValue::F64(_) => 8,
+        _ => todo!("byte size for {:?}", v),
+    }
+}
+
+fn primitive_byte_size(p: &PrimitiveValueKind) -> usize {
+    match p {
+        PrimitiveValueKind::Bool | PrimitiveValueKind::S8 | PrimitiveValueKind::U8 => 1,
+        PrimitiveValueKind::S16 | PrimitiveValueKind::U16 => 2,
+        PrimitiveValueKind::S32 | PrimitiveValueKind::U32 | PrimitiveValueKind::F32 => 4,
+        PrimitiveValueKind::S64 | PrimitiveValueKind::U64 | PrimitiveValueKind::F64 => 8,
+        _ => todo!(),
+    }
 }
 
 fn run_data(index: u32, data_segment: &DataSegment) -> Vec<Instruction> {

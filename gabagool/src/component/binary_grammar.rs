@@ -362,6 +362,15 @@ pub enum ComponentFuncResult {
     Named(Vec<(String, ComponentValueKind)>),
 }
 
+impl ComponentFuncResult {
+    pub fn types(&self) -> Vec<&ComponentValueKind> {
+        match self {
+            Self::Unnamed(ty) => vec![ty],
+            Self::Named(named) => named.iter().map(|(_, ty)| ty).collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ComponentValueKind {
     Type(u32),
@@ -369,11 +378,14 @@ pub enum ComponentValueKind {
 }
 
 impl ComponentValueKind {
-    pub fn flat_count(&self) -> usize {
+    pub fn flat_count(&self, types: &[ComponentTypeDef]) -> usize {
         match self {
             Self::Primitive(PrimitiveValueKind::String) => 2,
             Self::Primitive(_) => 1,
-            Self::Type(_) => todo!(),
+            Self::Type(i) => match &types[*i as usize] {
+                ComponentTypeDef::Defined(ComponentDefinedKind::List(_)) => 2,
+                _ => todo!("flat_count for type {i}"),
+            },
         }
     }
 }

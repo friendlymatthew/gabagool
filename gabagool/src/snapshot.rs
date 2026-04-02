@@ -8,7 +8,10 @@ use crate::binary_grammar::{
     ValueType,
 };
 use crate::compiler::ModuleCode;
-use crate::component::binary_grammar::{ComponentValueKind, PrimitiveValueKind, StringEncoding};
+use crate::component::binary_grammar::{
+    ComponentDefinedKind, ComponentFuncKind, ComponentFuncResult, ComponentTypeDef,
+    ComponentValueKind, PrimitiveValueKind, StringEncoding, VariantCase,
+};
 use crate::component::execution_grammar::{InstantiatedComponent, LiftedFunc};
 use crate::execution_grammar::{ExportInstance, ExternalValue, RawValue, Ref};
 use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
@@ -872,7 +875,7 @@ impl Snapshot for LiftedFunc {
         self.memory_addr.encode(buf);
         self.realloc_addr.encode(buf);
         self.string_encoding.encode(buf);
-        self.result_types.encode(buf);
+        self.func_type.encode(buf);
     }
 
     fn decode(buf: &mut &[u8]) -> Self {
@@ -881,7 +884,165 @@ impl Snapshot for LiftedFunc {
             memory_addr: Option::decode(buf),
             realloc_addr: Option::decode(buf),
             string_encoding: StringEncoding::decode(buf),
-            result_types: Vec::decode(buf),
+            func_type: ComponentFuncKind::decode(buf),
+        }
+    }
+}
+
+impl Snapshot for VariantCase {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.name.encode(buf);
+        self.ty.encode(buf);
+        self.refines.encode(buf);
+    }
+    fn decode(buf: &mut &[u8]) -> Self {
+        Self {
+            name: String::decode(buf),
+            ty: Option::decode(buf),
+            refines: Option::decode(buf),
+        }
+    }
+}
+
+impl Snapshot for ComponentDefinedKind {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        match self {
+            Self::Primitive(p) => {
+                0u8.encode(buf);
+                p.encode(buf);
+            }
+            Self::Record(fields) => {
+                1u8.encode(buf);
+                fields.encode(buf);
+            }
+            Self::Variant(cases) => {
+                2u8.encode(buf);
+                cases.encode(buf);
+            }
+            Self::List(ty) => {
+                3u8.encode(buf);
+                ty.encode(buf);
+            }
+            Self::Tuple(tys) => {
+                4u8.encode(buf);
+                tys.encode(buf);
+            }
+            Self::Flags(names) => {
+                5u8.encode(buf);
+                names.encode(buf);
+            }
+            Self::Enum(names) => {
+                6u8.encode(buf);
+                names.encode(buf);
+            }
+            Self::Option(ty) => {
+                7u8.encode(buf);
+                ty.encode(buf);
+            }
+            Self::Result { ok, err } => {
+                8u8.encode(buf);
+                ok.encode(buf);
+                err.encode(buf);
+            }
+            Self::Own(i) => {
+                9u8.encode(buf);
+                i.encode(buf);
+            }
+            Self::Borrow(i) => {
+                10u8.encode(buf);
+                i.encode(buf);
+            }
+        }
+    }
+    fn decode(buf: &mut &[u8]) -> Self {
+        match u8::decode(buf) {
+            0 => Self::Primitive(PrimitiveValueKind::decode(buf)),
+            1 => Self::Record(Vec::decode(buf)),
+            2 => Self::Variant(Vec::decode(buf)),
+            3 => Self::List(ComponentValueKind::decode(buf)),
+            4 => Self::Tuple(Vec::decode(buf)),
+            5 => Self::Flags(Vec::decode(buf)),
+            6 => Self::Enum(Vec::decode(buf)),
+            7 => Self::Option(ComponentValueKind::decode(buf)),
+            8 => Self::Result {
+                ok: Option::decode(buf),
+                err: Option::decode(buf),
+            },
+            9 => Self::Own(u32::decode(buf)),
+            10 => Self::Borrow(u32::decode(buf)),
+            n => panic!("invalid ComponentDefinedKind tag: {n}"),
+        }
+    }
+}
+
+impl Snapshot for ComponentFuncResult {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        match self {
+            Self::Unnamed(ty) => {
+                0u8.encode(buf);
+                ty.encode(buf);
+            }
+            Self::Named(named) => {
+                1u8.encode(buf);
+                named.encode(buf);
+            }
+        }
+    }
+    fn decode(buf: &mut &[u8]) -> Self {
+        match u8::decode(buf) {
+            0 => Self::Unnamed(ComponentValueKind::decode(buf)),
+            1 => Self::Named(Vec::decode(buf)),
+            n => panic!("invalid ComponentFuncResult tag: {n}"),
+        }
+    }
+}
+
+impl Snapshot for ComponentFuncKind {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.params.encode(buf);
+        self.results.encode(buf);
+    }
+    fn decode(buf: &mut &[u8]) -> Self {
+        Self {
+            params: Vec::decode(buf),
+            results: ComponentFuncResult::decode(buf),
+        }
+    }
+}
+
+impl Snapshot for ComponentTypeDef {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        match self {
+            Self::Defined(d) => {
+                0u8.encode(buf);
+                d.encode(buf);
+            }
+            Self::Func(f) => {
+                1u8.encode(buf);
+                f.encode(buf);
+            }
+            Self::Component(_) => {
+                2u8.encode(buf);
+            }
+            Self::Instance(_) => {
+                3u8.encode(buf);
+            }
+            Self::Resource { dtor } => {
+                4u8.encode(buf);
+                dtor.encode(buf);
+            }
+        }
+    }
+    fn decode(buf: &mut &[u8]) -> Self {
+        match u8::decode(buf) {
+            0 => Self::Defined(ComponentDefinedKind::decode(buf)),
+            1 => Self::Func(ComponentFuncKind::decode(buf)),
+            2 => Self::Component(vec![]),
+            3 => Self::Instance(vec![]),
+            4 => Self::Resource {
+                dtor: Option::decode(buf),
+            },
+            n => panic!("invalid ComponentTypeDef tag: {n}"),
         }
     }
 }
@@ -889,12 +1050,14 @@ impl Snapshot for LiftedFunc {
 impl Snapshot for InstantiatedComponent {
     fn encode(&self, buf: &mut Vec<u8>) {
         self.exports.encode(buf);
+        self.types.encode(buf);
         self.may_leave.encode(buf);
     }
 
     fn decode(buf: &mut &[u8]) -> Self {
         Self {
             exports: HashMap::decode(buf),
+            types: Vec::decode(buf),
             may_leave: bool::decode(buf),
         }
     }

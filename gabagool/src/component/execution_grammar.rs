@@ -1,4 +1,4 @@
-use crate::{ComponentValueKind, StringEncoding};
+use crate::{ComponentFuncKind, ComponentTypeDef, StringEncoding};
 use std::collections::HashMap;
 use std::result::Result as StdResult;
 
@@ -18,13 +18,13 @@ pub enum ComponentValue {
     Char(char),
     String(String),
     List(Vec<Self>),
-    Record(Vec<(std::string::String, Self)>),
+    Record(Vec<(String, Self)>),
     Tuple(Vec<Self>),
-    Variant(std::string::String, Option<Box<Self>>),
-    Enum(std::string::String),
+    Variant(String, Option<Box<Self>>),
+    Enum(String),
     Option(Option<Box<Self>>),
     Result(StdResult<Option<Box<Self>>, Option<Box<Self>>>),
-    Flags(Vec<std::string::String>),
+    Flags(Vec<String>),
 }
 
 impl From<bool> for ComponentValue {
@@ -100,7 +100,7 @@ impl From<char> for ComponentValue {
 }
 
 impl From<String> for ComponentValue {
-    fn from(v: std::string::String) -> Self {
+    fn from(v: String) -> Self {
         Self::String(v)
     }
 }
@@ -108,6 +108,42 @@ impl From<String> for ComponentValue {
 impl From<&str> for ComponentValue {
     fn from(v: &str) -> Self {
         Self::String(v.to_string())
+    }
+}
+
+impl<const N: usize, T> From<[T; N]> for ComponentValue
+where
+    T: Into<Self>,
+{
+    fn from(value: [T; N]) -> Self {
+        Self::List(value.into_iter().map(Into::into).collect())
+    }
+}
+
+impl<'a, T> From<&'a [T]> for ComponentValue
+where
+    T: Clone + Into<Self>,
+{
+    fn from(value: &'a [T]) -> Self {
+        Self::List(value.iter().cloned().map(Into::into).collect())
+    }
+}
+
+impl<'a, const N: usize, T> From<&'a [T; N]> for ComponentValue
+where
+    T: Clone + Into<Self>,
+{
+    fn from(value: &'a [T; N]) -> Self {
+        Self::List(value.iter().cloned().map(Into::into).collect())
+    }
+}
+
+impl<T> From<Vec<T>> for ComponentValue
+where
+    T: Into<Self>,
+{
+    fn from(value: Vec<T>) -> Self {
+        Self::List(value.into_iter().map(Into::into).collect())
     }
 }
 
@@ -120,11 +156,12 @@ pub struct LiftedFunc {
     pub memory_addr: Option<usize>,
     pub realloc_addr: Option<usize>,
     pub string_encoding: StringEncoding,
-    pub result_types: Vec<ComponentValueKind>,
+    pub func_type: ComponentFuncKind,
 }
 
 #[derive(Debug)]
 pub struct InstantiatedComponent {
     pub exports: HashMap<String, LiftedFunc>,
+    pub types: Vec<ComponentTypeDef>,
     pub may_leave: bool,
 }
