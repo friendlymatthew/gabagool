@@ -1134,134 +1134,121 @@ impl Store {
         I: IntoIterator<Item = ComponentValue>,
     {
         let mut flat = Vec::new();
-        let param_types = lifted
-            .func_type
-            .params
-            .iter()
-            .map(|(_, ty)| ty)
-            .collect::<Vec<_>>();
+        let param_types: Vec<_> = lifted.func_type.params.iter().map(|(_, ty)| ty).collect();
 
         for (param_i, arg) in args.into_iter().enumerate() {
-            let _param_ty = param_types.get(param_i);
-            match arg {
-                ComponentValue::Bool(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::S8(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::U8(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::S16(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::U16(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::S32(v) => flat.push(RawValue::from(v)),
-                ComponentValue::U32(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::S64(v) => flat.push(RawValue::from(v)),
-                ComponentValue::U64(v) => flat.push(RawValue::from(v as i64)),
-                ComponentValue::F32(v) => flat.push(RawValue::from(v)),
-                ComponentValue::F64(v) => flat.push(RawValue::from(v)),
-                ComponentValue::Char(v) => flat.push(RawValue::from(v as i32)),
-                ComponentValue::String(s) => {
-                    let bytes = s.as_bytes();
-                    let len = bytes.len();
-
-                    let mem_addr = lifted
-                        .memory_addr
-                        .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
-
-                    let realloc_addr = lifted
-                        .realloc_addr
-                        .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
-
-                    let ptr = self.call_realloc(realloc_addr, 0, 0, 1, len as i32)?;
-
-                    let mem = &mut self.memories[mem_addr];
-                    let dest = ptr as usize;
-                    mem.data[dest..dest + len].copy_from_slice(bytes);
-
-                    flat.push(RawValue::from(ptr));
-                    flat.push(RawValue::from(len as i32));
-                }
-                ComponentValue::List(elements) => {
-                    let mem_addr = lifted
-                        .memory_addr
-                        .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
-
-                    let realloc_addr = lifted
-                        .realloc_addr
-                        .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
-
-                    let elem_size = match _param_ty {
-                        Some(ComponentValueKind::Type(i)) => match &types[*i as usize] {
-                            ComponentTypeDef::Defined(ComponentDefinedKind::List(
-                                ComponentValueKind::Primitive(p),
-                            )) => primitive_byte_size(p),
-                            _ => elements.first().map_or(1, component_value_byte_size),
-                        },
-                        _ => elements.first().map_or(1, component_value_byte_size),
-                    };
-
-                    let len = elements.len();
-                    let byte_len = len * elem_size;
-                    let ptr =
-                        self.call_realloc(realloc_addr, 0, 0, elem_size as i32, byte_len as i32)?;
-
-                    let dest = ptr as usize;
-                    for (i, elem) in elements.iter().enumerate() {
-                        match elem {
-                            ComponentValue::U8(v) => {
-                                self.memories[mem_addr].data[dest + i] = *v;
-                            }
-                            ComponentValue::S8(v) => {
-                                self.memories[mem_addr].data[dest + i] = *v as u8;
-                            }
-                            ComponentValue::U16(v) => {
-                                let offset = dest + i * 2;
-                                self.memories[mem_addr].data[off..off + 2]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::S16(v) => {
-                                let offset = dest + i * 2;
-                                self.memories[mem_addr].data[off..off + 2]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::U32(v) => {
-                                let offset = dest + i * 4;
-                                self.memories[mem_addr].data[off..off + 4]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::S32(v) => {
-                                let offset = dest + i * 4;
-                                self.memories[mem_addr].data[off..off + 4]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::U64(v) => {
-                                let offset = dest + i * 8;
-                                self.memories[mem_addr].data[off..off + 8]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::S64(v) => {
-                                let offset = dest + i * 8;
-                                self.memories[mem_addr].data[off..off + 8]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::F32(v) => {
-                                let offset = dest + i * 4;
-                                self.memories[mem_addr].data[off..off + 4]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            ComponentValue::F64(v) => {
-                                let offset = dest + i * 8;
-                                self.memories[mem_addr].data[off..off + 8]
-                                    .copy_from_slice(&v.to_le_bytes());
-                            }
-                            _ => todo!("lower list element {:?}", elem),
-                        }
-                    }
-
-                    flat.push(RawValue::from(ptr));
-                    flat.push(RawValue::from(len as i32));
-                }
-                _ => todo!("lower {:?}", arg),
-            }
+            let param_ty = param_types.get(param_i).copied();
+            self.lower_value(arg, param_ty, types, lifted, &mut flat)?;
         }
 
         Ok(flat)
+    }
+
+    fn lower_value(
+        &mut self,
+        value: ComponentValue,
+        param_ty: Option<&ComponentValueKind>,
+        types: &[ComponentTypeDef],
+        lifted: &LiftedFunc,
+        flat: &mut Vec<RawValue>,
+    ) -> Result<()> {
+        match value {
+            ComponentValue::Bool(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::S8(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::U8(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::S16(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::U16(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::S32(v) => flat.push(RawValue::from(v)),
+            ComponentValue::U32(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::S64(v) => flat.push(RawValue::from(v)),
+            ComponentValue::U64(v) => flat.push(RawValue::from(v as i64)),
+            ComponentValue::F32(v) => flat.push(RawValue::from(v)),
+            ComponentValue::F64(v) => flat.push(RawValue::from(v)),
+            ComponentValue::Char(v) => flat.push(RawValue::from(v as i32)),
+            ComponentValue::String(s) => {
+                let bytes = s.as_bytes();
+                let len = bytes.len();
+
+                let mem_addr = lifted
+                    .memory_addr
+                    .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
+                let realloc_addr = lifted
+                    .realloc_addr
+                    .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
+
+                let ptr = self.call_realloc(realloc_addr, 0, 0, 1, len as i32)?;
+
+                let mem = &mut self.memories[mem_addr];
+                mem.data[ptr as usize..ptr as usize + len].copy_from_slice(bytes);
+
+                flat.push(RawValue::from(ptr));
+                flat.push(RawValue::from(len as i32));
+            }
+            ComponentValue::List(elements) => {
+                let mem_addr = lifted
+                    .memory_addr
+                    .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
+                let realloc_addr = lifted
+                    .realloc_addr
+                    .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
+
+                let elem_size = match param_ty {
+                    Some(ComponentValueKind::Type(i)) => match &types[*i as usize] {
+                        ComponentTypeDef::Defined(ComponentDefinedKind::List(
+                            ComponentValueKind::Primitive(p),
+                        )) => primitive_byte_size(p),
+                        _ => elements.first().map_or(1, component_value_byte_size),
+                    },
+                    _ => elements.first().map_or(1, component_value_byte_size),
+                };
+
+                let len = elements.len();
+                let byte_len = len * elem_size;
+                let ptr =
+                    self.call_realloc(realloc_addr, 0, 0, elem_size as i32, byte_len as i32)?;
+
+                let dest = ptr as usize;
+                for (i, elem) in elements.iter().enumerate() {
+                    let off = dest + i * elem_size;
+                    match elem {
+                        ComponentValue::U8(v) => self.memories[mem_addr].data[off] = *v,
+                        ComponentValue::S8(v) => self.memories[mem_addr].data[off] = *v as u8,
+                        ComponentValue::U16(v) => self.memories[mem_addr].data[off..off + 2]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::S16(v) => self.memories[mem_addr].data[off..off + 2]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::U32(v) => self.memories[mem_addr].data[off..off + 4]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::S32(v) => self.memories[mem_addr].data[off..off + 4]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::U64(v) => self.memories[mem_addr].data[off..off + 8]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::S64(v) => self.memories[mem_addr].data[off..off + 8]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::F32(v) => self.memories[mem_addr].data[off..off + 4]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        ComponentValue::F64(v) => self.memories[mem_addr].data[off..off + 8]
+                            .copy_from_slice(&v.to_le_bytes()),
+                        _ => todo!("lower list element {:?}", elem),
+                    }
+                }
+
+                flat.push(RawValue::from(ptr));
+                flat.push(RawValue::from(len as i32));
+            }
+            ComponentValue::Record(fields) => {
+                for (_, value) in fields {
+                    self.lower_value(value, None, types, lifted, flat)?;
+                }
+            }
+            ComponentValue::Tuple(values) => {
+                for value in values {
+                    self.lower_value(value, None, types, lifted, flat)?;
+                }
+            }
+            _ => todo!("lower {:?}", value),
+        }
+        Ok(())
     }
 
     fn lift_values(
@@ -1274,123 +1261,135 @@ impl Store {
         let mut cursor = 0;
 
         for kind in lifted.func_type.results.types() {
-            match kind {
-                ComponentValueKind::Primitive(p) => {
-                    let val = flat[cursor];
-                    cursor += 1;
-                    results.push(match p {
-                        PrimitiveValueKind::Bool => ComponentValue::Bool(val.as_i32() != 0),
-                        PrimitiveValueKind::S8 => ComponentValue::S8(val.as_i32() as i8),
-                        PrimitiveValueKind::U8 => ComponentValue::U8(val.as_i32() as u8),
-                        PrimitiveValueKind::S16 => ComponentValue::S16(val.as_i32() as i16),
-                        PrimitiveValueKind::U16 => ComponentValue::U16(val.as_i32() as u16),
-                        PrimitiveValueKind::S32 => ComponentValue::S32(val.as_i32()),
-                        PrimitiveValueKind::U32 => ComponentValue::U32(val.as_i32() as u32),
-                        PrimitiveValueKind::S64 => ComponentValue::S64(val.as_i64()),
-                        PrimitiveValueKind::U64 => ComponentValue::U64(val.as_i64() as u64),
-                        PrimitiveValueKind::F32 => {
-                            ComponentValue::F32(f32::from_bits(val.as_i32() as u32))
-                        }
-                        PrimitiveValueKind::F64 => {
-                            ComponentValue::F64(f64::from_bits(val.as_i64() as u64))
-                        }
-                        PrimitiveValueKind::Char => ComponentValue::Char(
-                            char::from_u32(val.as_i32() as u32).unwrap_or('\u{FFFD}'),
-                        ),
-                        PrimitiveValueKind::String => {
-                            let ptr = val.as_i32() as usize;
-                            let len = flat[cursor].as_i32() as usize;
-                            cursor += 1;
+            results.push(self.lift_value(kind, flat, &mut cursor, lifted, types)?);
+        }
 
-                            let mem_addr = lifted.memory_addr.ok_or_else(|| {
-                                Error::Instantiation("canon lift missing memory".into())
-                            })?;
+        Ok(results)
+    }
 
-                            let mem = &self.memories[mem_addr];
-                            let bytes = &mem.data[ptr..ptr + len];
-                            let s = std::str::from_utf8(bytes)
-                                .map_err(|e| Error::Instantiation(format!("{e}")))?;
-
-                            ComponentValue::String(s.to_string())
-                        }
-                    });
-                }
-                ComponentValueKind::Type(i) => match &types[*i as usize] {
-                    ComponentTypeDef::Defined(ComponentDefinedKind::List(elem_ty)) => {
-                        let ptr = flat[cursor].as_i32() as usize;
-                        let len = flat[cursor + 1].as_i32() as usize;
-                        cursor += 2;
+    fn lift_value(
+        &self,
+        kind: &ComponentValueKind,
+        flat: &[RawValue],
+        cursor: &mut usize,
+        lifted: &LiftedFunc,
+        types: &[ComponentTypeDef],
+    ) -> Result<ComponentValue> {
+        match kind {
+            ComponentValueKind::Primitive(p) => {
+                let val = flat[*cursor];
+                *cursor += 1;
+                Ok(match p {
+                    PrimitiveValueKind::Bool => ComponentValue::Bool(val.as_i32() != 0),
+                    PrimitiveValueKind::S8 => ComponentValue::S8(val.as_i32() as i8),
+                    PrimitiveValueKind::U8 => ComponentValue::U8(val.as_i32() as u8),
+                    PrimitiveValueKind::S16 => ComponentValue::S16(val.as_i32() as i16),
+                    PrimitiveValueKind::U16 => ComponentValue::U16(val.as_i32() as u16),
+                    PrimitiveValueKind::S32 => ComponentValue::S32(val.as_i32()),
+                    PrimitiveValueKind::U32 => ComponentValue::U32(val.as_i32() as u32),
+                    PrimitiveValueKind::S64 => ComponentValue::S64(val.as_i64()),
+                    PrimitiveValueKind::U64 => ComponentValue::U64(val.as_i64() as u64),
+                    PrimitiveValueKind::F32 => {
+                        ComponentValue::F32(f32::from_bits(val.as_i32() as u32))
+                    }
+                    PrimitiveValueKind::F64 => {
+                        ComponentValue::F64(f64::from_bits(val.as_i64() as u64))
+                    }
+                    PrimitiveValueKind::Char => ComponentValue::Char(
+                        char::from_u32(val.as_i32() as u32).unwrap_or('\u{FFFD}'),
+                    ),
+                    PrimitiveValueKind::String => {
+                        let ptr = val.as_i32() as usize;
+                        let len = flat[*cursor].as_i32() as usize;
+                        *cursor += 1;
 
                         let mem_addr = lifted.memory_addr.ok_or_else(|| {
                             Error::Instantiation("canon lift missing memory".into())
                         })?;
 
-                        let mem = &self.memories[mem_addr];
+                        let bytes = &self.memories[mem_addr].data[ptr..ptr + len];
+                        let s = std::str::from_utf8(bytes)
+                            .map_err(|e| Error::Instantiation(format!("{e}")))?;
 
-                        let elem_prim = match elem_ty {
-                            ComponentValueKind::Primitive(p) => p,
-                            _ => todo!("lift list of non-primitive"),
-                        };
-
-                        let size = primitive_byte_size(elem_prim);
-                        let read_elem: fn(&[u8], usize) -> ComponentValue = match elem_prim {
-                            PrimitiveValueKind::U8 => |d, o| ComponentValue::U8(d[o]),
-                            PrimitiveValueKind::S8 => |d, o| ComponentValue::S8(d[o] as i8),
-                            PrimitiveValueKind::U16 => |d, o| {
-                                ComponentValue::U16(u16::from_le_bytes(
-                                    d[o..o + 2].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::S16 => |d, o| {
-                                ComponentValue::S16(i16::from_le_bytes(
-                                    d[o..o + 2].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::U32 => |d, o| {
-                                ComponentValue::U32(u32::from_le_bytes(
-                                    d[o..o + 4].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::S32 => |d, o| {
-                                ComponentValue::S32(i32::from_le_bytes(
-                                    d[o..o + 4].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::U64 => |d, o| {
-                                ComponentValue::U64(u64::from_le_bytes(
-                                    d[o..o + 8].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::S64 => |d, o| {
-                                ComponentValue::S64(i64::from_le_bytes(
-                                    d[o..o + 8].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::F32 => |d, o| {
-                                ComponentValue::F32(f32::from_le_bytes(
-                                    d[o..o + 4].try_into().unwrap(),
-                                ))
-                            },
-                            PrimitiveValueKind::F64 => |d, o| {
-                                ComponentValue::F64(f64::from_le_bytes(
-                                    d[o..o + 8].try_into().unwrap(),
-                                ))
-                            },
-                            _ => todo!("lift list element {:?}", elem_prim),
-                        };
-
-                        let elements = (0..len)
-                            .map(|j| read_elem(&mem.data, ptr + j * size))
-                            .collect();
-
-                        results.push(ComponentValue::List(elements));
+                        ComponentValue::String(s.to_string())
                     }
-                    other => todo!("lift type {:?}", other),
-                },
+                })
             }
-        }
+            ComponentValueKind::Type(i) => match &types[*i as usize] {
+                ComponentTypeDef::Defined(ComponentDefinedKind::List(elem_ty)) => {
+                    let ptr = flat[*cursor].as_i32() as usize;
+                    let len = flat[*cursor + 1].as_i32() as usize;
+                    *cursor += 2;
 
-        Ok(results)
+                    let mem_addr = lifted
+                        .memory_addr
+                        .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
+                    let mem = &self.memories[mem_addr];
+
+                    let elem_prim = match elem_ty {
+                        ComponentValueKind::Primitive(p) => p,
+                        _ => todo!("lift list of non-primitive"),
+                    };
+
+                    let size = primitive_byte_size(elem_prim);
+                    let read_elem: fn(&[u8], usize) -> ComponentValue = match elem_prim {
+                        PrimitiveValueKind::U8 => |d, o| ComponentValue::U8(d[o]),
+                        PrimitiveValueKind::S8 => |d, o| ComponentValue::S8(d[o] as i8),
+                        PrimitiveValueKind::U16 => |d, o| {
+                            ComponentValue::U16(u16::from_le_bytes(d[o..o + 2].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::S16 => |d, o| {
+                            ComponentValue::S16(i16::from_le_bytes(d[o..o + 2].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::U32 => |d, o| {
+                            ComponentValue::U32(u32::from_le_bytes(d[o..o + 4].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::S32 => |d, o| {
+                            ComponentValue::S32(i32::from_le_bytes(d[o..o + 4].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::U64 => |d, o| {
+                            ComponentValue::U64(u64::from_le_bytes(d[o..o + 8].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::S64 => |d, o| {
+                            ComponentValue::S64(i64::from_le_bytes(d[o..o + 8].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::F32 => |d, o| {
+                            ComponentValue::F32(f32::from_le_bytes(d[o..o + 4].try_into().unwrap()))
+                        },
+                        PrimitiveValueKind::F64 => |d, o| {
+                            ComponentValue::F64(f64::from_le_bytes(d[o..o + 8].try_into().unwrap()))
+                        },
+                        _ => todo!("lift list element {:?}", elem_prim),
+                    };
+
+                    let elements = (0..len)
+                        .map(|j| read_elem(&mem.data, ptr + j * size))
+                        .collect();
+
+                    Ok(ComponentValue::List(elements))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Record(field_types)) => {
+                    let mut fields = Vec::with_capacity(field_types.len());
+
+                    for (name, ty) in field_types {
+                        let value = self.lift_value(ty, flat, cursor, lifted, types)?;
+                        fields.push((name.clone(), value));
+                    }
+
+                    Ok(ComponentValue::Record(fields))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Tuple(tys)) => {
+                    let mut values = Vec::with_capacity(tys.len());
+
+                    for ty in tys {
+                        values.push(self.lift_value(ty, flat, cursor, lifted, types)?);
+                    }
+
+                    Ok(ComponentValue::Tuple(values))
+                }
+                other => todo!("lift type {:?}", other),
+            },
+        }
     }
 
     pub fn resume(&mut self) -> Result<ExecutionState> {

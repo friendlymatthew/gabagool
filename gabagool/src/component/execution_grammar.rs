@@ -147,6 +147,20 @@ where
     }
 }
 
+impl<V> From<Vec<(&str, V)>> for ComponentValue
+where
+    V: Into<Self>,
+{
+    fn from(value: Vec<(&str, V)>) -> Self {
+        Self::Record(
+            value
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.into()))
+                .collect(),
+        )
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct ComponentInstance(pub(crate) usize);
 

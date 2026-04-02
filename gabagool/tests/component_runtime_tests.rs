@@ -346,3 +346,105 @@ fn component_list_identity() {
         ])]
     );
 }
+
+#[test]
+fn component_record_add_point() {
+    let wasm = wat::parse_str(
+        r#"
+        (component
+            (core module $m
+                (func (export "add") (param i32 i32 i32 i32) (result i32)
+                    local.get 0 local.get 2 i32.add
+                    local.get 1 local.get 3 i32.add
+                    i32.add
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "add") (param "a" (record (field "x" s32) (field "y" s32))) (param "b" (record (field "x" s32) (field "y" s32))) (result s32)
+                (canon lift (core func $i "add"))
+            )
+        )
+    "#,
+    )
+    .unwrap();
+
+    let component = Component::new(&wasm).unwrap();
+    let mut store = Store::new();
+    let instance = store.instantiate_component(&component).unwrap();
+
+    let a = vec![("x", 1), ("y", 2)];
+    let b = vec![("x", 3), ("y", 4)];
+
+    let results = store
+        .invoke_component(instance, "add", vec![a, b])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(results, vec![ComponentValue::S32(10)]);
+}
+
+#[test]
+fn component_tuple_swap() {
+    let wasm = wat::parse_str(
+        r#"
+        (component
+            (core module $m
+                (memory (export "memory") 1)
+
+                (global $bump (mut i32) (i32.const 0))
+                (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+                    (local $ptr i32)
+                    global.get $bump
+                    local.set $ptr
+                    global.get $bump
+                    local.get 3
+                    i32.add
+                    global.set $bump
+                    local.get $ptr
+                )
+
+                (func (export "swap") (param i32 i32) (param i32)
+                    ;; write second to retptr[0], first to retptr[4]
+                    local.get 2
+                    local.get 1
+                    i32.store
+
+                    local.get 2
+                    local.get 0
+                    i32.store offset=4
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "swap") (param "p" (tuple s32 s32)) (result (tuple s32 s32))
+                (canon lift (core func $i "swap")
+                    (memory $i "memory")
+                    (realloc (func $i "realloc"))
+                )
+            )
+        )
+    "#,
+    )
+    .unwrap();
+
+    let component = Component::new(&wasm).unwrap();
+    let mut store = Store::new();
+    let instance = store.instantiate_component(&component).unwrap();
+
+    // a convenience macro for tuples?
+    let pair = ComponentValue::Tuple(vec![ComponentValue::S32(10), ComponentValue::S32(20)]);
+
+    let results = store
+        .invoke_component(instance, "swap", vec![pair])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(
+        results,
+        vec![ComponentValue::Tuple(vec![
+            ComponentValue::S32(20),
+            ComponentValue::S32(10),
+        ])]
+    );
+}

@@ -384,6 +384,12 @@ impl ComponentValueKind {
             Self::Primitive(_) => 1,
             Self::Type(i) => match &types[*i as usize] {
                 ComponentTypeDef::Defined(ComponentDefinedKind::List(_)) => 2,
+                ComponentTypeDef::Defined(ComponentDefinedKind::Record(fields)) => {
+                    fields.iter().map(|(_, ty)| ty.flat_count(types)).sum()
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Tuple(tys)) => {
+                    tys.iter().map(|ty| ty.flat_count(types)).sum()
+                }
                 _ => todo!("flat_count for type {i}"),
             },
         }
