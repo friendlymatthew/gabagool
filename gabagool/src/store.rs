@@ -5,14 +5,17 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::compiler::ModuleCode;
+use crate::component::binary_grammar::{
+    ComponentFuncResult, ComponentTypeDef, ComponentValueKind, PrimitiveValueKind,
+};
+use crate::component::flatten::Initializer;
 use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    compiler, ensure, instantiation_err, trap, AddrType, Alias, CanonicalDef, Component,
-    ComponentInstance, ComponentSection, ComponentSort, ComponentValue, CoreInstance, CoreSort,
-    DataMode, ElementMode, ImportDescription, InstantiatedComponent, Instruction, Module,
-    Mutability, Trap,
+    compiler, ensure, instantiation_err, trap, AddrType, Component, ComponentFuncKind,
+    ComponentInstance, ComponentValue, DataMode, ElementMode, ImportDescription,
+    InstantiatedComponent, Instruction, LiftedFunc, Module, Mutability, Trap,
 };
 
 use crate::binary_grammar::{
@@ -31,6 +34,7 @@ use crate::RawValue;
 
 pub const PAGE_SIZE: usize = 65536;
 pub const MAX_CALL_DEPTH: usize = 1024;
+const MAX_FLAT_RESULTS: usize = 1;
 
 #[derive(Debug, Clone)]
 pub enum ExecutionState<V = RawValue> {
@@ -295,13 +299,13 @@ impl Store {
 
     pub fn new() -> Self {
         Self {
-            functions: vec![],
-            tables: vec![],
-            memories: vec![],
-            globals: vec![],
-            tags: vec![],
-            element_segments: vec![],
-            data_segments: vec![],
+            functions: Vec::new(),
+            tables: Vec::new(),
+            memories: Vec::new(),
+            globals: Vec::new(),
+            tags: Vec::new(),
+            element_segments: Vec::new(),
+            data_segments: Vec::new(),
             stack: ValueStack::with_capacity(1024),
             call_stack: Vec::new(),
             catch_stack: Vec::new(),
@@ -309,9 +313,9 @@ impl Store {
             fuel: None,
             pending_arity: None,
             pending_suspension: None,
-            instances: vec![],
-            func_addr_to_module: vec![],
-            component_instances: vec![],
+            instances: Vec::new(),
+            func_addr_to_module: Vec::new(),
+            component_instances: Vec::new(),
         }
     }
 
@@ -334,6 +338,18 @@ impl Store {
             }
         }
         instantiation_err!("export '{}' not found", name)
+    }
+
+    fn get_memory(&self, instance: Instance, name: &str) -> Result<usize> {
+        for export in self.exports(instance) {
+            if export.name == name {
+                if let ExternalValue::Memory { addr } = export.value {
+                    return Ok(addr);
+                }
+                instantiation_err!("export '{}' is not a memory", name);
+            }
+        }
+        instantiation_err!("memory export '{}' not found", name)
     }
 
     pub fn get_param_types(&self, instance: Instance, name: &str) -> Result<Vec<ValueType>> {
@@ -788,7 +804,7 @@ impl Store {
             import_declarations: module.import_declarations.clone(),
             exports: module.exports.clone(),
             tags: module.tags.clone(),
-            customs: vec![],
+            customs: Vec::new(),
         };
         let module_instance = self.allocate_module(
             parsed_clone,
@@ -914,96 +930,70 @@ impl Store {
     }
 
     pub fn instantiate_component(&mut self, component: &Component) -> Result<ComponentInstance> {
-        let mut core_modules = vec![];
-        let mut core_instances = vec![];
-        let mut core_funcs = vec![];
-        let mut component_funcs = vec![];
+        let flattened = &component.flattened;
+
+        let mut compiled_modules = Vec::with_capacity(flattened.modules.len());
+
+        for module in &flattened.modules {
+            compiled_modules.push(Module::from_parsed(
+                (**module).clone(),
+                CompilerMode::Optimize,
+            )?);
+        }
+
+        let mut core_instances = Vec::new();
+        let mut core_funcs = Vec::new();
+        let mut core_memories = Vec::new();
+        let mut component_funcs: Vec<LiftedFunc> = Vec::new();
         let mut component_exports = HashMap::new();
 
-        for section in &component.parsed.sections {
-            match section {
-                ComponentSection::CoreModule(parsed_module) => {
-                    let module =
-                        Module::from_parsed((**parsed_module).clone(), CompilerMode::Optimize)?;
-                    core_modules.push(module);
+        for init in &flattened.initializers {
+            match init {
+                Initializer::InstantiateModule { module_i } => {
+                    let inst = self.instantiate(&compiled_modules[*module_i], vec![])?;
+                    core_instances.push(inst);
                 }
-                ComponentSection::CoreInstance(instances) => {
-                    for instance in instances {
-                        match instance {
-                            CoreInstance::Instantiate {
-                                module_i,
-                                args: _args,
-                            } => {
-                                let module = &core_modules[*module_i as usize];
-                                // todo: resolve args into imports
-                                let inst = self.instantiate(module, vec![])?;
-                                core_instances.push(inst);
-                            }
-                            CoreInstance::FromExports(_exports) => {
-                                todo!("core instance from exports")
-                            }
-                        }
-                    }
+                Initializer::AliasCoreFunc { instance_i, name } => {
+                    let addr = self.get_func(core_instances[*instance_i], name)?;
+                    core_funcs.push(addr);
                 }
-                ComponentSection::Alias(aliases) => {
-                    for alias in aliases {
-                        match alias {
-                            Alias::CoreExport {
-                                sort,
-                                instance_i,
-                                name,
-                            } => {
-                                let instance = core_instances[*instance_i as usize];
+                Initializer::AliasCoreMemory { instance_i, name } => {
+                    let addr = self.get_memory(core_instances[*instance_i], name)?;
+                    core_memories.push(addr);
+                }
+                Initializer::Lift {
+                    core_func_i,
+                    opts,
+                    type_i,
+                } => {
+                    let func_addr = core_funcs[*core_func_i];
+                    let memory_addr = opts.memory.map(|i| core_memories[i as usize]);
+                    let realloc_addr = opts.realloc.map(|i| core_funcs[i as usize]);
 
-                                match sort {
-                                    ComponentSort::Core(CoreSort::Func) => {
-                                        let func_addr = self.get_func(instance, name)?;
-                                        core_funcs.push(func_addr);
-                                    }
-                                    _ => todo!("alias core export sort {:?}", sort),
+                    let result_types = match &flattened.types[*type_i as usize] {
+                        ComponentTypeDef::Func(ComponentFuncKind { results, .. }) => {
+                            match results {
+                                ComponentFuncResult::Unnamed(kind) => vec![kind.clone()],
+                                ComponentFuncResult::Named(named) => {
+                                    named.iter().map(|(_, kind)| kind.clone()).collect()
                                 }
                             }
-                            _ => todo!("alias kind {:?}", alias),
                         }
-                    }
-                }
-                ComponentSection::Canonical(defs) => {
-                    for def in defs {
-                        match def {
-                            CanonicalDef::Lift {
-                                core_func_i,
-                                opts: _opts,
-                                type_i: _type_i,
-                            } => {
-                                // For primitives (s32 → i32), lift is a passthrough
-                                let func_addr = core_funcs[*core_func_i as usize];
+                        _ => vec![],
+                    };
 
-                                component_funcs.push(func_addr);
-                            }
-                            CanonicalDef::Lower {
-                                func_i: _func_i,
-                                opts: _opts,
-                            } => {
-                                todo!("canon lower")
-                            }
-                            _ => todo!("canonical def {:?}", def),
-                        }
-                    }
+                    component_funcs.push(LiftedFunc {
+                        func_addr,
+                        memory_addr,
+                        realloc_addr,
+                        string_encoding: opts.string_encoding,
+                        result_types,
+                    });
                 }
-                ComponentSection::Export(exports) => {
-                    for export in exports {
-                        match export.sort {
-                            ComponentSort::Func => {
-                                let func_addr = component_funcs[export.i as usize];
-
-                                component_exports.insert(export.name.clone(), func_addr);
-                            }
-                            _ => todo!("export sort {:?}", export.sort),
-                        }
-                    }
+                Initializer::Export { name, func_i } => {
+                    let lifted = component_funcs[*func_i].clone();
+                    component_exports.insert(name.clone(), lifted);
                 }
-                ComponentSection::CoreType(_) | ComponentSection::ComponentType(_) => {}
-                other => todo!("what do {other:?} section look like"),
             }
         }
 
@@ -1031,30 +1021,65 @@ impl Store {
         args: I,
     ) -> Result<ExecutionState<ComponentValue>>
     where
-        I: IntoIterator<IntoIter: ExactSizeIterator>,
+        I: IntoIterator,
         I::Item: Into<ComponentValue>,
     {
-        let inst = &self.component_instances[instance.0];
-        let &addr = inst
+        let lifted = self.component_instances[instance.0]
             .exports
             .get(name)
-            .ok_or_else(|| Error::Instantiation(format!("export '{name}' not found")))?;
+            .ok_or_else(|| Error::Instantiation(format!("export '{name}' not found")))?
+            .clone();
 
-        let raw_args = args.into_iter().map(|v| match v.into() {
-            ComponentValue::S32(v) => RawValue::from(v),
-            _ => todo!("lower"),
-        });
+        let component_args = args.into_iter().map(Into::into);
 
-        let result = self.invoke_by_addr(addr, raw_args)?;
+        let mut raw_args = self.lower_values(component_args, &lifted)?;
+
+        let flat_result_count = lifted
+            .result_types
+            .iter()
+            .map(ComponentValueKind::flat_count)
+            .sum();
+
+        let retptr = (flat_result_count > MAX_FLAT_RESULTS)
+            .then(|| {
+                let mem_addr = lifted
+                    .memory_addr
+                    .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
+
+                let realloc_addr = lifted
+                    .realloc_addr
+                    .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
+
+                let byte_size = (flat_result_count * 4) as i32;
+                let ptr = self.call_realloc(realloc_addr, 0, 0, 4, byte_size)?;
+
+                raw_args.push(RawValue::from(ptr));
+
+                Ok::<_, Error>((ptr as usize, mem_addr))
+            })
+            .transpose()?;
+
+        let result = self.invoke_by_addr(lifted.func_addr, raw_args)?;
 
         Ok(match result {
-            ExecutionState::Completed(raw_values) => ExecutionState::Completed(
-                raw_values
-                    .iter()
-                    .map(|r| ComponentValue::S32(r.as_i32()))
-                    .collect(),
-            ),
             ExecutionState::FuelExhausted => ExecutionState::FuelExhausted,
+            ExecutionState::Completed(raw_values) => {
+                let flat = if let Some((ptr, mem_addr)) = retptr {
+                    let mem = &self.memories[mem_addr];
+
+                    (0..flat_result_count)
+                        .map(|n| {
+                            let offset = ptr + n * 4;
+                            let bytes = mem.data[offset..offset + 4].try_into().unwrap();
+                            RawValue::from(i32::from_le_bytes(bytes))
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    raw_values
+                };
+
+                ExecutionState::Completed(self.lift_values(&flat, &lifted)?)
+            }
             ExecutionState::Suspended {
                 module_name,
                 func_name,
@@ -1064,10 +1089,138 @@ impl Store {
                 func_name,
                 args: args
                     .iter()
-                    .map(|r| ComponentValue::S32(r.as_i32()))
+                    // todo: this wrapping of S64 is hack. probably should keep it as a raw value
+                    .map(|r| ComponentValue::S64(r.as_i64()))
                     .collect(),
             },
         })
+    }
+
+    fn call_realloc(
+        &mut self,
+        realloc_addr: usize,
+        old_ptr: i32,
+        old_size: i32,
+        align: i32,
+        new_size: i32,
+    ) -> Result<i32> {
+        let result = self.invoke_by_addr(
+            realloc_addr,
+            vec![
+                RawValue::from(old_ptr),
+                RawValue::from(old_size),
+                RawValue::from(align),
+                RawValue::from(new_size),
+            ],
+        )?;
+
+        let out = match result {
+            ExecutionState::Completed(vals) => vals[0].as_i32(),
+            _ => instantiation_err!("realloc did not complete"),
+        };
+
+        Ok(out)
+    }
+
+    fn lower_values<I>(&mut self, args: I, lifted: &LiftedFunc) -> Result<Vec<RawValue>>
+    where
+        I: IntoIterator<Item = ComponentValue>,
+    {
+        let mut flat = Vec::new();
+
+        for arg in args {
+            match arg {
+                ComponentValue::Bool(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::S8(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::U8(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::S16(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::U16(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::S32(v) => flat.push(RawValue::from(v)),
+                ComponentValue::U32(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::S64(v) => flat.push(RawValue::from(v)),
+                ComponentValue::U64(v) => flat.push(RawValue::from(v as i64)),
+                ComponentValue::F32(v) => flat.push(RawValue::from(v)),
+                ComponentValue::F64(v) => flat.push(RawValue::from(v)),
+                ComponentValue::Char(v) => flat.push(RawValue::from(v as i32)),
+                ComponentValue::String(s) => {
+                    let bytes = s.as_bytes();
+                    let len = bytes.len();
+
+                    let mem_addr = lifted
+                        .memory_addr
+                        .ok_or_else(|| Error::Instantiation("canon lift missing memory".into()))?;
+
+                    let realloc_addr = lifted
+                        .realloc_addr
+                        .ok_or_else(|| Error::Instantiation("canon lift missing realloc".into()))?;
+
+                    let ptr = self.call_realloc(realloc_addr, 0, 0, 1, len as i32)?;
+
+                    let mem = &mut self.memories[mem_addr];
+                    let dest = ptr as usize;
+                    mem.data[dest..dest + len].copy_from_slice(bytes);
+
+                    flat.push(RawValue::from(ptr));
+                    flat.push(RawValue::from(len as i32));
+                }
+                _ => todo!("lower {:?}", arg),
+            }
+        }
+
+        Ok(flat)
+    }
+
+    fn lift_values(&self, flat: &[RawValue], lifted: &LiftedFunc) -> Result<Vec<ComponentValue>> {
+        let mut results = Vec::new();
+        let mut cursor = 0;
+
+        for ty in &lifted.result_types {
+            match ty {
+                ComponentValueKind::Primitive(p) => {
+                    let val = flat[cursor];
+                    cursor += 1;
+                    results.push(match p {
+                        PrimitiveValueKind::Bool => ComponentValue::Bool(val.as_i32() != 0),
+                        PrimitiveValueKind::S8 => ComponentValue::S8(val.as_i32() as i8),
+                        PrimitiveValueKind::U8 => ComponentValue::U8(val.as_i32() as u8),
+                        PrimitiveValueKind::S16 => ComponentValue::S16(val.as_i32() as i16),
+                        PrimitiveValueKind::U16 => ComponentValue::U16(val.as_i32() as u16),
+                        PrimitiveValueKind::S32 => ComponentValue::S32(val.as_i32()),
+                        PrimitiveValueKind::U32 => ComponentValue::U32(val.as_i32() as u32),
+                        PrimitiveValueKind::S64 => ComponentValue::S64(val.as_i64()),
+                        PrimitiveValueKind::U64 => ComponentValue::U64(val.as_i64() as u64),
+                        PrimitiveValueKind::F32 => {
+                            ComponentValue::F32(f32::from_bits(val.as_i32() as u32))
+                        }
+                        PrimitiveValueKind::F64 => {
+                            ComponentValue::F64(f64::from_bits(val.as_i64() as u64))
+                        }
+                        PrimitiveValueKind::Char => ComponentValue::Char(
+                            char::from_u32(val.as_i32() as u32).unwrap_or('\u{FFFD}'),
+                        ),
+                        PrimitiveValueKind::String => {
+                            let ptr = val.as_i32() as usize;
+                            let len = flat[cursor].as_i32() as usize;
+                            cursor += 1;
+
+                            let mem_addr = lifted.memory_addr.ok_or_else(|| {
+                                Error::Instantiation("canon lift missing memory".into())
+                            })?;
+
+                            let mem = &self.memories[mem_addr];
+                            let bytes = &mem.data[ptr..ptr + len];
+                            let s = std::str::from_utf8(bytes)
+                                .map_err(|e| Error::Instantiation(format!("{e}")))?;
+
+                            ComponentValue::String(s.to_string())
+                        }
+                    });
+                }
+                _ => todo!("lift type {:?}", ty),
+            }
+        }
+
+        Ok(results)
     }
 
     pub fn resume(&mut self) -> Result<ExecutionState> {
@@ -2812,7 +2965,7 @@ impl Store {
             ops,
             type_index: 0,
             num_args: 0,
-            local_types: vec![],
+            local_types: Vec::new(),
             max_stack_height,
         };
 
@@ -2824,7 +2977,7 @@ impl Store {
             module_i,
             compiled_func_i: compiled_func_i as u32,
             pc: 0,
-            locals: vec![],
+            locals: Vec::new(),
             stack_base: self.stack.len(),
             arity: 0,
         });
@@ -2839,7 +2992,7 @@ const fn limits_match(actual: &Limit, expected: &Limit) -> bool {
 
 fn run_data(index: u32, data_segment: &DataSegment) -> Vec<Instruction> {
     match &data_segment.mode {
-        DataMode::Passive => vec![],
+        DataMode::Passive => Vec::new(),
         DataMode::Active { memory, offset } => {
             let n = data_segment.bytes.len();
             let mut instrs = offset.clone();
@@ -2856,7 +3009,7 @@ fn run_data(index: u32, data_segment: &DataSegment) -> Vec<Instruction> {
 
 fn run_elem(index: u32, element_segment: &ElementSegment) -> Vec<Instruction> {
     match &element_segment.mode {
-        ElementMode::Passive => vec![],
+        ElementMode::Passive => Vec::new(),
         ElementMode::Declarative => vec![Instruction::ElemDrop(index)],
         ElementMode::Active {
             table_index,
@@ -3071,8 +3224,8 @@ impl Store {
         let dummy_address_map = Rc::new(AddressMap::default());
         let dummy_function = Function {
             type_index: 0,
-            locals: vec![],
-            body: vec![],
+            locals: Vec::new(),
+            body: Vec::new(),
         };
 
         for _ in 0..num_funcs {

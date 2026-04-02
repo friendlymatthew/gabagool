@@ -3,13 +3,13 @@ use std::collections::VecDeque;
 
 use crate::error::{Error, Result};
 use crate::{
-    ensure, parse_err, Alias, CanonOpts, CanonicalDef, ComponentDefinedType, ComponentExport,
-    ComponentExportDecl, ComponentFuncResult, ComponentFuncType, ComponentImport,
+    ensure, parse_err, Alias, CanonicalDef, ComponentDefinedKind, ComponentExport,
+    ComponentExportDecl, ComponentFuncKind, ComponentFuncResult, ComponentImport,
     ComponentInlineExport, ComponentInstantiateArg, ComponentSection, ComponentSort,
-    ComponentStart, ComponentTypeDecl, ComponentTypeDef, ComponentValType, CoreExportDecl,
+    ComponentStart, ComponentTypeDecl, ComponentTypeDef, ComponentValueKind, CoreExportDecl,
     CoreInlineExport, CoreInstance, CoreInstantiateArg, CoreModuleDecl, CoreModuleType, CoreType,
-    ExternDesc, InstanceTypeDecl, Parsed, ParsedComponent, ParsedComponentInstance,
-    PrimitiveValType, StringEncoding, TypeBound, VariantCase,
+    ExternDesc, InstanceTypeDecl, Parsed, ParsedCanonOpts, ParsedComponent,
+    ParsedComponentInstance, PrimitiveValueKind, StringEncoding, TypeBound, VariantCase,
 };
 
 use crate::binary_grammar::{
@@ -451,9 +451,9 @@ impl<'a> Parser<'a> {
         Ok(out)
     }
 
-    fn parse_canon_opts(&mut self) -> Result<CanonOpts> {
+    fn parse_canon_opts(&mut self) -> Result<ParsedCanonOpts> {
         let count = self.read_u32()?;
-        let mut opts = CanonOpts::default();
+        let mut opts = ParsedCanonOpts::default();
         for _ in 0..count {
             match self.read_u8()? {
                 0 => opts.string_encoding = StringEncoding::Utf8,
@@ -470,7 +470,7 @@ impl<'a> Parser<'a> {
         Ok(opts)
     }
 
-    fn parse_result_list(&mut self) -> Result<Option<ComponentValType>> {
+    fn parse_result_list(&mut self) -> Result<Option<ComponentValueKind>> {
         let out = match self.read_u8()? {
             0x00 => Some(self.parse_component_val_type()?),
             0x01 => {
@@ -573,8 +573,8 @@ impl<'a> Parser<'a> {
         Ok(out)
     }
 
-    fn parse_component_func_type(&mut self) -> Result<ComponentFuncType> {
-        Ok(ComponentFuncType {
+    fn parse_component_func_type(&mut self) -> Result<ComponentFuncKind> {
+        Ok(ComponentFuncKind {
             params: self.parse_vec(Self::parse_labeled_val_type)?,
             results: {
                 match self.read_u8()? {
@@ -588,47 +588,47 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_labeled_val_type(&mut self) -> Result<(String, ComponentValType)> {
+    fn parse_labeled_val_type(&mut self) -> Result<(String, ComponentValueKind)> {
         Ok((self.parse_name()?, self.parse_component_val_type()?))
     }
 
-    fn parse_component_val_type(&mut self) -> Result<ComponentValType> {
+    fn parse_component_val_type(&mut self) -> Result<ComponentValueKind> {
         let b = self.peek_u8()?;
         let out = match b {
             0x68..=0x7f => {
                 self.cursor += 1;
 
-                ComponentValType::Primitive(PrimitiveValType::from_byte(b)?)
+                ComponentValueKind::Primitive(PrimitiveValueKind::from_byte(b)?)
             }
-            _ => ComponentValType::Type(self.read_u32()?),
+            _ => ComponentValueKind::Type(self.read_u32()?),
         };
 
         Ok(out)
     }
 
-    fn parse_component_defined_type(&mut self) -> Result<ComponentDefinedType> {
+    fn parse_component_defined_type(&mut self) -> Result<ComponentDefinedKind> {
         let out = match self.read_u8()? {
-            0x72 => ComponentDefinedType::Record(self.parse_vec(Self::parse_labeled_val_type)?),
-            0x71 => ComponentDefinedType::Variant(self.parse_vec(Self::parse_variant_case)?),
-            0x70 => ComponentDefinedType::List(self.parse_component_val_type()?),
-            0x6f => ComponentDefinedType::Tuple(self.parse_vec(Self::parse_component_val_type)?),
-            0x6e => ComponentDefinedType::Flags(self.parse_vec(Self::parse_name)?),
-            0x6d => ComponentDefinedType::Enum(self.parse_vec(Self::parse_name)?),
-            0x6b => ComponentDefinedType::Option(self.parse_component_val_type()?),
-            0x6a => ComponentDefinedType::Result {
+            0x72 => ComponentDefinedKind::Record(self.parse_vec(Self::parse_labeled_val_type)?),
+            0x71 => ComponentDefinedKind::Variant(self.parse_vec(Self::parse_variant_case)?),
+            0x70 => ComponentDefinedKind::List(self.parse_component_val_type()?),
+            0x6f => ComponentDefinedKind::Tuple(self.parse_vec(Self::parse_component_val_type)?),
+            0x6e => ComponentDefinedKind::Flags(self.parse_vec(Self::parse_name)?),
+            0x6d => ComponentDefinedKind::Enum(self.parse_vec(Self::parse_name)?),
+            0x6b => ComponentDefinedKind::Option(self.parse_component_val_type()?),
+            0x6a => ComponentDefinedKind::Result {
                 ok: self.parse_optional_val_type()?,
                 err: self.parse_optional_val_type()?,
             },
-            0x69 => ComponentDefinedType::Own(self.read_u32()?),
-            0x68 => ComponentDefinedType::Borrow(self.read_u32()?),
-            b @ 0x73..=0x7f => ComponentDefinedType::Primitive(PrimitiveValType::from_byte(b)?),
+            0x69 => ComponentDefinedKind::Own(self.read_u32()?),
+            0x68 => ComponentDefinedKind::Borrow(self.read_u32()?),
+            b @ 0x73..=0x7f => ComponentDefinedKind::Primitive(PrimitiveValueKind::from_byte(b)?),
             b => parse_err!("unknown component defined type: {b:#x}"),
         };
 
         Ok(out)
     }
 
-    fn parse_optional_val_type(&mut self) -> Result<Option<ComponentValType>> {
+    fn parse_optional_val_type(&mut self) -> Result<Option<ComponentValueKind>> {
         let out = match self.read_u8()? {
             0 => None,
             1 => Some(self.parse_component_val_type()?),

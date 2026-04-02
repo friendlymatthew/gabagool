@@ -1,3 +1,4 @@
+use crate::{ComponentValueKind, StringEncoding};
 use std::collections::HashMap;
 use std::result::Result as StdResult;
 
@@ -98,7 +99,7 @@ impl From<char> for ComponentValue {
     }
 }
 
-impl From<std::string::String> for ComponentValue {
+impl From<String> for ComponentValue {
     fn from(v: std::string::String) -> Self {
         Self::String(v)
     }
@@ -113,8 +114,17 @@ impl From<&str> for ComponentValue {
 #[derive(Debug, Copy, Clone)]
 pub struct ComponentInstance(pub(crate) usize);
 
+#[derive(Debug, Clone)]
+pub struct LiftedFunc {
+    pub func_addr: usize,
+    pub memory_addr: Option<usize>,
+    pub realloc_addr: Option<usize>,
+    pub string_encoding: StringEncoding,
+    pub result_types: Vec<ComponentValueKind>,
+}
+
 #[derive(Debug)]
 pub struct InstantiatedComponent {
-    pub exports: HashMap<std::string::String, usize>,
+    pub exports: HashMap<String, LiftedFunc>,
     pub may_leave: bool,
 }

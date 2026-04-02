@@ -1,17 +1,18 @@
 use crate::binary_grammar::{ImportDeclaration, ImportDescription, ParsedModule, SubType};
 use crate::parser::Parser;
-use crate::{parse_err, Error, Result};
+use crate::{flatten, parse_err, Error, Result};
 
 #[derive(Debug)]
 pub struct Component {
-    pub(crate) parsed: ParsedComponent,
+    pub(crate) flattened: flatten::FlattenedComponent,
 }
 
 impl Component {
     pub fn new(bytes: &[u8]) -> Result<Self> {
         let parsed = Parser::new(bytes).parse()?.try_as_component()?;
+        let flattened = flatten::flatten(&parsed)?;
 
-        Ok(Self { parsed })
+        Ok(Self { flattened })
     }
 }
 
@@ -71,12 +72,12 @@ pub struct CoreExportDecl {
 pub enum CanonicalDef {
     Lift {
         core_func_i: u32,
-        opts: CanonOpts,
+        opts: ParsedCanonOpts,
         type_i: u32,
     },
     Lower {
         func_i: u32,
-        opts: CanonOpts,
+        opts: ParsedCanonOpts,
     },
     ResourceNew(u32),
     ResourceDrop(u32),
@@ -87,8 +88,8 @@ pub enum CanonicalDef {
     },
     BackpressureSet,
     TaskReturn {
-        result_type: Option<ComponentValType>,
-        opts: CanonOpts,
+        result_type: Option<ComponentValueKind>,
+        opts: ParsedCanonOpts,
     },
     ContextGet {
         slot: u32,
@@ -102,11 +103,11 @@ pub enum CanonicalDef {
     StreamNew(u32),
     StreamRead {
         type_i: u32,
-        opts: CanonOpts,
+        opts: ParsedCanonOpts,
     },
     StreamWrite {
         type_i: u32,
-        opts: CanonOpts,
+        opts: ParsedCanonOpts,
     },
     StreamCancelRead {
         type_i: u32,
@@ -121,11 +122,11 @@ pub enum CanonicalDef {
     FutureNew(u32),
     FutureRead {
         type_i: u32,
-        opts: CanonOpts,
+        opts: ParsedCanonOpts,
     },
     FutureWrite {
         type_i: u32,
-        opts: CanonOpts,
+        opts: ParsedCanonOpts,
     },
     FutureCancelRead {
         type_i: u32,
@@ -137,8 +138,8 @@ pub enum CanonicalDef {
     },
     FutureDropReadable(u32),
     FutureDropWritable(u32),
-    ErrorContextNew(CanonOpts),
-    ErrorContextDebugMessage(CanonOpts),
+    ErrorContextNew(ParsedCanonOpts),
+    ErrorContextDebugMessage(ParsedCanonOpts),
     ErrorContextDrop,
     WaitableSetNew,
     WaitableSetWait {
@@ -187,7 +188,7 @@ pub enum CanonicalDef {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct CanonOpts {
+pub struct ParsedCanonOpts {
     pub string_encoding: StringEncoding,
     pub memory: Option<u32>,
     pub realloc: Option<u32>,
@@ -341,33 +342,43 @@ pub enum TypeBound {
 
 #[derive(Debug, Clone)]
 pub enum ComponentTypeDef {
-    Defined(ComponentDefinedType),
-    Func(ComponentFuncType),
+    Defined(ComponentDefinedKind),
+    Func(ComponentFuncKind),
     Component(Vec<ComponentTypeDecl>),
     Instance(Vec<InstanceTypeDecl>),
     Resource { dtor: Option<u32> },
 }
 
 #[derive(Debug, Clone)]
-pub struct ComponentFuncType {
-    pub params: Vec<(String, ComponentValType)>,
+pub struct ComponentFuncKind {
+    pub params: Vec<(String, ComponentValueKind)>,
     pub results: ComponentFuncResult,
 }
 
 #[derive(Debug, Clone)]
 pub enum ComponentFuncResult {
-    Unnamed(ComponentValType),
-    Named(Vec<(String, ComponentValType)>),
+    Unnamed(ComponentValueKind),
+    Named(Vec<(String, ComponentValueKind)>),
 }
 
 #[derive(Debug, Clone)]
-pub enum ComponentValType {
+pub enum ComponentValueKind {
     Type(u32),
-    Primitive(PrimitiveValType),
+    Primitive(PrimitiveValueKind),
+}
+
+impl ComponentValueKind {
+    pub fn flat_count(&self) -> usize {
+        match self {
+            Self::Primitive(PrimitiveValueKind::String) => 2,
+            Self::Primitive(_) => 1,
+            Self::Type(_) => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum PrimitiveValType {
+pub enum PrimitiveValueKind {
     Bool,
     S8,
     U8,
@@ -383,7 +394,7 @@ pub enum PrimitiveValType {
     String,
 }
 
-impl PrimitiveValType {
+impl PrimitiveValueKind {
     pub fn from_byte(b: u8) -> Result<Self> {
         let out = match b {
             0x7f => Self::Bool,
@@ -406,18 +417,18 @@ impl PrimitiveValType {
 }
 
 #[derive(Debug, Clone)]
-pub enum ComponentDefinedType {
-    Primitive(PrimitiveValType),
-    Record(Vec<(String, ComponentValType)>),
+pub enum ComponentDefinedKind {
+    Primitive(PrimitiveValueKind),
+    Record(Vec<(String, ComponentValueKind)>),
     Variant(Vec<VariantCase>),
-    List(ComponentValType),
-    Tuple(Vec<ComponentValType>),
+    List(ComponentValueKind),
+    Tuple(Vec<ComponentValueKind>),
     Flags(Vec<String>),
     Enum(Vec<String>),
-    Option(ComponentValType),
+    Option(ComponentValueKind),
     Result {
-        ok: Option<ComponentValType>,
-        err: Option<ComponentValType>,
+        ok: Option<ComponentValueKind>,
+        err: Option<ComponentValueKind>,
     },
     Own(u32),
     Borrow(u32),
@@ -426,7 +437,7 @@ pub enum ComponentDefinedType {
 #[derive(Debug, Clone)]
 pub struct VariantCase {
     pub name: String,
-    pub ty: Option<ComponentValType>,
+    pub ty: Option<ComponentValueKind>,
     pub refines: Option<u32>,
 }
 
