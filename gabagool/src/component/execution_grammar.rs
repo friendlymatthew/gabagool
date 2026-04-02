@@ -161,6 +161,30 @@ where
     }
 }
 
+impl<V> From<Option<V>> for ComponentValue
+where
+    V: Into<Self>,
+{
+    fn from(value: Option<V>) -> Self {
+        Self::Option(value.map(|v| Box::new(v.into())))
+    }
+}
+
+impl<T, E> From<StdResult<T, E>> for ComponentValue
+where
+    T: Into<Self>,
+    E: Into<Self>,
+{
+    fn from(res: StdResult<T, E>) -> Self {
+        let out = match res {
+            Ok(v) => Ok(Some(Box::new(v.into()))),
+            Err(e) => Err(Some(Box::new(e.into()))),
+        };
+
+        Self::Result(out)
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct ComponentInstance(pub(crate) usize);
 

@@ -448,3 +448,162 @@ fn component_tuple_swap() {
         ])]
     );
 }
+
+#[test]
+fn component_option_double() {
+    let wasm = wat::parse_str(
+        r#"
+        (component
+            (core module $m
+                (memory (export "memory") 1)
+                (global $bump (mut i32) (i32.const 0))
+                (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+                    (local $ptr i32)
+                    global.get $bump
+                    local.set $ptr
+                    global.get $bump
+                    local.get 3
+                    i32.add
+                    global.set $bump
+                    local.get $ptr
+                )
+
+                (func (export "double") (param i32 i32) (param i32)
+                    local.get 2
+                    local.get 0
+                    i32.store
+
+                    local.get 2
+                    local.get 1
+                    i32.const 2
+                    i32.mul
+                    local.get 0
+                    i32.mul
+                    i32.store offset=4
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "double") (param "v" (option s32)) (result (option s32))
+                (canon lift (core func $i "double")
+                    (memory $i "memory")
+                    (realloc (func $i "realloc"))
+                )
+            )
+        )
+    "#,
+    )
+    .unwrap();
+
+    let component = Component::new(&wasm).unwrap();
+    let mut store = Store::new();
+    let instance = store.instantiate_component(&component).unwrap();
+
+    let results = store
+        .invoke_component(instance, "double", vec![Some(21)])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(
+        results,
+        vec![ComponentValue::Option(Some(Box::new(ComponentValue::S32(
+            42
+        ))))]
+    );
+
+    let results = store
+        .invoke_component(instance, "double", vec![None::<i32>])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(results, vec![ComponentValue::Option(None)]);
+}
+
+#[test]
+fn component_result_safe_div() {
+    let wasm = wat::parse_str(
+        r#"
+        (component
+            (core module $m
+                (memory (export "memory") 1)
+                (global $bump (mut i32) (i32.const 0))
+                (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+                    (local $ptr i32)
+                    global.get $bump
+                    local.set $ptr
+                    global.get $bump
+                    local.get 3
+                    i32.add
+                    global.set $bump
+                    local.get $ptr
+                )
+
+                (func (export "safe-div") (param i32 i32) (param i32)
+                    (if (i32.eqz (local.get 1))
+                        (then
+                            local.get 2
+                            i32.const 1
+                            i32.store
+
+                            local.get 2
+                            i32.const 0
+                            i32.store offset=4
+                        )
+                        (else
+                            local.get 2
+                            i32.const 0
+                            i32.store
+
+                            local.get 2
+                            local.get 0
+                            local.get 1
+                            i32.div_s
+                            i32.store offset=4
+                        )
+                    )
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "safe-div") (param "a" s32) (param "b" s32) (result (result s32 (error s32)))
+                (canon lift (core func $i "safe-div")
+                    (memory $i "memory")
+                    (realloc (func $i "realloc"))
+                )
+            )
+        )
+    "#,
+    )
+    .unwrap();
+
+    let component = Component::new(&wasm).unwrap();
+    let mut store = Store::new();
+    let instance = store.instantiate_component(&component).unwrap();
+
+    // 10 / 2 = Ok(5)
+    let results = store
+        .invoke_component(instance, "safe-div", vec![10, 2])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(
+        results,
+        vec![ComponentValue::Result(Ok(Some(Box::new(
+            ComponentValue::S32(5)
+        ))))]
+    );
+
+    let results = store
+        .invoke_component(instance, "safe-div", vec![10, 0])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(
+        results,
+        vec![ComponentValue::Result(Err(Some(Box::new(
+            ComponentValue::S32(0)
+        ))))]
+    );
+}

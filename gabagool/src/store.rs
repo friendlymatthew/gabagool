@@ -6,17 +6,16 @@ use std::sync::Arc;
 
 use crate::compiler::ModuleCode;
 use crate::component::binary_grammar::{
-    ComponentDefinedKind, ComponentFuncResult, ComponentTypeDef, ComponentValueKind,
-    PrimitiveValueKind,
+    ComponentDefinedKind, ComponentTypeDef, ComponentValueKind, PrimitiveValueKind,
 };
 use crate::component::flatten::Initializer;
 use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    compiler, ensure, instantiation_err, trap, AddrType, Component, ComponentFuncKind,
-    ComponentInstance, ComponentValue, DataMode, ElementMode, ImportDescription,
-    InstantiatedComponent, Instruction, LiftedFunc, Module, Mutability, Trap,
+    compiler, ensure, instantiation_err, trap, AddrType, Component, ComponentInstance,
+    ComponentValue, DataMode, ElementMode, ImportDescription, InstantiatedComponent, Instruction,
+    LiftedFunc, Module, Mutability, Trap,
 };
 
 use crate::binary_grammar::{
@@ -1246,6 +1245,103 @@ impl Store {
                     self.lower_value(value, None, types, lifted, flat)?;
                 }
             }
+            ComponentValue::Variant(case_name, payload) => {
+                let defined = resolve_defined_type(param_ty, types);
+                let cases = match defined {
+                    Some(ComponentDefinedKind::Variant(cases)) => cases,
+                    _ => instantiation_err!("variant lower requires variant type"),
+                };
+
+                let Some(case_i) = cases.iter().position(|c| c.name == case_name) else {
+                    instantiation_err!("enum case not found: {case_name}")
+                };
+
+                let max_payload = cases
+                    .iter()
+                    .map(|c| c.ty.as_ref().map_or(0, |ty| ty.flat_count(types)))
+                    .max()
+                    .unwrap_or(0);
+
+                flat.push(RawValue::from(case_i as i32));
+
+                let before = flat.len();
+                if let Some(value) = payload {
+                    self.lower_value(*value, None, types, lifted, flat)?;
+                }
+
+                let written = flat.len() - before - 1;
+                let padding = max_payload - written;
+                flat.extend(std::iter::repeat_n(RawValue::from(i32::MAX), padding));
+            }
+            ComponentValue::Enum(case_name) => {
+                let defined = resolve_defined_type(param_ty, types);
+
+                let cases = match defined {
+                    Some(ComponentDefinedKind::Enum(cases)) => cases,
+                    _ => instantiation_err!("enum lower requires enum type"),
+                };
+
+                let Some(case_i) = cases.iter().position(|c| *c == case_name) else {
+                    instantiation_err!("enum case not found: {case_name}")
+                };
+
+                flat.push(RawValue::from(case_i as i32));
+            }
+            ComponentValue::Option(opt) => {
+                let defined = resolve_defined_type(param_ty, types);
+
+                let inner_ty = match defined {
+                    Some(ComponentDefinedKind::Option(ty)) => ty,
+                    _ => instantiation_err!("option lower requires option type"),
+                };
+
+                let payload_count = inner_ty.flat_count(types);
+
+                match opt {
+                    None => flat.extend(std::iter::repeat_n(
+                        RawValue::from(i32::MAX),
+                        payload_count + 1,
+                    )),
+                    Some(value) => {
+                        flat.push(RawValue::from(1i32));
+                        self.lower_value(*value, None, types, lifted, flat)?;
+                    }
+                }
+            }
+            ComponentValue::Result(result) => {
+                let defined = resolve_defined_type(param_ty, types);
+                let (ok_ty, err_ty) = match defined {
+                    Some(ComponentDefinedKind::Result { ok, err }) => (ok, err),
+                    _ => instantiation_err!("result lower requires result type"),
+                };
+
+                let ok_count = ok_ty.as_ref().map_or(0, |ty| ty.flat_count(types));
+                let err_count = err_ty.as_ref().map_or(0, |ty| ty.flat_count(types));
+                let max_payload = ok_count.max(err_count);
+
+                let before = flat.len();
+
+                match result {
+                    Ok(value) => {
+                        flat.push(RawValue::from(0i32));
+
+                        if let Some(value) = value {
+                            self.lower_value(*value, None, types, lifted, flat)?;
+                        }
+                    }
+                    Err(value) => {
+                        flat.push(RawValue::from(1i32));
+
+                        if let Some(value) = value {
+                            self.lower_value(*value, None, types, lifted, flat)?;
+                        }
+                    }
+                }
+
+                let written = flat.len() - before - 1;
+                let padding = max_payload - written;
+                flat.extend(std::iter::repeat_n(RawValue::from(i32::MAX), padding));
+            }
             _ => todo!("lower {:?}", value),
         }
         Ok(())
@@ -1279,6 +1375,7 @@ impl Store {
             ComponentValueKind::Primitive(p) => {
                 let val = flat[*cursor];
                 *cursor += 1;
+
                 Ok(match p {
                     PrimitiveValueKind::Bool => ComponentValue::Bool(val.as_i32() != 0),
                     PrimitiveValueKind::S8 => ComponentValue::S8(val.as_i32() as i8),
@@ -1386,6 +1483,88 @@ impl Store {
                     }
 
                     Ok(ComponentValue::Tuple(values))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Variant(cases)) => {
+                    let discriminant = flat[*cursor].as_i32() as usize;
+                    *cursor += 1;
+
+                    let max_payload = cases
+                        .iter()
+                        .map(|c| c.ty.as_ref().map_or(0, |ty| ty.flat_count(types)))
+                        .max()
+                        .unwrap_or(0);
+
+                    let case = &cases[discriminant];
+                    let payload = if let Some(ty) = &case.ty {
+                        let val = self.lift_value(ty, flat, cursor, lifted, types)?;
+                        let this_count = ty.flat_count(types);
+
+                        *cursor += max_payload - this_count;
+
+                        Some(Box::new(val))
+                    } else {
+                        *cursor += max_payload;
+
+                        None
+                    };
+
+                    Ok(ComponentValue::Variant(case.name.clone(), payload))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Enum(cases)) => {
+                    let discriminant = flat[*cursor].as_i32() as usize;
+                    *cursor += 1;
+
+                    Ok(ComponentValue::Enum(cases[discriminant].clone()))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Option(inner_ty)) => {
+                    let discriminant = flat[*cursor].as_i32();
+                    *cursor += 1;
+
+                    let payload_count = inner_ty.flat_count(types);
+                    if discriminant == 0 {
+                        *cursor += payload_count;
+
+                        return Ok(ComponentValue::Option(None));
+                    }
+
+                    let val = self.lift_value(inner_ty, flat, cursor, lifted, types)?;
+
+                    Ok(ComponentValue::Option(Some(Box::new(val))))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Result { ok, err }) => {
+                    let discriminant = flat[*cursor].as_i32();
+                    *cursor += 1;
+
+                    let ok_count = ok.as_ref().map_or(0, |ty| ty.flat_count(types));
+                    let err_count = err.as_ref().map_or(0, |ty| ty.flat_count(types));
+                    let max_payload = ok_count.max(err_count);
+
+                    if discriminant == 0 {
+                        let val = if let Some(ty) = ok {
+                            let v = self.lift_value(ty, flat, cursor, lifted, types)?;
+                            *cursor += max_payload - ok_count;
+
+                            Some(Box::new(v))
+                        } else {
+                            *cursor += max_payload;
+
+                            None
+                        };
+                        return Ok(ComponentValue::Result(Ok(val)));
+                    }
+
+                    let val = if let Some(ty) = err {
+                        let v = self.lift_value(ty, flat, cursor, lifted, types)?;
+                        *cursor += max_payload - err_count;
+
+                        Some(Box::new(v))
+                    } else {
+                        *cursor += max_payload;
+
+                        None
+                    };
+
+                    Ok(ComponentValue::Result(Err(val)))
                 }
                 other => todo!("lift type {:?}", other),
             },
@@ -3183,6 +3362,19 @@ impl Store {
 
 const fn limits_match(actual: &Limit, expected: &Limit) -> bool {
     actual.min >= expected.min && (expected.max == u64::MAX || actual.max <= expected.max)
+}
+
+fn resolve_defined_type<'a>(
+    param_ty: Option<&ComponentValueKind>,
+    types: &'a [ComponentTypeDef],
+) -> Option<&'a ComponentDefinedKind> {
+    match param_ty? {
+        ComponentValueKind::Type(i) => match &types[*i as usize] {
+            ComponentTypeDef::Defined(d) => Some(d),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn component_value_byte_size(v: &ComponentValue) -> usize {

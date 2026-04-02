@@ -390,6 +390,23 @@ impl ComponentValueKind {
                 ComponentTypeDef::Defined(ComponentDefinedKind::Tuple(tys)) => {
                     tys.iter().map(|ty| ty.flat_count(types)).sum()
                 }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Variant(cases)) => {
+                    let max_payload = cases
+                        .iter()
+                        .map(|c| c.ty.as_ref().map_or(0, |ty| ty.flat_count(types)))
+                        .max()
+                        .unwrap_or(0);
+                    1 + max_payload
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Enum(_)) => 1,
+                ComponentTypeDef::Defined(ComponentDefinedKind::Option(ty)) => {
+                    1 + ty.flat_count(types)
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Result { ok, err }) => {
+                    let ok_count = ok.as_ref().map_or(0, |ty| ty.flat_count(types));
+                    let err_count = err.as_ref().map_or(0, |ty| ty.flat_count(types));
+                    1 + ok_count.max(err_count)
+                }
                 _ => todo!("flat_count for type {i}"),
             },
         }
