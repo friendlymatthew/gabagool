@@ -407,6 +407,9 @@ impl ComponentValueKind {
                     let err_count = err.as_ref().map_or(0, |ty| ty.flat_count(types));
                     1 + ok_count.max(err_count)
                 }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Flags(names)) => {
+                    names.len().div_ceil(32).max(1)
+                }
                 _ => todo!("flat_count for type {i}"),
             },
         }

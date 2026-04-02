@@ -1346,6 +1346,28 @@ impl Store {
                 let padding = max_payload - written;
                 flat.extend(std::iter::repeat_n(RawValue::from(i32::MAX), padding));
             }
+            ComponentValue::Flags(set_flags) => {
+                let all_flags = match resolve_defined_type(param_ty, types) {
+                    Some(ComponentDefinedKind::Flags(names)) => names,
+                    _ => instantiation_err!("flags lower requires flags type"),
+                };
+
+                let num_i32s = all_flags.len().div_ceil(32).max(1);
+                let mut words = vec![0u32; num_i32s];
+
+                for name in &set_flags {
+                    let bit = all_flags
+                        .iter()
+                        .position(|n| n == name)
+                        .ok_or_else(|| Error::Instantiation(format!("unknown flag: {name}")))?;
+
+                    words[bit / 32] |= 1 << (bit % 32);
+                }
+
+                for w in words {
+                    flat.push(RawValue::from(w as i32));
+                }
+            }
             _ => todo!("lower {:?}", value),
         }
         Ok(())
@@ -1569,6 +1591,26 @@ impl Store {
                     };
 
                     Ok(ComponentValue::Result(Err(val)))
+                }
+                ComponentTypeDef::Defined(ComponentDefinedKind::Flags(all_flags)) => {
+                    let num_i32s = all_flags.len().div_ceil(32).max(1);
+
+                    let mut set = Vec::new();
+
+                    for word_i in 0..num_i32s {
+                        let bits = flat[*cursor].as_i32() as u32;
+                        *cursor += 1;
+
+                        for bit in 0..32 {
+                            let flag_i = word_i * 32 + bit;
+
+                            if flag_i < all_flags.len() && (bits >> bit) & 1 != 0 {
+                                set.push(all_flags[flag_i].clone());
+                            }
+                        }
+                    }
+
+                    Ok(ComponentValue::Flags(set))
                 }
                 other => todo!("lift type {:?}", other),
             },

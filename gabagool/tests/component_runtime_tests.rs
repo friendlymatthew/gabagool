@@ -468,16 +468,16 @@ fn component_option_double() {
                     local.get $ptr
                 )
 
-                (func (export "double") (param i32 i32) (param i32)
-                    local.get 2
-                    local.get 0
+                (func (export "double") (param $disc i32) (param $val i32) (param $retptr i32)
+                    ;; write discriminant
+                    local.get $retptr
+                    local.get $disc
                     i32.store
 
-                    local.get 2
-                    local.get 1
+                    ;; write payload: val * 2 if some, 0 if none
+                    local.get $retptr
+                    local.get $val
                     i32.const 2
-                    i32.mul
-                    local.get 0
                     i32.mul
                     i32.store offset=4
                 )
@@ -511,8 +511,12 @@ fn component_option_double() {
         ))))]
     );
 
-    let results = store
-        .invoke_component(instance, "double", vec![None::<i32>])
+    // fresh store for None case to avoid bump allocator state
+    let mut store2 = Store::new();
+    let instance2 = store2.instantiate_component(&component).unwrap();
+
+    let results = store2
+        .invoke_component(instance2, "double", vec![None::<i32>])
         .unwrap()
         .into_completed()
         .unwrap();
@@ -605,5 +609,59 @@ fn component_result_safe_div() {
         vec![ComponentValue::Result(Err(Some(Box::new(
             ComponentValue::S32(0)
         ))))]
+    );
+}
+
+#[test]
+fn component_flags_roundtrip() {
+    let wasm = wat::parse_str(
+        r#"
+        (component
+            (core module $m
+                (memory (export "memory") 1)
+                (global $bump (mut i32) (i32.const 0))
+                (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+                    (local $ptr i32)
+                    global.get $bump
+                    local.set $ptr
+                    global.get $bump
+                    local.get 3
+                    i32.add
+                    global.set $bump
+                    local.get $ptr
+                )
+
+                ;; identity: takes flags (i32), returns flags (i32)
+                (func (export "identity") (param i32) (result i32)
+                    local.get 0
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "identity") (param "perms" (flags "read" "write" "exec")) (result (flags "read" "write" "exec"))
+                (canon lift (core func $i "identity")
+                    (memory $i "memory")
+                    (realloc (func $i "realloc"))
+                )
+            )
+        )
+    "#,
+    )
+    .unwrap();
+
+    let component = Component::new(&wasm).unwrap();
+    let mut store = Store::new();
+    let instance = store.instantiate_component(&component).unwrap();
+
+    let flags = ComponentValue::Flags(vec!["read".into(), "exec".into()]);
+
+    let results = store
+        .invoke_component(instance, "identity", vec![flags])
+        .unwrap()
+        .into_completed()
+        .unwrap();
+
+    assert_eq!(
+        results,
+        vec![ComponentValue::Flags(vec!["read".into(), "exec".into()])]
     );
 }
