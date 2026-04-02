@@ -126,8 +126,8 @@ mod tests {
         }
         assert_eq!(buf.entries.len(), 10);
 
-        for (idx, entry) in buf.entries.iter().enumerate() {
-            assert_eq!(entry.timestamp, idx as u64);
+        for (i, entry) in buf.entries.iter().enumerate() {
+            assert_eq!(entry.timestamp, i as u64);
         }
     }
 

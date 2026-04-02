@@ -84,8 +84,8 @@ pub fn compile(module: &ParsedModule, mode: CompilerMode) -> ModuleCode {
     let mut shuffle_masks = Vec::new();
     let mut catch_handlers = Vec::new();
 
-    let resolve_sig = |type_idx: u32, types: &[SubType]| -> (usize, usize) {
-        match &types[type_idx as usize].composite_type {
+    let resolve_sig = |type_i: u32, types: &[SubType]| -> (usize, usize) {
+        match &types[type_i as usize].composite_type {
             CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
             _ => (0, 0),
         }
@@ -94,7 +94,7 @@ pub fn compile(module: &ParsedModule, mode: CompilerMode) -> ModuleCode {
         .import_declarations
         .iter()
         .filter_map(|imp| match &imp.description {
-            ImportDescription::Func(type_idx) => Some(resolve_sig(*type_idx, &module.types)),
+            ImportDescription::Func(type_i) => Some(resolve_sig(*type_i, &module.types)),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -102,8 +102,8 @@ pub fn compile(module: &ParsedModule, mode: CompilerMode) -> ModuleCode {
         func_signatures.push(resolve_sig(f.type_index, &module.types));
     }
 
-    let resolve_tag_sig = |type_idx: u32, types: &[SubType]| -> usize {
-        match &types[type_idx as usize].composite_type {
+    let resolve_tag_sig = |type_i: u32, types: &[SubType]| -> usize {
+        match &types[type_i as usize].composite_type {
             CompositeType::Func(ft) => ft.0 .0.len(),
             _ => 0,
         }
@@ -112,7 +112,7 @@ pub fn compile(module: &ParsedModule, mode: CompilerMode) -> ModuleCode {
         .import_declarations
         .iter()
         .filter_map(|imp| match &imp.description {
-            ImportDescription::Tag(type_idx) => Some(resolve_tag_sig(*type_idx, &module.types)),
+            ImportDescription::Tag(type_i) => Some(resolve_tag_sig(*type_i, &module.types)),
             _ => None,
         })
         .collect();
@@ -199,8 +199,8 @@ pub fn compile_function_into_code(
 }
 
 impl<'a> Compiler<'a> {
-    fn resolve_type_sig(&self, type_idx: u32) -> (usize, usize) {
-        match &self.types[type_idx as usize].composite_type {
+    fn resolve_type_sig(&self, type_i: u32) -> (usize, usize) {
+        match &self.types[type_i as usize].composite_type {
             CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
             _ => (0, 0),
         }
@@ -210,8 +210,8 @@ impl<'a> Compiler<'a> {
         match bt {
             BlockType::Empty => (0, 0),
             BlockType::SingleValue(_) => (0, 1),
-            BlockType::TypeIndex(idx) => {
-                let st = &self.types[*idx as usize];
+            BlockType::TypeIndex(i) => {
+                let st = &self.types[*i as usize];
                 match &st.composite_type {
                     CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
                     _ => (0, 0),
@@ -317,7 +317,7 @@ impl<'a> Compiler<'a> {
         catches
             .iter()
             .map(|c| {
-                let (kind, tag_idx, label) = match c {
+                let (kind, tag_i, label) = match c {
                     CatchClause::Catch { tag, label } => (CatchKind::Catch, *tag, *label),
                     CatchClause::CatchRef { tag, label } => (CatchKind::CatchRef, *tag, *label),
                     CatchClause::CatchAll { label } => (CatchKind::CatchAll, 0, *label),
@@ -326,7 +326,7 @@ impl<'a> Compiler<'a> {
 
                 let n_tag_values = match kind {
                     CatchKind::Catch | CatchKind::CatchRef => {
-                        self.tag_signatures[tag_idx as usize] as u16
+                        self.tag_signatures[tag_i as usize] as u16
                     }
                     _ => 0,
                 };
@@ -336,8 +336,8 @@ impl<'a> Compiler<'a> {
                         _ => 0,
                     };
 
-                let idx = self.block_stack.len() - 2 - label as usize;
-                let ctx = &self.block_stack[idx];
+                let i = self.block_stack.len() - 2 - label as usize;
+                let ctx = &self.block_stack[i];
                 let target = if ctx.kind == BlockKind::Loop {
                     ctx.start_label
                 } else {
@@ -348,7 +348,7 @@ impl<'a> Compiler<'a> {
 
                 CompiledCatchClause {
                     kind,
-                    tag_idx,
+                    tag_i,
                     target: target.0,
                     n_values,
                     drop,
@@ -358,8 +358,8 @@ impl<'a> Compiler<'a> {
     }
 
     fn emit_branch(&mut self, depth: u32, conditional: bool, negate: bool) {
-        let idx = self.block_stack.len() - 1 - depth as usize;
-        let ctx = &self.block_stack[idx];
+        let i = self.block_stack.len() - 1 - depth as usize;
+        let ctx = &self.block_stack[i];
 
         let keep = ctx.branch_arity as u16;
         let drop = (self.stack_height - ctx.entry_stack_height - keep as i32) as u16;
@@ -407,12 +407,12 @@ impl<'a> Compiler<'a> {
         } else {
             Vec::new()
         };
-        for (idx, cop) in self.ops.iter().enumerate() {
+        for (i, cop) in self.ops.iter().enumerate() {
             if let CompilerOp::Op(mut op) = *cop {
                 Self::resolve_targets(&mut op, &label_positions);
                 out.push(op);
                 if self.mode == CompilerMode::Debug {
-                    assembled_positions.push(self.source_positions[idx]);
+                    assembled_positions.push(self.source_positions[i]);
                 }
             }
         }
@@ -537,25 +537,25 @@ impl<'a> Compiler<'a> {
         while i < self.ops.len() {
             match &self.ops[i..] {
                 [CompilerOp::Op(Op::LocalGet {
-                    local_idx: local_get_idx,
+                    local_i: local_get_i,
                 }), CompilerOp::Op(Op::LocalSet {
-                    local_idx: local_set_idx,
+                    local_i: local_set_i,
                 }), ..] => {
                     out.push(
                         Op::LocalGetLocalSet {
-                            local_get_idx: *local_get_idx,
-                            local_set_idx: *local_set_idx,
+                            local_get_i: *local_get_i,
+                            local_set_i: *local_set_i,
                         }
                         .into(),
                     );
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::I32Store { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::I32Store { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetI32Store {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -564,11 +564,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::I32Load { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::I32Load { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetI32Load {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -577,11 +577,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::I64Load { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::I64Load { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetI64Load {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -590,11 +590,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::F32Load { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::F32Load { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetF32Load {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -603,11 +603,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::F64Load { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::F64Load { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetF64Load {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -616,11 +616,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::I64Store { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::I64Store { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetI64Store {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -629,11 +629,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::F32Store { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::F32Store { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetF32Store {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -642,11 +642,11 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::F64Store { offset, memory }), ..] =>
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::F64Store { offset, memory }), ..] =>
                 {
                     out.push(
                         Op::LocalGetF64Store {
-                            local_idx: *local_idx,
+                            local_i: *local_i,
                             offset: *offset,
                             memory: *memory,
                         }
@@ -655,25 +655,17 @@ impl<'a> Compiler<'a> {
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet { local_idx }), CompilerOp::Op(Op::Return), ..] => {
-                    out.push(
-                        Op::LocalGetReturn {
-                            local_idx: *local_idx,
-                        }
-                        .into(),
-                    );
+                [CompilerOp::Op(Op::LocalGet { local_i }), CompilerOp::Op(Op::Return), ..] => {
+                    out.push(Op::LocalGetReturn { local_i: *local_i }.into());
 
                     i += 2;
                 }
-                [CompilerOp::Op(Op::LocalGet {
-                    local_idx: local_idx_a,
-                }), CompilerOp::Op(Op::LocalGet {
-                    local_idx: local_idx_b,
-                }), ..] => {
+                [CompilerOp::Op(Op::LocalGet { local_i: local_i_a }), CompilerOp::Op(Op::LocalGet { local_i: local_i_b }), ..] =>
+                {
                     out.push(
                         Op::LocalGet2 {
-                            local_idx_a: *local_idx_a,
-                            local_idx_b: *local_idx_b,
+                            local_i_a: *local_i_a,
+                            local_i_b: *local_i_b,
                         }
                         .into(),
                     );
@@ -1273,13 +1265,13 @@ impl<'a> Compiler<'a> {
             }
             Instruction::BrTable(labels, default) => {
                 self.stack_height -= 1;
-                let default_idx = self.block_stack.len() - 1 - *default as usize;
-                let keep = self.block_stack[default_idx].branch_arity as u16;
+                let default_i = self.block_stack.len() - 1 - *default as usize;
+                let keep = self.block_stack[default_i].branch_arity as u16;
 
                 let mut entries = Vec::with_capacity(labels.len() + 1);
                 for label in labels.iter().chain(std::iter::once(default)) {
-                    let idx = self.block_stack.len() - 1 - *label as usize;
-                    let ctx = &self.block_stack[idx];
+                    let i = self.block_stack.len() - 1 - *label as usize;
+                    let ctx = &self.block_stack[i];
                     let drop = (self.stack_height - ctx.entry_stack_height - keep as i32) as u16;
 
                     let target = if ctx.kind == BlockKind::Loop {
@@ -1294,11 +1286,11 @@ impl<'a> Compiler<'a> {
                     });
                 }
 
-                let table_idx = self.jump_tables.len();
+                let table_i = self.jump_tables.len();
                 self.jump_tables.push(entries);
 
                 self.emit(Op::JumpTable {
-                    index: table_idx as u32,
+                    index: table_i as u32,
                     keep,
                 });
                 self.stack_height = UNREACHABLE_DEPTH;
@@ -1314,50 +1306,42 @@ impl<'a> Compiler<'a> {
             Instruction::Nop => {
                 self.emit(Op::Nop);
             }
-            Instruction::Call(func_idx) => {
-                let (n_params, n_results) = self.func_signatures[*func_idx as usize];
-                self.emit(Op::Call {
-                    func_idx: *func_idx,
-                });
+            Instruction::Call(func_i) => {
+                let (n_params, n_results) = self.func_signatures[*func_i as usize];
+                self.emit(Op::Call { func_i: *func_i });
                 self.stack_height -= n_params as i32;
                 self.stack_height += n_results as i32;
             }
-            Instruction::CallIndirect(type_idx, table_idx) => {
-                let (n_params, n_results) = self.resolve_type_sig(*type_idx);
+            Instruction::CallIndirect(type_i, table_i) => {
+                let (n_params, n_results) = self.resolve_type_sig(*type_i);
                 self.stack_height -= 1;
                 self.emit(Op::CallIndirect {
-                    type_idx: *type_idx,
-                    table_idx: *table_idx,
+                    type_i: *type_i,
+                    table_i: *table_i,
                 });
                 self.stack_height -= n_params as i32;
                 self.stack_height += n_results as i32;
             }
-            Instruction::ReturnCall(func_idx) => {
-                self.emit(Op::ReturnCall {
-                    func_idx: *func_idx,
-                });
+            Instruction::ReturnCall(func_i) => {
+                self.emit(Op::ReturnCall { func_i: *func_i });
                 self.stack_height = UNREACHABLE_DEPTH;
             }
-            Instruction::ReturnCallIndirect(type_idx, table_idx) => {
+            Instruction::ReturnCallIndirect(type_i, table_i) => {
                 self.emit(Op::ReturnCallIndirect {
-                    type_idx: *type_idx,
-                    table_idx: *table_idx,
+                    type_i: *type_i,
+                    table_i: *table_i,
                 });
                 self.stack_height = UNREACHABLE_DEPTH;
             }
-            Instruction::CallRef(type_idx) => {
-                let (n_params, n_results) = self.resolve_type_sig(*type_idx);
+            Instruction::CallRef(type_i) => {
+                let (n_params, n_results) = self.resolve_type_sig(*type_i);
                 self.stack_height -= 1;
-                self.emit(Op::CallRef {
-                    type_idx: *type_idx,
-                });
+                self.emit(Op::CallRef { type_i: *type_i });
                 self.stack_height -= n_params as i32;
                 self.stack_height += n_results as i32;
             }
-            Instruction::ReturnCallRef(type_idx) => {
-                self.emit(Op::ReturnCallRef {
-                    type_idx: *type_idx,
-                });
+            Instruction::ReturnCallRef(type_i) => {
+                self.emit(Op::ReturnCallRef { type_i: *type_i });
                 self.stack_height = UNREACHABLE_DEPTH;
             }
             Instruction::I32Const(v) => {
@@ -1377,28 +1361,28 @@ impl<'a> Compiler<'a> {
                 self.stack_height += 1;
             }
             Instruction::V128Const(v) => {
-                let table_idx = self.v128_constants.len() as u32;
+                let table_i = self.v128_constants.len() as u32;
                 self.v128_constants.push(*v);
-                self.emit(Op::V128Const { table_idx });
+                self.emit(Op::V128Const { table_i });
                 self.stack_height += 1;
             }
-            Instruction::LocalGet(idx) => {
-                self.emit(Op::LocalGet { local_idx: *idx });
+            Instruction::LocalGet(i) => {
+                self.emit(Op::LocalGet { local_i: *i });
                 self.stack_height += 1;
             }
-            Instruction::LocalSet(idx) => {
-                self.emit(Op::LocalSet { local_idx: *idx });
+            Instruction::LocalSet(i) => {
+                self.emit(Op::LocalSet { local_i: *i });
                 self.stack_height -= 1;
             }
-            Instruction::LocalTee(idx) => {
-                self.emit(Op::LocalTee { local_idx: *idx });
+            Instruction::LocalTee(i) => {
+                self.emit(Op::LocalTee { local_i: *i });
             }
-            Instruction::GlobalGet(idx) => {
-                self.emit(Op::GlobalGet { global_idx: *idx });
+            Instruction::GlobalGet(i) => {
+                self.emit(Op::GlobalGet { global_i: *i });
                 self.stack_height += 1;
             }
-            Instruction::GlobalSet(idx) => {
-                self.emit(Op::GlobalSet { global_idx: *idx });
+            Instruction::GlobalSet(i) => {
+                self.emit(Op::GlobalSet { global_i: *i });
                 self.stack_height -= 1;
             }
             Instruction::Drop => {
@@ -1423,12 +1407,12 @@ impl<'a> Compiler<'a> {
             Instruction::RefAsNonNull => {
                 self.emit(Op::RefAsNonNull);
             }
-            Instruction::RefFunc(idx) => {
-                self.emit(Op::RefFunc { func_idx: *idx });
+            Instruction::RefFunc(i) => {
+                self.emit(Op::RefFunc { func_i: *i });
                 self.stack_height += 1;
             }
-            Instruction::Throw(tag_idx) => {
-                self.emit(Op::Throw { tag_idx: *tag_idx });
+            Instruction::Throw(tag_i) => {
+                self.emit(Op::Throw { tag_i: *tag_i });
                 self.stack_height = UNREACHABLE_DEPTH;
             }
             Instruction::ThrowRef => {
@@ -1436,8 +1420,8 @@ impl<'a> Compiler<'a> {
                 self.stack_height = UNREACHABLE_DEPTH;
             }
             Instruction::BrOnNull(depth) => {
-                let idx = self.block_stack.len() - 1 - *depth as usize;
-                let ctx = &self.block_stack[idx];
+                let i = self.block_stack.len() - 1 - *depth as usize;
+                let ctx = &self.block_stack[i];
                 let keep = ctx.branch_arity as u16;
                 let drop = (self.stack_height - ctx.entry_stack_height - keep as i32 - 1) as u16;
                 let target = if ctx.kind == BlockKind::Loop {
@@ -1452,8 +1436,8 @@ impl<'a> Compiler<'a> {
                 });
             }
             Instruction::BrOnNonNull(depth) => {
-                let idx = self.block_stack.len() - 1 - *depth as usize;
-                let ctx = &self.block_stack[idx];
+                let i = self.block_stack.len() - 1 - *depth as usize;
+                let ctx = &self.block_stack[i];
                 let keep = ctx.branch_arity as u16;
                 let drop = (self.stack_height - ctx.entry_stack_height - keep as i32) as u16;
 
@@ -1471,40 +1455,40 @@ impl<'a> Compiler<'a> {
 
                 self.stack_height -= 1;
             }
-            Instruction::TableGet(idx) => {
-                self.emit(Op::TableGet { table_idx: *idx });
+            Instruction::TableGet(i) => {
+                self.emit(Op::TableGet { table_i: *i });
             }
-            Instruction::TableSet(idx) => {
-                self.emit(Op::TableSet { table_idx: *idx });
+            Instruction::TableSet(i) => {
+                self.emit(Op::TableSet { table_i: *i });
                 self.stack_height -= 2;
             }
-            Instruction::TableInit(table_idx, elem_idx) => {
+            Instruction::TableInit(table_i, elem_i) => {
                 self.emit(Op::TableInit {
-                    elem_idx: *elem_idx,
-                    table_idx: *table_idx,
+                    elem_i: *elem_i,
+                    table_i: *table_i,
                 });
                 self.stack_height -= 3;
             }
-            Instruction::ElemDrop(idx) => {
-                self.emit(Op::ElemDrop { elem_idx: *idx });
+            Instruction::ElemDrop(i) => {
+                self.emit(Op::ElemDrop { elem_i: *i });
             }
             Instruction::TableCopy(dst, src) => {
                 self.emit(Op::TableCopy {
-                    dst_table_idx: *dst,
-                    src_table_idx: *src,
+                    dst_table_i: *dst,
+                    src_table_i: *src,
                 });
                 self.stack_height -= 3;
             }
-            Instruction::TableGrow(idx) => {
-                self.emit(Op::TableGrow { table_idx: *idx });
+            Instruction::TableGrow(i) => {
+                self.emit(Op::TableGrow { table_i: *i });
                 self.stack_height -= 1;
             }
-            Instruction::TableSize(idx) => {
-                self.emit(Op::TableSize { table_idx: *idx });
+            Instruction::TableSize(i) => {
+                self.emit(Op::TableSize { table_i: *i });
                 self.stack_height += 1;
             }
-            Instruction::TableFill(idx) => {
-                self.emit(Op::TableFill { table_idx: *idx });
+            Instruction::TableFill(i) => {
+                self.emit(Op::TableFill { table_i: *i });
                 self.stack_height -= 3;
             }
             Instruction::I32Load(ma) => {
@@ -1654,32 +1638,32 @@ impl<'a> Compiler<'a> {
                 });
                 self.stack_height -= 2;
             }
-            Instruction::MemorySize(idx) => {
-                self.emit(Op::MemorySize { memory_idx: *idx });
+            Instruction::MemorySize(i) => {
+                self.emit(Op::MemorySize { memory_i: *i });
                 self.stack_height += 1;
             }
-            Instruction::MemoryGrow(idx) => {
-                self.emit(Op::MemoryGrow { memory_idx: *idx });
+            Instruction::MemoryGrow(i) => {
+                self.emit(Op::MemoryGrow { memory_i: *i });
             }
-            Instruction::MemoryInit(data_idx, mem_idx) => {
+            Instruction::MemoryInit(data_i, mem_i) => {
                 self.emit(Op::MemoryInit {
-                    data_idx: *data_idx,
-                    memory_idx: *mem_idx,
+                    data_i: *data_i,
+                    memory_i: *mem_i,
                 });
                 self.stack_height -= 3;
             }
-            Instruction::DataDrop(idx) => {
-                self.emit(Op::DataDrop { data_idx: *idx });
+            Instruction::DataDrop(i) => {
+                self.emit(Op::DataDrop { data_i: *i });
             }
             Instruction::MemoryCopy(dst, src) => {
                 self.emit(Op::MemoryCopy {
-                    dst_memory_idx: *dst,
-                    src_memory_idx: *src,
+                    dst_memory_i: *dst,
+                    src_memory_i: *src,
                 });
                 self.stack_height -= 3;
             }
-            Instruction::MemoryFill(idx) => {
-                self.emit(Op::MemoryFill { memory_idx: *idx });
+            Instruction::MemoryFill(i) => {
+                self.emit(Op::MemoryFill { memory_i: *i });
                 self.stack_height -= 3;
             }
             Instruction::I32EqZero => {
@@ -2316,9 +2300,9 @@ impl<'a> Compiler<'a> {
                 self.stack_height -= 2;
             }
             Instruction::I8x16Shuffle(mask) => {
-                let table_idx = self.shuffle_masks.len() as u32;
+                let table_i = self.shuffle_masks.len() as u32;
                 self.shuffle_masks.push(*mask);
-                self.emit(Op::I8x16Shuffle { table_idx });
+                self.emit(Op::I8x16Shuffle { table_i });
                 self.stack_height -= 1;
             }
             Instruction::I8x16ExtractLaneSigned(l) => {
@@ -3192,10 +3176,10 @@ impl<'a> Compiler<'a> {
                 });
 
                 let clauses = self.compile_catch_clauses(catches, entry);
-                let handler_idx = self.catch_handlers.len() as u32;
+                let handler_i = self.catch_handlers.len() as u32;
                 self.catch_handlers.push(clauses);
 
-                self.emit(Op::TryCatchPush { handler_idx });
+                self.emit(Op::TryCatchPush { handler_i });
 
                 for i in body {
                     self.compile_instruction(i);
@@ -3284,8 +3268,8 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGet2 {
-                local_idx_a: 0,
-                local_idx_b: 1,
+                local_i_a: 0,
+                local_i_b: 1,
             },
             I32Add,
             Return,
@@ -3307,8 +3291,8 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGet2 {
-                local_idx_a: 0,
-                local_idx_b: 1,
+                local_i_a: 0,
+                local_i_b: 1,
             },
             I32EqJumpIf {
                 target: 2,
@@ -3334,8 +3318,8 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGet2 {
-                local_idx_a: 0,
-                local_idx_b: 1,
+                local_i_a: 0,
+                local_i_b: 1,
             },
             I32LtSignedJumpIf {
                 target: 2,
@@ -3360,7 +3344,7 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGet {
-                local_idx: 0,
+                local_i: 0,
             },
             I32EqZeroJumpIf {
                 target: 2,
@@ -3419,7 +3403,7 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGetI32Load {
-                local_idx: 0,
+                local_i: 0,
                 offset: 8,
                 memory: 0,
             },
@@ -3445,7 +3429,7 @@ mod tests {
                 value: 42,
             },
             LocalGetI32Store {
-                local_idx: 0,
+                local_i: 0,
                 offset: 4,
                 memory: 0,
             },
@@ -3460,8 +3444,8 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGetLocalSet {
-                local_get_idx: 0,
-                local_set_idx: 1,
+                local_get_i: 0,
+                local_set_i: 1,
             },
             Return,
         ]
@@ -3474,7 +3458,7 @@ mod tests {
         insta::assert_debug_snapshot!(&ops, @r#"
         [
             LocalGetReturn {
-                local_idx: 0,
+                local_i: 0,
             },
         ]
         "#);

@@ -10,8 +10,9 @@ use crate::error::{Error, Result};
 use crate::jit::assembler::JitFunction;
 use crate::{
     compiler, ensure, instantiation_err, trap, AddrType, Alias, CanonicalDef, Component,
-    ComponentSection, ComponentSort, ComponentValue, CoreInstance, CoreSort, DataMode, ElementMode,
-    ImportDescription, InstantiatedComponent, Instruction, Module, Mutability, Trap,
+    ComponentInstance, ComponentSection, ComponentSort, ComponentValue, CoreInstance, CoreSort,
+    DataMode, ElementMode, ImportDescription, InstantiatedComponent, Instruction, Module,
+    Mutability, Trap,
 };
 
 use crate::binary_grammar::{
@@ -102,13 +103,13 @@ macro_rules! cmp_branch {
 }
 
 macro_rules! local_get_load {
-    ($self:expr, $depth:expr, $mi:expr, $local_idx:expr, $offset:expr, $memory:expr, $width:literal, |$bytes:ident| $convert:expr) => {{
+    ($self:expr, $depth:expr, $mi:expr, $local_i:expr, $offset:expr, $memory:expr, $width:literal, |$bytes:ident| $convert:expr) => {{
         let locals = &$self.call_stack[$depth].locals;
         let mem_addr = $self.instances[$mi].mem_addrs[$memory as usize];
         let mem = &$self.memories[mem_addr];
         let base = match mem.memory_type.addr_type {
-            AddrType::I32 => locals[$local_idx as usize].as_i32() as u64,
-            AddrType::I64 => locals[$local_idx as usize].as_i64() as u64,
+            AddrType::I32 => locals[$local_i as usize].as_i32() as u64,
+            AddrType::I64 => locals[$local_i as usize].as_i64() as u64,
         };
         let ea = base
             .checked_add($offset as u64)
@@ -122,9 +123,9 @@ macro_rules! local_get_load {
 }
 
 macro_rules! local_get_store {
-    ($self:expr, $depth:expr, $mi:expr, $local_idx:expr, $offset:expr, $memory:expr, $width:literal, $to_bytes:expr) => {{
+    ($self:expr, $depth:expr, $mi:expr, $local_i:expr, $offset:expr, $memory:expr, $width:literal, $to_bytes:expr) => {{
         let locals = &$self.call_stack[$depth].locals;
-        let val = locals[$local_idx as usize];
+        let val = locals[$local_i as usize];
         let mem_addr = $self.instances[$mi].mem_addrs[$memory as usize];
         let addr_type = $self.memories[mem_addr].memory_type.addr_type;
         let base = $self.stack.pop_address(addr_type) as u64;
@@ -204,15 +205,9 @@ enum RunOutcome {
 #[derive(Debug, Copy, Clone)]
 pub struct Instance(pub(crate) usize);
 
-/// A handle to an instantiated WASM module in the store
-///
-/// Only created by [`Store::instantiate`], so the handle is always valid
-#[derive(Debug, Copy, Clone)]
-pub struct ComponentInstance(pub(crate) usize);
-
 pub struct CallFrame {
-    pub module_idx: u16,
-    pub compiled_func_idx: u32,
+    pub module_i: u16,
+    pub compiled_func_i: u32,
     pub pc: usize,
     pub locals: Vec<RawValue>,
     pub stack_base: usize,
@@ -222,8 +217,8 @@ pub struct CallFrame {
 struct CatchFrame {
     call_depth: usize,
     stack_restore: usize,
-    module_idx: u16,
-    handler_idx: u32,
+    module_i: u16,
+    handler_i: u32,
 }
 
 /// Runtime state of an instantiated [`crate::Module`]
@@ -256,7 +251,7 @@ pub struct Store {
     pub data_segments: Vec<DataInstance>,
 
     pub(crate) instances: Vec<InstantiatedModule>,
-    /// maps func addr → (instance_idx, compiled_func_idx)
+    /// maps func addr → (instance_i, compiled_func_i)
     func_addr_to_module: Vec<Option<(u16, u32)>>,
 
     // execution state
@@ -615,8 +610,8 @@ impl Store {
             };
 
             match (extern_val, &import_decl.description) {
-                (ExternalValue::Function { addr }, ImportDescription::Func(type_idx)) => {
-                    let expected = match &module.types()[*type_idx as usize].composite_type {
+                (ExternalValue::Function { addr }, ImportDescription::Func(type_i)) => {
+                    let expected = match &module.types()[*type_i as usize].composite_type {
                         CompositeType::Func(ft) => ft,
                         _ => return Err(err("type index is not a function type")),
                     };
@@ -659,8 +654,8 @@ impl Store {
                         err("global type mismatch")
                     );
                 }
-                (ExternalValue::Tag { addr }, ImportDescription::Tag(type_idx)) => {
-                    let expected = match &module.types()[*type_idx as usize].composite_type {
+                (ExternalValue::Tag { addr }, ImportDescription::Tag(type_i)) => {
+                    let expected = match &module.types()[*type_i as usize].composite_type {
                         CompositeType::Func(ft) => ft,
                         _ => return Err(err("type index is not a function type")),
                     };
@@ -777,7 +772,7 @@ impl Store {
         // remove temp globals — allocate_module will add them properly
         self.globals.truncate(num_imported_globals);
 
-        let start_func_idx = module.start;
+        let start_func_i = module.start;
         let num_local_funcs = module.functions.len();
 
         // step 24: allocate_module needs ownership, so clone declaration data
@@ -804,7 +799,7 @@ impl Store {
         )?;
 
         // build the InstanceEntity with shared code + address mappings
-        let instance_idx = self.instances.len() as u16;
+        let instance_i = self.instances.len() as u16;
         let mut entity = InstantiatedModule {
             code: Arc::clone(&module.code),
             function_addrs: module_instance.function_addrs.clone(),
@@ -820,11 +815,11 @@ impl Store {
             jit_functions: Vec::new(),
         };
 
-        // build a mapping from func_addr to (instance_idx, compiled func index)
+        // build a mapping from func_addr to (instance_i, compiled func index)
         if self.func_addr_to_module.len() < self.functions.len() {
             self.func_addr_to_module.resize(self.functions.len(), None);
         }
-        let first_compiled_idx = entity.code.compiled_funcs.len() - num_local_funcs;
+        let first_compiled_i = entity.code.compiled_funcs.len() - num_local_funcs;
         for (i, &addr) in module_instance
             .function_addrs
             .iter()
@@ -833,7 +828,7 @@ impl Store {
             .rev()
             .enumerate()
         {
-            self.func_addr_to_module[addr] = Some((instance_idx, (first_compiled_idx + i) as u32));
+            self.func_addr_to_module[addr] = Some((instance_i, (first_compiled_i + i) as u32));
         }
 
         // compile any imported local functions not yet in the compiled set
@@ -854,10 +849,10 @@ impl Store {
                     code_mut,
                     module.compile_mode,
                 );
-                let idx = code_mut.compiled_funcs.len();
+                let i = code_mut.compiled_funcs.len();
                 code_mut.compiled_funcs.push(cf);
                 if addr < self.func_addr_to_module.len() {
-                    self.func_addr_to_module[addr] = Some((instance_idx, idx as u32));
+                    self.func_addr_to_module[addr] = Some((instance_i, i as u32));
                 }
             }
         }
@@ -876,22 +871,22 @@ impl Store {
 
         self.instances.push(entity);
         self.ensure_stack_capacity();
-        let instance = Instance(instance_idx as usize);
+        let instance = Instance(instance_i as usize);
 
         // step 27 - execute element segment initialization
         // step 28 - execute data segment initialization
         let init_instructions = [element_instructions, data_instructions].concat();
         if !init_instructions.is_empty() {
-            self.run_init_instructions(&init_instructions, instance_idx)?;
+            self.run_init_instructions(&init_instructions, instance_i)?;
         }
 
         // step 29: invoke start function if present
-        if let Some(start_idx) = start_func_idx {
+        if let Some(start_i) = start_func_i {
             let func_addr = *module_instance
                 .function_addrs
-                .get(start_idx as usize)
+                .get(start_i as usize)
                 .ok_or_else(|| {
-                    Error::Instantiation(format!("start function index {} oob", start_idx))
+                    Error::Instantiation(format!("start function index {} oob", start_i))
                 })?;
             if self.push_function_call(func_addr)? {
                 instantiation_err!("start function cannot be a host import");
@@ -936,10 +931,10 @@ impl Store {
                     for instance in instances {
                         match instance {
                             CoreInstance::Instantiate {
-                                module_idx,
+                                module_i,
                                 args: _args,
                             } => {
-                                let module = &core_modules[*module_idx as usize];
+                                let module = &core_modules[*module_i as usize];
                                 // todo: resolve args into imports
                                 let inst = self.instantiate(module, vec![])?;
                                 core_instances.push(inst);
@@ -955,10 +950,10 @@ impl Store {
                         match alias {
                             Alias::CoreExport {
                                 sort,
-                                instance_idx,
+                                instance_i,
                                 name,
                             } => {
-                                let instance = core_instances[*instance_idx as usize];
+                                let instance = core_instances[*instance_i as usize];
 
                                 match sort {
                                     ComponentSort::Core(CoreSort::Func) => {
@@ -976,17 +971,17 @@ impl Store {
                     for def in defs {
                         match def {
                             CanonicalDef::Lift {
-                                core_func_idx,
+                                core_func_i,
                                 opts: _opts,
-                                type_idx: _type_idx,
+                                type_i: _type_i,
                             } => {
                                 // For primitives (s32 → i32), lift is a passthrough
-                                let func_addr = core_funcs[*core_func_idx as usize];
+                                let func_addr = core_funcs[*core_func_i as usize];
 
                                 component_funcs.push(func_addr);
                             }
                             CanonicalDef::Lower {
-                                func_idx: _func_idx,
+                                func_i: _func_i,
                                 opts: _opts,
                             } => {
                                 todo!("canon lower")
@@ -999,7 +994,7 @@ impl Store {
                     for export in exports {
                         match export.sort {
                             ComponentSort::Func => {
-                                let func_addr = component_funcs[export.idx as usize];
+                                let func_addr = component_funcs[export.i as usize];
 
                                 component_exports.insert(export.name.clone(), func_addr);
                             }
@@ -1192,7 +1187,7 @@ impl Store {
             }
         };
 
-        let Some((module_idx, compiled_idx)) = self.compiled_func_index(func_addr) else {
+        let Some((module_i, compiled_i)) = self.compiled_func_index(func_addr) else {
             match &self.functions[func_addr] {
                 FunctionInstance::Host {
                     module_name,
@@ -1222,7 +1217,7 @@ impl Store {
         let mut locals: Vec<RawValue> = self.stack.slice_from(args_start).to_vec();
         self.stack.truncate(args_start);
 
-        let cf = &self.instances[module_idx as usize].code.compiled_funcs[compiled_idx as usize];
+        let cf = &self.instances[module_i as usize].code.compiled_funcs[compiled_i as usize];
         for _ in &cf.local_types[num_args..] {
             locals.push(RawValue::default());
         }
@@ -1230,8 +1225,8 @@ impl Store {
         let stack_base = self.stack.len();
 
         self.call_stack.push(CallFrame {
-            module_idx,
-            compiled_func_idx: compiled_idx,
+            module_i,
+            compiled_func_i: compiled_i,
             pc: 0,
             locals,
             stack_base,
@@ -1251,11 +1246,11 @@ impl Store {
                 n => n - 1,
             };
 
-            let mi = self.call_stack[depth].module_idx as usize;
-            let func_idx = self.call_stack[depth].compiled_func_idx;
+            let mi = self.call_stack[depth].module_i as usize;
+            let func_i = self.call_stack[depth].compiled_func_i;
             let pc = self.call_stack[depth].pc;
 
-            let Some(jit_function) = &self.instances[mi].jit_functions[func_idx as usize] else {
+            let Some(jit_function) = &self.instances[mi].jit_functions[func_i as usize] else {
                 return self.run();
             };
 
@@ -1298,18 +1293,18 @@ impl Store {
             };
             assert!(depth < self.call_stack.len());
 
-            let mi = self.call_stack[depth].module_idx as usize;
-            let func_idx = self.call_stack[depth].compiled_func_idx;
+            let mi = self.call_stack[depth].module_i as usize;
+            let func_i = self.call_stack[depth].compiled_func_i;
             let pc = self.call_stack[depth].pc;
             assert!(
-                (func_idx as usize) < self.instances[mi].code.compiled_funcs.len(),
-                "compiler error: compiled function index {func_idx} oob"
+                (func_i as usize) < self.instances[mi].code.compiled_funcs.len(),
+                "compiler error: compiled function index {func_i} oob"
             );
 
-            let func_ops = &self.instances[mi].code.compiled_funcs[func_idx as usize].ops;
+            let func_ops = &self.instances[mi].code.compiled_funcs[func_i as usize].ops;
             assert!(
                 pc < func_ops.len(),
-                "compiler error: pc {pc} past end of function {func_idx} (len {})",
+                "compiler error: pc {pc} past end of function {func_i} (len {})",
                 func_ops.len()
             );
 
@@ -1375,17 +1370,14 @@ impl Store {
                         self.call_stack[depth].pc = target as usize;
                     }
                 }
-                Op::Call { func_idx } => {
-                    let func_addr = self.instances[mi].function_addrs[func_idx as usize];
+                Op::Call { func_i } => {
+                    let func_addr = self.instances[mi].function_addrs[func_i as usize];
                     if self.push_function_call(func_addr)? {
                         return Ok(RunOutcome::Suspended);
                     }
                 }
-                Op::CallIndirect {
-                    type_idx,
-                    table_idx,
-                } => {
-                    let table_addr = self.instances[mi].table_addrs[table_idx as usize];
+                Op::CallIndirect { type_i, table_i } => {
+                    let table_addr = self.instances[mi].table_addrs[table_i as usize];
                     let addr_type = self.tables[table_addr].table_type.addr_type;
 
                     let i = self.stack.pop_address(addr_type);
@@ -1400,9 +1392,9 @@ impl Store {
                     };
 
                     let expected =
-                        match &self.instances[mi].code.types[type_idx as usize].composite_type {
+                        match &self.instances[mi].code.types[type_i as usize].composite_type {
                             CompositeType::Func(ft) => ft,
-                            _ => instantiation_err!("type index {} not a func type", type_idx),
+                            _ => instantiation_err!("type index {} not a func type", type_i),
                         };
 
                     let actual = match &self.functions[*func_addr] {
@@ -1419,8 +1411,8 @@ impl Store {
                         return Ok(RunOutcome::Suspended);
                     }
                 }
-                Op::ReturnCall { func_idx } => {
-                    let func_addr = self.instances[mi].function_addrs[func_idx as usize];
+                Op::ReturnCall { func_i } => {
+                    let func_addr = self.instances[mi].function_addrs[func_i as usize];
                     let num_args = self.func_num_params(func_addr);
 
                     let old_base = self.call_stack[depth].stack_base;
@@ -1436,11 +1428,8 @@ impl Store {
                         return Ok(RunOutcome::Suspended);
                     }
                 }
-                Op::ReturnCallIndirect {
-                    type_idx,
-                    table_idx,
-                } => {
-                    let table_addr = self.instances[mi].table_addrs[table_idx as usize];
+                Op::ReturnCallIndirect { type_i, table_i } => {
+                    let table_addr = self.instances[mi].table_addrs[table_i as usize];
                     let addr_type = self.tables[table_addr].table_type.addr_type;
 
                     let i = self.stack.pop_address(addr_type);
@@ -1454,9 +1443,9 @@ impl Store {
                     };
 
                     let expected =
-                        match &self.instances[mi].code.types[type_idx as usize].composite_type {
+                        match &self.instances[mi].code.types[type_i as usize].composite_type {
                             CompositeType::Func(ft) => ft,
-                            _ => instantiation_err!("type index {} not a func type", type_idx),
+                            _ => instantiation_err!("type index {} not a func type", type_i),
                         };
 
                     let actual = match &self.functions[*func_addr] {
@@ -1517,37 +1506,37 @@ impl Store {
                 Op::I64Const { value } => self.stack.push(value),
                 Op::F32Const { value } => self.stack.push(value),
                 Op::F64Const { value } => self.stack.push(value),
-                Op::V128Const { table_idx } => {
-                    let v = self.instances[mi].code.v128_constants[table_idx as usize];
+                Op::V128Const { table_i } => {
+                    let v = self.instances[mi].code.v128_constants[table_i as usize];
                     self.stack.push_v128(v);
                 }
-                Op::LocalGet { local_idx } => self.do_local_get(local_idx as usize, depth),
-                Op::LocalSet { local_idx } => {
+                Op::LocalGet { local_i } => self.do_local_get(local_i as usize, depth),
+                Op::LocalSet { local_i } => {
                     let val = self.stack.pop();
                     let locals = &mut self.call_stack[depth].locals;
                     assert!(
-                        (local_idx as usize) < locals.len(),
-                        "compiler error: local index {local_idx} oob (func has {} locals)",
+                        (local_i as usize) < locals.len(),
+                        "compiler error: local index {local_i} oob (func has {} locals)",
                         locals.len()
                     );
-                    locals[local_idx as usize] = val;
+                    locals[local_i as usize] = val;
                 }
-                Op::LocalTee { local_idx } => {
+                Op::LocalTee { local_i } => {
                     let val = *self.stack.last();
                     let locals = &mut self.call_stack[depth].locals;
                     assert!(
-                        (local_idx as usize) < locals.len(),
-                        "compiler error: local index {local_idx} oob (func has {} locals)",
+                        (local_i as usize) < locals.len(),
+                        "compiler error: local index {local_i} oob (func has {} locals)",
                         locals.len()
                     );
-                    locals[local_idx as usize] = val;
+                    locals[local_i as usize] = val;
                 }
-                Op::GlobalGet { global_idx } => {
-                    let addr = self.instances[mi].global_addrs[global_idx as usize];
+                Op::GlobalGet { global_i } => {
+                    let addr = self.instances[mi].global_addrs[global_i as usize];
                     self.stack.push(self.globals[addr].value);
                 }
-                Op::GlobalSet { global_idx } => {
-                    let addr = self.instances[mi].global_addrs[global_idx as usize];
+                Op::GlobalSet { global_i } => {
+                    let addr = self.instances[mi].global_addrs[global_i as usize];
                     ensure!(
                         matches!(self.globals[addr].global_type.mutability, Mutability::Var),
                         Error::Instantiation("cannot set immutable global".into())
@@ -1569,8 +1558,8 @@ impl Store {
                     let is_null = matches!(val.as_ref(), Ref::Null);
                     self.stack.push(is_null as i32);
                 }
-                Op::RefFunc { func_idx } => {
-                    let addr = self.instances[mi].function_addrs[func_idx as usize];
+                Op::RefFunc { func_i } => {
+                    let addr = self.instances[mi].function_addrs[func_i as usize];
                     self.stack.push(RawValue::from_ref(Ref::FunctionAddr(addr)));
                 }
                 Op::RefEq => todo!(),
@@ -1582,19 +1571,19 @@ impl Store {
                     );
                     self.stack.push(val);
                 }
-                Op::TryCatchPush { handler_idx } => {
+                Op::TryCatchPush { handler_i } => {
                     self.catch_stack.push(CatchFrame {
                         call_depth: self.call_stack.len(),
                         stack_restore: self.stack.len(),
-                        module_idx: mi as u16,
-                        handler_idx,
+                        module_i: mi as u16,
+                        handler_i,
                     });
                 }
                 Op::TryCatchPop => {
                     self.catch_stack.pop();
                 }
-                Op::Throw { tag_idx } => {
-                    let tag_addr = self.instances[mi].tag_addrs[tag_idx as usize];
+                Op::Throw { tag_i } => {
+                    let tag_addr = self.instances[mi].tag_addrs[tag_i as usize];
                     let n_values = self.tags[tag_addr].tag_type.0 .0.len();
                     let values = self.stack.pop_n(n_values).to_vec();
                     self.handle_exception(tag_addr, values)?;
@@ -1603,15 +1592,15 @@ impl Store {
                     let exn_ref = self.stack.pop().as_ref();
                     match exn_ref {
                         Ref::Null => trap!(Trap::NullReference),
-                        Ref::ExnRef(idx) => {
-                            let exn = self.exceptions[idx].clone();
+                        Ref::ExnRef(i) => {
+                            let exn = self.exceptions[i].clone();
                             self.handle_exception(exn.tag_addr, exn.values)?;
                         }
                         _ => trap!(Trap::NullReference),
                     }
                 }
-                Op::TableGet { table_idx } => {
-                    let ta = self.instances[mi].table_addrs[table_idx as usize];
+                Op::TableGet { table_i } => {
+                    let ta = self.instances[mi].table_addrs[table_i as usize];
                     let addr_type = self.tables[ta].table_type.addr_type;
 
                     let i = self.stack.pop_address(addr_type);
@@ -1623,8 +1612,8 @@ impl Store {
 
                     self.stack.push(RawValue::from_ref(*elem));
                 }
-                Op::TableSet { table_idx } => {
-                    let ta = self.instances[mi].table_addrs[table_idx as usize];
+                Op::TableSet { table_i } => {
+                    let ta = self.instances[mi].table_addrs[table_i as usize];
                     let r = self.stack.pop().as_ref();
 
                     let at = self.tables[ta].table_type.addr_type;
@@ -1637,12 +1626,9 @@ impl Store {
 
                     *elem = r;
                 }
-                Op::TableInit {
-                    elem_idx,
-                    table_idx,
-                } => {
-                    let ta = self.instances[mi].table_addrs[table_idx as usize];
-                    let ea = self.instances[mi].elem_addrs[elem_idx as usize];
+                Op::TableInit { elem_i, table_i } => {
+                    let ta = self.instances[mi].table_addrs[table_i as usize];
+                    let ea = self.instances[mi].elem_addrs[elem_i as usize];
 
                     let n = pop_val!(self, I32);
                     let s = pop_val!(self, I32);
@@ -1665,16 +1651,16 @@ impl Store {
                         self.tables[ta].elem[d..d + n].copy_from_slice(&src);
                     }
                 }
-                Op::ElemDrop { elem_idx } => {
-                    let ea = self.instances[mi].elem_addrs[elem_idx as usize];
+                Op::ElemDrop { elem_i } => {
+                    let ea = self.instances[mi].elem_addrs[elem_i as usize];
                     self.element_segments[ea].elem.clear();
                 }
                 Op::TableCopy {
-                    dst_table_idx,
-                    src_table_idx,
+                    dst_table_i,
+                    src_table_i,
                 } => {
-                    let dst_a = self.instances[mi].table_addrs[dst_table_idx as usize];
-                    let src_a = self.instances[mi].table_addrs[src_table_idx as usize];
+                    let dst_a = self.instances[mi].table_addrs[dst_table_i as usize];
+                    let src_a = self.instances[mi].table_addrs[src_table_i as usize];
 
                     let dst_at = self.tables[dst_a].table_type.addr_type;
                     let src_at = self.tables[src_a].table_type.addr_type;
@@ -1704,8 +1690,8 @@ impl Store {
                         }
                     }
                 }
-                Op::TableGrow { table_idx } => {
-                    let ta = self.instances[mi].table_addrs[table_idx as usize];
+                Op::TableGrow { table_i } => {
+                    let ta = self.instances[mi].table_addrs[table_i as usize];
                     let at = self.tables[ta].table_type.addr_type;
                     let n = self.stack.pop_address(at);
 
@@ -1727,15 +1713,15 @@ impl Store {
                     self.tables[ta].table_type.limit.min = new_size;
                     self.stack.push_address(old_size, at);
                 }
-                Op::TableSize { table_idx } => {
-                    let ta = self.instances[mi].table_addrs[table_idx as usize];
+                Op::TableSize { table_i } => {
+                    let ta = self.instances[mi].table_addrs[table_i as usize];
                     let size = self.tables[ta].elem.len();
                     let at = self.tables[ta].table_type.addr_type;
 
                     self.stack.push_address(size, at);
                 }
-                Op::TableFill { table_idx } => {
-                    let ta = self.instances[mi].table_addrs[table_idx as usize];
+                Op::TableFill { table_i } => {
+                    let ta = self.instances[mi].table_addrs[table_i as usize];
                     let at = self.tables[ta].table_type.addr_type;
                     let n = self.stack.pop_address(at);
 
@@ -1830,15 +1816,15 @@ impl Store {
                     mem_store_c!(self, mi, offset, memory, 4, |v| (v.as_i64() as u32)
                         .to_le_bytes())
                 }
-                Op::MemorySize { memory_idx } => {
-                    let ma = self.instances[mi].mem_addrs[memory_idx as usize];
+                Op::MemorySize { memory_i } => {
+                    let ma = self.instances[mi].mem_addrs[memory_i as usize];
                     let mem = &self.memories[ma];
                     let size = mem.data.len() / PAGE_SIZE;
 
                     self.stack.push_address(size, mem.memory_type.addr_type);
                 }
-                Op::MemoryGrow { memory_idx } => {
-                    let ma = self.instances[mi].mem_addrs[memory_idx as usize];
+                Op::MemoryGrow { memory_i } => {
+                    let ma = self.instances[mi].mem_addrs[memory_i as usize];
                     let mem = &mut self.memories[ma];
                     let at = mem.memory_type.addr_type;
                     let page_count = self.stack.pop_address(at);
@@ -1861,12 +1847,9 @@ impl Store {
 
                     self.stack.push_address(old_size, at);
                 }
-                Op::MemoryInit {
-                    data_idx,
-                    memory_idx,
-                } => {
-                    let ma = self.instances[mi].mem_addrs[memory_idx as usize];
-                    let da = self.instances[mi].data_addrs[data_idx as usize];
+                Op::MemoryInit { data_i, memory_i } => {
+                    let ma = self.instances[mi].mem_addrs[memory_i as usize];
+                    let da = self.instances[mi].data_addrs[data_i as usize];
 
                     let at = self.memories[ma].memory_type.addr_type;
 
@@ -1887,16 +1870,16 @@ impl Store {
                         self.memories[ma].data[d..d + n].copy_from_slice(&src);
                     }
                 }
-                Op::DataDrop { data_idx } => {
-                    let da = self.instances[mi].data_addrs[data_idx as usize];
+                Op::DataDrop { data_i } => {
+                    let da = self.instances[mi].data_addrs[data_i as usize];
                     self.data_segments[da].data.clear();
                 }
                 Op::MemoryCopy {
-                    dst_memory_idx,
-                    src_memory_idx,
+                    dst_memory_i,
+                    src_memory_i,
                 } => {
-                    let m1 = self.instances[mi].mem_addrs[dst_memory_idx as usize];
-                    let m2 = self.instances[mi].mem_addrs[src_memory_idx as usize];
+                    let m1 = self.instances[mi].mem_addrs[dst_memory_i as usize];
+                    let m2 = self.instances[mi].mem_addrs[src_memory_i as usize];
                     let at = self.memories[m1].memory_type.addr_type;
 
                     let n = self.stack.pop_address(at);
@@ -1920,8 +1903,8 @@ impl Store {
                         }
                     }
                 }
-                Op::MemoryFill { memory_idx } => {
-                    let ma = self.instances[mi].mem_addrs[memory_idx as usize];
+                Op::MemoryFill { memory_i } => {
+                    let ma = self.instances[mi].mem_addrs[memory_i as usize];
                     let at = self.memories[ma].memory_type.addr_type;
                     let n = self.stack.pop_address(at);
                     let val = pop_val!(self, I32);
@@ -2568,142 +2551,142 @@ impl Store {
                     cmp_branch!(self, depth, F64, target, keep, drop, >=)
                 }
                 Op::LocalGet2 {
-                    local_idx_a,
-                    local_idx_b,
+                    local_i_a,
+                    local_i_b,
                 } => {
                     let locals = &self.call_stack[depth].locals;
 
                     self.stack.extend_from_slice(&[
-                        locals[local_idx_a as usize],
-                        locals[local_idx_b as usize],
+                        locals[local_i_a as usize],
+                        locals[local_i_b as usize],
                     ]);
                 }
-                Op::LocalGetReturn { local_idx } => {
-                    self.do_local_get(local_idx as usize, depth);
+                Op::LocalGetReturn { local_i } => {
+                    self.do_local_get(local_i as usize, depth);
                     self.do_return(depth);
                 }
                 Op::LocalGetI32Load {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
-                } => local_get_load!(self, depth, mi, local_idx, offset, memory, 4, |b| {
+                } => local_get_load!(self, depth, mi, local_i, offset, memory, 4, |b| {
                     i32::from_le_bytes(b)
                 }),
                 Op::LocalGetI64Load {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
-                } => local_get_load!(self, depth, mi, local_idx, offset, memory, 8, |b| {
+                } => local_get_load!(self, depth, mi, local_i, offset, memory, 8, |b| {
                     i64::from_le_bytes(b)
                 }),
                 Op::LocalGetF32Load {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
-                } => local_get_load!(self, depth, mi, local_idx, offset, memory, 4, |b| {
+                } => local_get_load!(self, depth, mi, local_i, offset, memory, 4, |b| {
                     f32::from_le_bytes(b)
                 }),
                 Op::LocalGetF64Load {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
-                } => local_get_load!(self, depth, mi, local_idx, offset, memory, 8, |b| {
+                } => local_get_load!(self, depth, mi, local_i, offset, memory, 8, |b| {
                     f64::from_le_bytes(b)
                 }),
                 Op::LocalGetI32Store {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                 } => local_get_store!(
                     self,
                     depth,
                     mi,
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                     4,
                     |v: RawValue| v.as_i32().to_le_bytes()
                 ),
                 Op::LocalGetI64Store {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                 } => local_get_store!(
                     self,
                     depth,
                     mi,
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                     8,
                     |v: RawValue| v.as_i64().to_le_bytes()
                 ),
                 Op::LocalGetF32Store {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                 } => local_get_store!(
                     self,
                     depth,
                     mi,
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                     4,
                     |v: RawValue| v.as_f32().to_le_bytes()
                 ),
                 Op::LocalGetF64Store {
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                 } => local_get_store!(
                     self,
                     depth,
                     mi,
-                    local_idx,
+                    local_i,
                     offset,
                     memory,
                     8,
                     |v: RawValue| v.as_f64().to_le_bytes()
                 ),
                 Op::LocalGetLocalSet {
-                    local_get_idx,
-                    local_set_idx,
+                    local_get_i,
+                    local_set_i,
                 } => {
                     let locals = &mut self.call_stack[depth].locals;
-                    let out = locals[local_get_idx as usize];
+                    let out = locals[local_get_i as usize];
 
-                    locals[local_set_idx as usize] = out;
+                    locals[local_set_i as usize] = out;
                 }
                 _ => todo!(),
             }
         }
     }
 
-    fn do_local_get(&mut self, local_idx: usize, depth: usize) {
+    fn do_local_get(&mut self, local_i: usize, depth: usize) {
         let locals = &self.call_stack[depth].locals;
         debug_assert!(
-            local_idx < locals.len(),
-            "compiler error: local index {local_idx} oob (func has {} locals)",
+            local_i < locals.len(),
+            "compiler error: local index {local_i} oob (func has {} locals)",
             locals.len()
         );
 
-        self.stack.push(locals[local_idx]);
+        self.stack.push(locals[local_i]);
     }
 
     fn handle_exception(&mut self, tag_addr: usize, values: Vec<RawValue>) -> Result<()> {
         while let Some(frame) = self.catch_stack.last() {
-            let mi = frame.module_idx as usize;
-            let handler_idx = frame.handler_idx as usize;
+            let mi = frame.module_i as usize;
+            let handler_i = frame.handler_i as usize;
             let call_depth = frame.call_depth;
             let stack_restore = frame.stack_restore;
 
-            let clauses = self.instances[mi].code.catch_handlers[handler_idx].clone();
+            let clauses = self.instances[mi].code.catch_handlers[handler_i].clone();
 
             for clause in &clauses {
                 let matches = match clause.kind {
                     CatchKind::Catch | CatchKind::CatchRef => {
-                        let clause_tag_addr = self.instances[mi].tag_addrs[clause.tag_idx as usize];
+                        let clause_tag_addr = self.instances[mi].tag_addrs[clause.tag_i as usize];
                         clause_tag_addr == tag_addr
                     }
                     CatchKind::CatchAll | CatchKind::CatchAllRef => true,
@@ -2729,9 +2712,9 @@ impl Store {
 
                     match clause.kind {
                         CatchKind::CatchRef | CatchKind::CatchAllRef => {
-                            let exn_idx = self.exceptions.len();
+                            let exn_i = self.exceptions.len();
                             self.exceptions.push(Exception { tag_addr, values });
-                            self.stack.push(RawValue::from_ref(Ref::ExnRef(exn_idx)));
+                            self.stack.push(RawValue::from_ref(Ref::ExnRef(exn_i)));
                         }
                         _ => {}
                     }
@@ -2773,8 +2756,8 @@ impl Store {
             len,
             arity,
             base,
-            self.call_stack[depth].compiled_func_idx,
-            self.call_stack[depth].module_idx,
+            self.call_stack[depth].compiled_func_i,
+            self.call_stack[depth].module_i,
         );
         if arity > 0 {
             self.stack.copy_within(len - arity..len, base);
@@ -2790,29 +2773,25 @@ impl Store {
         }
     }
 
-    fn run_init_instructions(
-        &mut self,
-        instructions: &[Instruction],
-        module_idx: u16,
-    ) -> Result<()> {
+    fn run_init_instructions(&mut self, instructions: &[Instruction], module_i: u16) -> Result<()> {
         let mut ops = Vec::with_capacity(instructions.len() + 1);
         for instr in instructions {
             match instr {
                 Instruction::I32Const(v) => ops.push(Op::I32Const { value: *v }),
                 Instruction::I64Const(v) => ops.push(Op::I64Const { value: *v }),
-                Instruction::MemoryInit(data_idx, mem) => ops.push(Op::MemoryInit {
-                    data_idx: *data_idx,
-                    memory_idx: *mem,
+                Instruction::MemoryInit(data_i, mem) => ops.push(Op::MemoryInit {
+                    data_i: *data_i,
+                    memory_i: *mem,
                 }),
-                Instruction::DataDrop(idx) => ops.push(Op::DataDrop { data_idx: *idx }),
-                Instruction::TableInit(table_idx, elem_idx) => ops.push(Op::TableInit {
-                    table_idx: *table_idx,
-                    elem_idx: *elem_idx,
+                Instruction::DataDrop(i) => ops.push(Op::DataDrop { data_i: *i }),
+                Instruction::TableInit(table_i, elem_i) => ops.push(Op::TableInit {
+                    table_i: *table_i,
+                    elem_i: *elem_i,
                 }),
-                Instruction::ElemDrop(idx) => ops.push(Op::ElemDrop { elem_idx: *idx }),
+                Instruction::ElemDrop(i) => ops.push(Op::ElemDrop { elem_i: *i }),
                 Instruction::RefNull(ht) => ops.push(Op::RefNull(*ht)),
-                Instruction::RefFunc(idx) => ops.push(Op::RefFunc { func_idx: *idx }),
-                Instruction::GlobalGet(idx) => ops.push(Op::GlobalGet { global_idx: *idx }),
+                Instruction::RefFunc(i) => ops.push(Op::RefFunc { func_i: *i }),
+                Instruction::GlobalGet(i) => ops.push(Op::GlobalGet { global_i: *i }),
                 Instruction::I32Add => ops.push(Op::I32Add),
                 Instruction::I32Sub => ops.push(Op::I32Sub),
                 Instruction::I32Mul => ops.push(Op::I32Mul),
@@ -2837,13 +2816,13 @@ impl Store {
             max_stack_height,
         };
 
-        let code = Arc::make_mut(&mut self.instances[module_idx as usize].code);
-        let compiled_func_idx = code.compiled_funcs.len();
+        let code = Arc::make_mut(&mut self.instances[module_i as usize].code);
+        let compiled_func_i = code.compiled_funcs.len();
         code.compiled_funcs.push(cf);
 
         self.call_stack.push(CallFrame {
-            module_idx,
-            compiled_func_idx: compiled_func_idx as u32,
+            module_i,
+            compiled_func_i: compiled_func_i as u32,
             pc: 0,
             locals: vec![],
             stack_base: self.stack.len(),
@@ -2913,21 +2892,21 @@ fn eval_const_expr_with_module(
                 stack.extend(<[RawValue; 2]>::from((hi, lo)));
             }
             Instruction::RefNull(_) => stack.push(RawValue::from_ref(Ref::Null)),
-            Instruction::RefFunc(idx) => {
+            Instruction::RefFunc(i) => {
                 let addr = *address_map
                     .function_addrs
-                    .get(*idx as usize)
-                    .ok_or_else(|| Error::Instantiation(format!("ref.func index {} oob", idx)))?;
+                    .get(*i as usize)
+                    .ok_or_else(|| Error::Instantiation(format!("ref.func index {} oob", i)))?;
                 stack.push(RawValue::from_ref(Ref::FunctionAddr(addr)));
             }
-            Instruction::GlobalGet(idx) => {
-                let store_idx = *address_map.global_addrs.get(*idx as usize).ok_or_else(|| {
-                    Error::Instantiation(format!("global index {} oob in const expr", idx))
+            Instruction::GlobalGet(i) => {
+                let store_i = *address_map.global_addrs.get(*i as usize).ok_or_else(|| {
+                    Error::Instantiation(format!("global index {} oob in const expr", i))
                 })?;
-                let global = store.globals.get(store_idx).ok_or_else(|| {
+                let global = store.globals.get(store_i).ok_or_else(|| {
                     Error::Instantiation(format!(
                         "global store index {} oob in const expr",
-                        store_idx
+                        store_i
                     ))
                 })?;
                 stack.push(global.value);

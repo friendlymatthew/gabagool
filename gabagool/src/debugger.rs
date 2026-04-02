@@ -6,8 +6,8 @@ use crate::{
 };
 
 pub struct FrameInfo {
-    pub module_idx: u16,
-    pub compiled_func_idx: u32,
+    pub module_i: u16,
+    pub compiled_func_i: u32,
     pub pc: usize,
     pub locals: Vec<RawValue>,
     pub local_types: Vec<ValueType>,
@@ -18,16 +18,16 @@ pub struct FrameInfo {
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub struct Breakpoint {
-    module_idx: u16,
-    compiled_func_idx: u32,
+    module_i: u16,
+    compiled_func_i: u32,
     pc: usize,
 }
 
 impl Breakpoint {
-    pub const fn new(module_idx: u16, compiled_func_idx: u32, pc: usize) -> Self {
+    pub const fn new(module_i: u16, compiled_func_i: u32, pc: usize) -> Self {
         Self {
-            module_idx,
-            compiled_func_idx,
+            module_i,
+            compiled_func_i,
             pc,
         }
     }
@@ -129,12 +129,12 @@ impl Debugger {
     /// Returns call stack frames (bottom to top).
     pub fn call_stack(&self) -> impl Iterator<Item = FrameInfo> + use<'_> {
         self.store.call_stack().iter().map(|frame| {
-            let cf = &self.store.instances[frame.module_idx as usize]
+            let cf = &self.store.instances[frame.module_i as usize]
                 .code
-                .compiled_funcs[frame.compiled_func_idx as usize];
+                .compiled_funcs[frame.compiled_func_i as usize];
             FrameInfo {
-                module_idx: frame.module_idx,
-                compiled_func_idx: frame.compiled_func_idx,
+                module_i: frame.module_i,
+                compiled_func_i: frame.compiled_func_i,
                 pc: frame.pc,
                 locals: frame.locals.clone(),
                 local_types: cf.local_types.clone(),
@@ -154,8 +154,8 @@ impl Debugger {
         self.store.value_stack_from(frame.stack_base)
     }
 
-    pub fn globals(&self, module_idx: u16) -> Vec<(&GlobalType, &RawValue)> {
-        let inst = &self.store.instances[module_idx as usize];
+    pub fn globals(&self, module_i: u16) -> Vec<(&GlobalType, &RawValue)> {
+        let inst = &self.store.instances[module_i as usize];
         inst.global_addrs
             .iter()
             .map(|&addr| {
@@ -167,21 +167,21 @@ impl Debugger {
 
     pub fn read_memory(
         &self,
-        module_idx: u16,
-        mem_idx: usize,
+        module_i: u16,
+        mem_i: usize,
         offset: usize,
         length: usize,
     ) -> Option<&[u8]> {
-        let inst = &self.store.instances[module_idx as usize];
-        let mem_addr = *inst.mem_addrs.get(mem_idx)?;
+        let inst = &self.store.instances[module_i as usize];
+        let mem_addr = *inst.mem_addrs.get(mem_i)?;
         self.store.memories[mem_addr]
             .data
             .get(offset..offset + length)
     }
 
-    pub fn memory_size(&self, module_idx: u16, mem_idx: usize) -> Option<usize> {
-        let inst = &self.store.instances[module_idx as usize];
-        let mem_addr = *inst.mem_addrs.get(mem_idx)?;
+    pub fn memory_size(&self, module_i: u16, mem_i: usize) -> Option<usize> {
+        let inst = &self.store.instances[module_i as usize];
+        let mem_addr = *inst.mem_addrs.get(mem_i)?;
         Some(self.store.memories[mem_addr].data.len())
     }
 
@@ -207,8 +207,8 @@ impl Debugger {
         };
 
         self.breakpoints.contains(&Breakpoint {
-            module_idx: frame.module_idx,
-            compiled_func_idx: frame.compiled_func_idx,
+            module_i: frame.module_i,
+            compiled_func_i: frame.compiled_func_i,
             pc: frame.pc,
         })
     }
@@ -521,8 +521,8 @@ mod tests {
         }
         let frame = dbg.store.top_frame().unwrap();
         let bp = Breakpoint {
-            module_idx: frame.module_idx,
-            compiled_func_idx: frame.compiled_func_idx,
+            module_i: frame.module_i,
+            compiled_func_i: frame.compiled_func_i,
             pc: frame.pc,
         };
         let bp_ic = dbg.instruction_count();
@@ -551,8 +551,8 @@ mod tests {
         }
         let frame = dbg.store.top_frame().unwrap();
         let bp = Breakpoint {
-            module_idx: frame.module_idx,
-            compiled_func_idx: frame.compiled_func_idx,
+            module_i: frame.module_i,
+            compiled_func_i: frame.compiled_func_i,
             pc: frame.pc,
         };
 

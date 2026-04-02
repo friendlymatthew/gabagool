@@ -19,7 +19,7 @@ pub enum CatchKind {
 #[derive(Debug, Clone, Copy)]
 pub struct CompiledCatchClause {
     pub kind: CatchKind,
-    pub tag_idx: u32,
+    pub tag_i: u32,
     pub target: u32,
     pub n_values: u16,
     pub drop: u16,
@@ -79,24 +79,24 @@ pub enum Op {
         drop: u16,
     },
     Call {
-        func_idx: u32,
+        func_i: u32,
     },
     CallIndirect {
-        type_idx: u32,
-        table_idx: u32,
+        type_i: u32,
+        table_i: u32,
     },
     ReturnCall {
-        func_idx: u32,
+        func_i: u32,
     },
     ReturnCallIndirect {
-        type_idx: u32,
-        table_idx: u32,
+        type_i: u32,
+        table_i: u32,
     },
     CallRef {
-        type_idx: u32,
+        type_i: u32,
     },
     ReturnCallRef {
-        type_idx: u32,
+        type_i: u32,
     },
     I32Const {
         value: i32,
@@ -111,22 +111,22 @@ pub enum Op {
         value: f64,
     },
     V128Const {
-        table_idx: u32,
+        table_i: u32,
     },
     LocalGet {
-        local_idx: u32,
+        local_i: u32,
     },
     LocalSet {
-        local_idx: u32,
+        local_i: u32,
     },
     LocalTee {
-        local_idx: u32,
+        local_i: u32,
     },
     GlobalGet {
-        global_idx: u32,
+        global_i: u32,
     },
     GlobalSet {
-        global_idx: u32,
+        global_i: u32,
     },
     Drop,
     Select,
@@ -135,41 +135,41 @@ pub enum Op {
     RefEq,
     RefAsNonNull,
     RefFunc {
-        func_idx: u32,
+        func_i: u32,
     },
     Throw {
-        tag_idx: u32,
+        tag_i: u32,
     },
     ThrowRef,
     TryCatchPush {
-        handler_idx: u32,
+        handler_i: u32,
     },
     TryCatchPop,
     TableGet {
-        table_idx: u32,
+        table_i: u32,
     },
     TableSet {
-        table_idx: u32,
+        table_i: u32,
     },
     TableInit {
-        elem_idx: u32,
-        table_idx: u32,
+        elem_i: u32,
+        table_i: u32,
     },
     ElemDrop {
-        elem_idx: u32,
+        elem_i: u32,
     },
     TableCopy {
-        dst_table_idx: u32,
-        src_table_idx: u32,
+        dst_table_i: u32,
+        src_table_i: u32,
     },
     TableGrow {
-        table_idx: u32,
+        table_i: u32,
     },
     TableSize {
-        table_idx: u32,
+        table_i: u32,
     },
     TableFill {
-        table_idx: u32,
+        table_i: u32,
     },
     I32Load {
         offset: u32,
@@ -264,24 +264,24 @@ pub enum Op {
         memory: u32,
     },
     MemorySize {
-        memory_idx: u32,
+        memory_i: u32,
     },
     MemoryGrow {
-        memory_idx: u32,
+        memory_i: u32,
     },
     MemoryInit {
-        data_idx: u32,
-        memory_idx: u32,
+        data_i: u32,
+        memory_i: u32,
     },
     DataDrop {
-        data_idx: u32,
+        data_i: u32,
     },
     MemoryCopy {
-        dst_memory_idx: u32,
-        src_memory_idx: u32,
+        dst_memory_i: u32,
+        src_memory_i: u32,
     },
     MemoryFill {
-        memory_idx: u32,
+        memory_i: u32,
     },
     I32EqZero,
     I32Eq,
@@ -516,7 +516,7 @@ pub enum Op {
         lane: u8,
     },
     I8x16Shuffle {
-        table_idx: u32,
+        table_i: u32,
     },
     I8x16ExtractLaneSigned(u8),
     I8x16ExtractLaneUnsigned(u8),
@@ -926,55 +926,55 @@ pub enum Op {
         drop: u16,
     },
     LocalGet2 {
-        local_idx_a: u32,
-        local_idx_b: u32,
+        local_i_a: u32,
+        local_i_b: u32,
     },
     LocalGetReturn {
-        local_idx: u32,
+        local_i: u32,
     },
     LocalGetI32Load {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetI64Load {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetF32Load {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetF64Load {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetI32Store {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetI64Store {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetF32Store {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetF64Store {
-        local_idx: u32,
+        local_i: u32,
         offset: u32,
         memory: u32,
     },
     LocalGetLocalSet {
-        local_get_idx: u32,
-        local_set_idx: u32,
+        local_get_i: u32,
+        local_set_i: u32,
     },
 }
 

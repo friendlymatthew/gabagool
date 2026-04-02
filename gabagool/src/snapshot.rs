@@ -230,9 +230,9 @@ impl Snapshot for HeapType {
             Self::NoExtern => 9u8.encode(buf),
             Self::NoFunc => 10u8.encode(buf),
             Self::NoExn => 11u8.encode(buf),
-            Self::TypeIndex(idx) => {
+            Self::TypeIndex(i) => {
                 12u8.encode(buf);
-                idx.encode(buf);
+                i.encode(buf);
             }
         }
     }
@@ -676,7 +676,7 @@ impl Snapshot for ModuleCode {
             (handler.len() as u32).encode(buf);
             for clause in handler {
                 (clause.kind as u8).encode(buf);
-                clause.tag_idx.encode(buf);
+                clause.tag_i.encode(buf);
                 clause.target.encode(buf);
                 clause.n_values.encode(buf);
                 clause.drop.encode(buf);
@@ -707,7 +707,7 @@ impl Snapshot for ModuleCode {
                         };
                         CompiledCatchClause {
                             kind,
-                            tag_idx: u32::decode(buf),
+                            tag_i: u32::decode(buf),
                             target: u32::decode(buf),
                             n_values: u16::decode(buf),
                             drop: u16::decode(buf),
@@ -729,8 +729,8 @@ impl Snapshot for ModuleCode {
 
 impl Snapshot for CallFrame {
     fn encode(&self, buf: &mut Vec<u8>) {
-        self.module_idx.encode(buf);
-        self.compiled_func_idx.encode(buf);
+        self.module_i.encode(buf);
+        self.compiled_func_i.encode(buf);
         self.pc.encode(buf);
         encode_bulk(&self.locals, buf);
         self.stack_base.encode(buf);
@@ -738,8 +738,8 @@ impl Snapshot for CallFrame {
     }
     fn decode(buf: &mut &[u8]) -> Self {
         Self {
-            module_idx: u16::decode(buf),
-            compiled_func_idx: u32::decode(buf),
+            module_i: u16::decode(buf),
+            compiled_func_i: u32::decode(buf),
             pc: usize::decode(buf),
             locals: decode_bulk::<RawValue>(buf),
             stack_base: usize::decode(buf),

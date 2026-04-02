@@ -2,6 +2,7 @@
 
 mod binary_grammar;
 pub mod compiler;
+pub mod component;
 pub mod debugger;
 mod error;
 mod execution_grammar;
@@ -17,6 +18,7 @@ pub mod value_stack;
 mod jit;
 
 pub use binary_grammar::*;
+pub use component::*;
 pub use error::*;
 pub use execution_grammar::*;
 pub use store::*;

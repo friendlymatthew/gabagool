@@ -111,7 +111,7 @@ impl<'a> Parser<'a> {
                 },
                 9 => {
                     sections.push(ComponentSection::Start(ComponentStart {
-                        func_idx: self.read_u32()?,
+                        func_i: self.read_u32()?,
                         args: self.parse_vec(Self::read_u32)?,
                         results: self.read_u32()?,
                     }));
@@ -147,7 +147,7 @@ impl<'a> Parser<'a> {
     fn parse_core_instance(&mut self) -> Result<CoreInstance> {
         let out = match self.read_u8()? {
             0 => CoreInstance::Instantiate {
-                module_idx: self.read_u32()?,
+                module_i: self.read_u32()?,
                 args: self.parse_vec(|p| {
                     let name = p.parse_name()?;
                     let sort = p.read_u8()?;
@@ -159,7 +159,7 @@ impl<'a> Parser<'a> {
                     );
                     Ok(CoreInstantiateArg {
                         name,
-                        instance_idx: p.read_u32()?,
+                        instance_i: p.read_u32()?,
                     })
                 })?,
             },
@@ -167,7 +167,7 @@ impl<'a> Parser<'a> {
                 Ok(CoreInlineExport {
                     name: p.parse_name()?,
                     sort: p.read_u8()?.try_into()?,
-                    idx: p.read_u32()?,
+                    i: p.read_u32()?,
                 })
             })?),
             b => parse_err!("unknown core instance type: {b:#x}"),
@@ -179,12 +179,12 @@ impl<'a> Parser<'a> {
     fn parse_component_instance(&mut self) -> Result<ParsedComponentInstance> {
         let out = match self.read_u8()? {
             0 => ParsedComponentInstance::Instantiate {
-                component_idx: self.read_u32()?,
+                component_i: self.read_u32()?,
                 args: self.parse_vec(|p| {
                     Ok(ComponentInstantiateArg {
                         name: p.parse_name()?,
                         sort: p.parse_component_sort()?,
-                        idx: p.read_u32()?,
+                        i: p.read_u32()?,
                     })
                 })?,
             },
@@ -192,7 +192,7 @@ impl<'a> Parser<'a> {
                 Ok(ComponentInlineExport {
                     name: p.parse_component_name()?,
                     sort: p.parse_component_sort()?,
-                    idx: p.read_u32()?,
+                    i: p.read_u32()?,
                 })
             })?),
             b => parse_err!("unknown component instance type: {b:#x}"),
@@ -220,18 +220,18 @@ impl<'a> Parser<'a> {
         let out = match self.read_u8()? {
             0 => Alias::Export {
                 sort,
-                instance_idx: self.read_u32()?,
+                instance_i: self.read_u32()?,
                 name: self.parse_name()?,
             },
             1 => Alias::CoreExport {
                 sort,
-                instance_idx: self.read_u32()?,
+                instance_i: self.read_u32()?,
                 name: self.parse_name()?,
             },
             2 => Alias::Outer {
                 sort,
                 count: self.read_u32()?,
-                idx: self.read_u32()?,
+                i: self.read_u32()?,
             },
             b => parse_err!("unknown alias target: {b:#x}"),
         };
@@ -250,7 +250,7 @@ impl<'a> Parser<'a> {
         Ok(ComponentExport {
             name: self.parse_component_name()?,
             sort: self.parse_component_sort()?,
-            idx: self.read_u32()?,
+            i: self.read_u32()?,
             desc: match self.read_u8()? {
                 0x00 => None,
                 0x01 => Some(self.parse_extern_desc()?),
@@ -313,9 +313,9 @@ impl<'a> Parser<'a> {
                 );
 
                 CanonicalDef::Lift {
-                    core_func_idx: self.read_u32()?,
+                    core_func_i: self.read_u32()?,
                     opts: self.parse_canon_opts()?,
-                    type_idx: self.read_u32()?,
+                    type_i: self.read_u32()?,
                 }
             }
             1 => {
@@ -329,7 +329,7 @@ impl<'a> Parser<'a> {
                 );
 
                 CanonicalDef::Lower {
-                    func_idx: self.read_u32()?,
+                    func_i: self.read_u32()?,
                     opts: self.parse_canon_opts()?,
                 }
             }
@@ -363,38 +363,38 @@ impl<'a> Parser<'a> {
             13 => CanonicalDef::SubtaskDrop,
             14 => CanonicalDef::StreamNew(self.read_u32()?),
             15 => CanonicalDef::StreamRead {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 opts: self.parse_canon_opts()?,
             },
             16 => CanonicalDef::StreamWrite {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 opts: self.parse_canon_opts()?,
             },
             17 => CanonicalDef::StreamCancelRead {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 async_: self.read_u8()? != 0,
             },
             18 => CanonicalDef::StreamCancelWrite {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 async_: self.read_u8()? != 0,
             },
             19 => CanonicalDef::StreamDropReadable(self.read_u32()?),
             20 => CanonicalDef::StreamDropWritable(self.read_u32()?),
             21 => CanonicalDef::FutureNew(self.read_u32()?),
             22 => CanonicalDef::FutureRead {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 opts: self.parse_canon_opts()?,
             },
             23 => CanonicalDef::FutureWrite {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 opts: self.parse_canon_opts()?,
             },
             24 => CanonicalDef::FutureCancelRead {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 async_: self.read_u8()? != 0,
             },
             25 => CanonicalDef::FutureCancelWrite {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 async_: self.read_u8()? != 0,
             },
             26 => CanonicalDef::FutureDropReadable(self.read_u32()?),
@@ -417,7 +417,7 @@ impl<'a> Parser<'a> {
             37 => CanonicalDef::BackpressureDec,
             38 => CanonicalDef::ThreadIndex,
             39 => CanonicalDef::ThreadNewIndirect {
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 table: self.read_u32()?,
             },
             40 => CanonicalDef::ThreadSuspendToSuspended {
@@ -435,11 +435,11 @@ impl<'a> Parser<'a> {
             },
             64 => CanonicalDef::ThreadSpawnRef {
                 shared: self.read_u8()? != 0,
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
             },
             65 => CanonicalDef::ThreadSpawnIndirect {
                 shared: self.read_u8()? != 0,
-                type_idx: self.read_u32()?,
+                type_i: self.read_u32()?,
                 table: self.read_u32()?,
             },
             66 => CanonicalDef::ThreadAvailableParallelism {
@@ -724,7 +724,7 @@ impl<'a> Parser<'a> {
                 ModuleSection::Export(ExportSection { mut exports }) => {
                     module.exports.append(&mut exports)
                 }
-                ModuleSection::Start(idx) => module.start = Some(idx),
+                ModuleSection::Start(i) => module.start = Some(i),
                 ModuleSection::Element(ElementSection { mut elements }) => {
                     module.element_segments.append(&mut elements)
                 }
@@ -914,12 +914,12 @@ impl<'a> Parser<'a> {
             0x69..=0x74 => self.parse_abs_heap_type(),
             _ => {
                 // Type index encoded as s33 (positive signed integer)
-                let idx = self.read_i64()?;
+                let i = self.read_i64()?;
                 ensure!(
-                    idx >= 0,
-                    Error::Parse(format!("heap type index must be non-negative, got {}", idx))
+                    i >= 0,
+                    Error::Parse(format!("heap type index must be non-negative, got {}", i))
                 );
-                Ok(HeapType::TypeIndex(idx as u32))
+                Ok(HeapType::TypeIndex(i as u32))
             }
         }
     }
@@ -1187,8 +1187,8 @@ impl<'a> Parser<'a> {
         let align_raw = self.read_u32()?;
         let (align, memory) = if align_raw & (1 << 6) != 0 {
             let align = align_raw & !(1 << 6);
-            let mem_idx = self.read_u32()?;
-            (align, mem_idx)
+            let mem_i = self.read_u32()?;
+            (align, mem_i)
         } else {
             (align_raw, 0)
         };
@@ -1320,41 +1320,41 @@ impl<'a> Parser<'a> {
                 0x00 => Instruction::StructNew(self.read_u32()?),
                 0x01 => Instruction::StructNewDefault(self.read_u32()?),
                 0x02 => {
-                    let type_idx = self.read_u32()?;
-                    let field_idx = self.read_u32()?;
-                    Instruction::StructGet(type_idx, field_idx)
+                    let type_i = self.read_u32()?;
+                    let field_i = self.read_u32()?;
+                    Instruction::StructGet(type_i, field_i)
                 }
                 0x03 => {
-                    let type_idx = self.read_u32()?;
-                    let field_idx = self.read_u32()?;
-                    Instruction::StructGetSigned(type_idx, field_idx)
+                    let type_i = self.read_u32()?;
+                    let field_i = self.read_u32()?;
+                    Instruction::StructGetSigned(type_i, field_i)
                 }
                 0x04 => {
-                    let type_idx = self.read_u32()?;
-                    let field_idx = self.read_u32()?;
-                    Instruction::StructGetUnsigned(type_idx, field_idx)
+                    let type_i = self.read_u32()?;
+                    let field_i = self.read_u32()?;
+                    Instruction::StructGetUnsigned(type_i, field_i)
                 }
                 0x05 => {
-                    let type_idx = self.read_u32()?;
-                    let field_idx = self.read_u32()?;
-                    Instruction::StructSet(type_idx, field_idx)
+                    let type_i = self.read_u32()?;
+                    let field_i = self.read_u32()?;
+                    Instruction::StructSet(type_i, field_i)
                 }
                 0x06 => Instruction::ArrayNew(self.read_u32()?),
                 0x07 => Instruction::ArrayNewDefault(self.read_u32()?),
                 0x08 => {
-                    let type_idx = self.read_u32()?;
+                    let type_i = self.read_u32()?;
                     let size = self.read_u32()?;
-                    Instruction::ArrayNewFixed(type_idx, size)
+                    Instruction::ArrayNewFixed(type_i, size)
                 }
                 0x09 => {
-                    let type_idx = self.read_u32()?;
-                    let data_idx = self.read_u32()?;
-                    Instruction::ArrayNewData(type_idx, data_idx)
+                    let type_i = self.read_u32()?;
+                    let data_i = self.read_u32()?;
+                    Instruction::ArrayNewData(type_i, data_i)
                 }
                 0x0A => {
-                    let type_idx = self.read_u32()?;
-                    let elem_idx = self.read_u32()?;
-                    Instruction::ArrayNewElem(type_idx, elem_idx)
+                    let type_i = self.read_u32()?;
+                    let elem_i = self.read_u32()?;
+                    Instruction::ArrayNewElem(type_i, elem_i)
                 }
                 0x0B => Instruction::ArrayGet(self.read_u32()?),
                 0x0C => Instruction::ArrayGetSigned(self.read_u32()?),
@@ -1363,19 +1363,19 @@ impl<'a> Parser<'a> {
                 0x0F => Instruction::ArrayLen,
                 0x10 => Instruction::ArrayFill(self.read_u32()?),
                 0x11 => {
-                    let dst_type_idx = self.read_u32()?;
-                    let src_type_idx = self.read_u32()?;
-                    Instruction::ArrayCopy(dst_type_idx, src_type_idx)
+                    let dst_type_i = self.read_u32()?;
+                    let src_type_i = self.read_u32()?;
+                    Instruction::ArrayCopy(dst_type_i, src_type_i)
                 }
                 0x12 => {
-                    let type_idx = self.read_u32()?;
-                    let data_idx = self.read_u32()?;
-                    Instruction::ArrayInitData(type_idx, data_idx)
+                    let type_i = self.read_u32()?;
+                    let data_i = self.read_u32()?;
+                    Instruction::ArrayInitData(type_i, data_i)
                 }
                 0x13 => {
-                    let type_idx = self.read_u32()?;
-                    let elem_idx = self.read_u32()?;
-                    Instruction::ArrayInitElem(type_idx, elem_idx)
+                    let type_i = self.read_u32()?;
+                    let elem_i = self.read_u32()?;
+                    Instruction::ArrayInitElem(type_i, elem_i)
                 }
                 0x14 => Instruction::RefTest(self.parse_heap_type()?),
                 0x15 => Instruction::RefTestNull(self.parse_heap_type()?),
@@ -1425,8 +1425,8 @@ impl<'a> Parser<'a> {
                     Instruction::MemoryCopy(dst_mem, src_mem)
                 }
                 11 => {
-                    let mem_idx = self.read_u32()?;
-                    Instruction::MemoryFill(mem_idx)
+                    let mem_i = self.read_u32()?;
+                    Instruction::MemoryFill(mem_i)
                 }
                 12 => {
                     let y = self.read_u32()?;
@@ -1464,12 +1464,12 @@ impl<'a> Parser<'a> {
             0x3D => Instruction::I64Store16(self.parse_memarg()?),
             0x3E => Instruction::I64Store32(self.parse_memarg()?),
             0x3F => {
-                let mem_idx = self.read_u32()?;
-                Instruction::MemorySize(mem_idx)
+                let mem_i = self.read_u32()?;
+                Instruction::MemorySize(mem_i)
             }
             0x40 => {
-                let mem_idx = self.read_u32()?;
-                Instruction::MemoryGrow(mem_idx)
+                let mem_i = self.read_u32()?;
+                Instruction::MemoryGrow(mem_i)
             }
             0x41 => Instruction::I32Const(self.read_i32()?),
             0x42 => Instruction::I64Const(self.read_i64()?),
@@ -2060,7 +2060,7 @@ impl<'a> Parser<'a> {
                 let expression = self
                     .parse_vec(Self::read_u32)?
                     .into_iter()
-                    .map(|idx| vec![Instruction::RefFunc(idx)])
+                    .map(|i| vec![Instruction::RefFunc(i)])
                     .collect::<Vec<_>>();
 
                 ElementSegment {
@@ -2081,7 +2081,7 @@ impl<'a> Parser<'a> {
                 let expression = self
                     .parse_vec(Self::read_u32)?
                     .into_iter()
-                    .map(|idx| vec![Instruction::RefFunc(idx)])
+                    .map(|i| vec![Instruction::RefFunc(i)])
                     .collect::<Vec<_>>();
 
                 ElementSegment {
@@ -2101,7 +2101,7 @@ impl<'a> Parser<'a> {
                 let expression = self
                     .parse_vec(Self::read_u32)?
                     .into_iter()
-                    .map(|idx| vec![Instruction::RefFunc(idx)])
+                    .map(|i| vec![Instruction::RefFunc(i)])
                     .collect::<Vec<_>>();
 
                 ElementSegment {
@@ -2122,7 +2122,7 @@ impl<'a> Parser<'a> {
                 let expression = self
                     .parse_vec(Self::read_u32)?
                     .into_iter()
-                    .map(|idx| vec![Instruction::RefFunc(idx)])
+                    .map(|i| vec![Instruction::RefFunc(i)])
                     .collect::<Vec<_>>();
 
                 ElementSegment {
