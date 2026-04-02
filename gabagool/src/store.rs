@@ -43,7 +43,7 @@ pub enum ExecutionState<V = RawValue> {
     Suspended {
         module_name: String,
         func_name: String,
-        args: Vec<V>,
+        args: Vec<RawValue>,
     },
 }
 
@@ -266,6 +266,7 @@ pub struct Store {
     fuel: Option<u64>,
     pending_arity: Option<usize>,
     pending_suspension: Option<(String, String, Vec<RawValue>)>,
+    pending_lifted: Option<LiftedFunc>,
 
     component_instances: Vec<InstantiatedComponent>,
 }
@@ -313,6 +314,7 @@ impl Store {
             fuel: None,
             pending_arity: None,
             pending_suspension: None,
+            pending_lifted: None,
             instances: Vec::new(),
             func_addr_to_module: Vec::new(),
             component_instances: Vec::new(),
@@ -1062,8 +1064,8 @@ impl Store {
         let result = self.invoke_by_addr(lifted.func_addr, raw_args)?;
 
         Ok(match result {
-            ExecutionState::FuelExhausted => ExecutionState::FuelExhausted,
             ExecutionState::Completed(raw_values) => {
+                self.pending_lifted = None;
                 let flat = if let Some((ptr, mem_addr)) = retptr {
                     let mem = &self.memories[mem_addr];
 
@@ -1080,19 +1082,22 @@ impl Store {
 
                 ExecutionState::Completed(self.lift_values(&flat, &lifted)?)
             }
+            ExecutionState::FuelExhausted => {
+                self.pending_lifted = Some(lifted);
+                ExecutionState::FuelExhausted
+            }
             ExecutionState::Suspended {
                 module_name,
                 func_name,
                 args,
-            } => ExecutionState::Suspended {
-                module_name,
-                func_name,
-                args: args
-                    .iter()
-                    // todo: this wrapping of S64 is hack. probably should keep it as a raw value
-                    .map(|r| ComponentValue::S64(r.as_i64()))
-                    .collect(),
-            },
+            } => {
+                self.pending_lifted = Some(lifted);
+                ExecutionState::Suspended {
+                    module_name,
+                    func_name,
+                    args,
+                }
+            }
         })
     }
 
@@ -1229,6 +1234,32 @@ impl Store {
             .ok_or_else(|| Error::Instantiation("no pending execution to resume".into()))?;
 
         self.finish_run(arity)
+    }
+
+    pub fn resume_component(&mut self) -> Result<ExecutionState<ComponentValue>> {
+        let lifted = self
+            .pending_lifted
+            .clone()
+            .ok_or_else(|| Error::Instantiation("no pending component execution".into()))?;
+
+        let result = self.resume()?;
+
+        Ok(match result {
+            ExecutionState::Completed(raw_values) => {
+                self.pending_lifted = None;
+                ExecutionState::Completed(self.lift_values(&raw_values, &lifted)?)
+            }
+            ExecutionState::FuelExhausted => ExecutionState::FuelExhausted,
+            ExecutionState::Suspended {
+                module_name,
+                func_name,
+                args,
+            } => ExecutionState::Suspended {
+                module_name,
+                func_name,
+                args,
+            },
+        })
     }
 
     pub fn resume_with(&mut self, return_values: &[RawValue]) -> Result<ExecutionState> {
@@ -3202,6 +3233,13 @@ impl Store {
         // fuel + pending_arity
         self.fuel.encode(&mut buf);
         self.pending_arity.encode(&mut buf);
+        self.pending_lifted.encode(&mut buf);
+
+        // component instances
+        (self.component_instances.len() as u32).encode(&mut buf);
+        for ci in &self.component_instances {
+            ci.encode(&mut buf);
+        }
 
         buf
     }
@@ -3324,9 +3362,17 @@ impl Store {
         // call stack
         let call_stack = Vec::decode(buf);
 
-        // fuel + pending_arity
+        // fuel + pending_arity + pending_lifted
         let fuel = Option::decode(buf);
         let pending_arity = Option::decode(buf);
+        let pending_lifted = Option::decode(buf);
+
+        // component instances
+        let num_component_instances = u32::decode(buf) as usize;
+        let mut component_instances = Vec::with_capacity(num_component_instances);
+        for _ in 0..num_component_instances {
+            component_instances.push(InstantiatedComponent::decode(buf));
+        }
 
         Self {
             functions,
@@ -3345,7 +3391,8 @@ impl Store {
             fuel,
             pending_arity,
             pending_suspension: None,
-            component_instances: Vec::new(),
+            pending_lifted,
+            component_instances,
         }
     }
 }

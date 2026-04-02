@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::{mem, slice};
 
@@ -7,6 +8,8 @@ use crate::binary_grammar::{
     ValueType,
 };
 use crate::compiler::ModuleCode;
+use crate::component::binary_grammar::{ComponentValueKind, PrimitiveValueKind, StringEncoding};
+use crate::component::execution_grammar::{InstantiatedComponent, LiftedFunc};
 use crate::execution_grammar::{ExportInstance, ExternalValue, RawValue, Ref};
 use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
 use crate::store::{CallFrame, InstantiatedModule};
@@ -184,6 +187,28 @@ pub fn encode_slice<T: Snapshot>(slice: &[T], buf: &mut Vec<u8>) {
     (slice.len() as u32).encode(buf);
     for item in slice {
         item.encode(buf);
+    }
+}
+
+impl<K: Snapshot + Eq + std::hash::Hash, V: Snapshot> Snapshot for HashMap<K, V> {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        (self.len() as u32).encode(buf);
+
+        for (k, v) in self {
+            k.encode(buf);
+            v.encode(buf);
+        }
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        let len = u32::decode(buf) as usize;
+        let mut map = Self::with_capacity(len);
+
+        for _ in 0..len {
+            map.insert(K::decode(buf), V::decode(buf));
+        }
+
+        map
     }
 }
 
@@ -771,8 +796,106 @@ impl Snapshot for InstantiatedModule {
             elem_addrs: Vec::<usize>::decode(buf),
             data_addrs: Vec::<usize>::decode(buf),
             exports: Vec::<ExportInstance>::decode(buf),
+            // todo: figure out this
             #[cfg(feature = "jit")]
-            jit_functions: todo!(),
+            jit_functions: Vec::new(),
+        }
+    }
+}
+
+impl Snapshot for PrimitiveValueKind {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        (*self as u8).encode(buf);
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        match u8::decode(buf) {
+            0 => Self::Bool,
+            1 => Self::S8,
+            2 => Self::U8,
+            3 => Self::S16,
+            4 => Self::U16,
+            5 => Self::S32,
+            6 => Self::U32,
+            7 => Self::S64,
+            8 => Self::U64,
+            9 => Self::F32,
+            10 => Self::F64,
+            11 => Self::Char,
+            12 => Self::String,
+            n => panic!("invalid PrimitiveValueKind tag: {n}"),
+        }
+    }
+}
+
+impl Snapshot for ComponentValueKind {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        match self {
+            Self::Type(i) => {
+                0u8.encode(buf);
+                i.encode(buf);
+            }
+            Self::Primitive(p) => {
+                1u8.encode(buf);
+                p.encode(buf);
+            }
+        }
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        match u8::decode(buf) {
+            0 => Self::Type(u32::decode(buf)),
+            1 => Self::Primitive(PrimitiveValueKind::decode(buf)),
+            n => panic!("invalid ComponentValueKind tag: {n}"),
+        }
+    }
+}
+
+impl Snapshot for StringEncoding {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        (*self as u8).encode(buf);
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        match u8::decode(buf) {
+            0 => Self::Utf8,
+            1 => Self::Utf16,
+            2 => Self::Latin1Utf16,
+            n => panic!("invalid StringEncoding tag: {n}"),
+        }
+    }
+}
+
+impl Snapshot for LiftedFunc {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.func_addr.encode(buf);
+        self.memory_addr.encode(buf);
+        self.realloc_addr.encode(buf);
+        self.string_encoding.encode(buf);
+        self.result_types.encode(buf);
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        Self {
+            func_addr: usize::decode(buf),
+            memory_addr: Option::decode(buf),
+            realloc_addr: Option::decode(buf),
+            string_encoding: StringEncoding::decode(buf),
+            result_types: Vec::decode(buf),
+        }
+    }
+}
+
+impl Snapshot for InstantiatedComponent {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.exports.encode(buf);
+        self.may_leave.encode(buf);
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        Self {
+            exports: HashMap::decode(buf),
+            may_leave: bool::decode(buf),
         }
     }
 }

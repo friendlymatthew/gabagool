@@ -197,6 +197,7 @@ pub struct ParsedCanonOpts {
     pub callback: Option<u32>,
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Default)]
 pub enum StringEncoding {
     #[default]
@@ -377,6 +378,7 @@ impl ComponentValueKind {
     }
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum PrimitiveValueKind {
     Bool,
