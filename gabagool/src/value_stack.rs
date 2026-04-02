@@ -69,6 +69,16 @@ impl ValueStack {
         self.cursor += slice.len();
     }
 
+    pub fn extend_exact(&mut self, iter: impl ExactSizeIterator<Item = RawValue>) {
+        let len = iter.len();
+        for (i, value) in iter.enumerate() {
+            unsafe {
+                self.inner.as_mut_ptr().add(self.cursor + i).write(value);
+            }
+        }
+        self.cursor += len;
+    }
+
     pub const fn truncate(&mut self, len: usize) {
         self.cursor = len;
     }

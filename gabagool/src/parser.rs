@@ -5,10 +5,10 @@ use crate::error::{Error, Result};
 use crate::{
     ensure, parse_err, Alias, CanonOpts, CanonicalDef, ComponentDefinedType, ComponentExport,
     ComponentExportDecl, ComponentFuncResult, ComponentFuncType, ComponentImport,
-    ComponentInlineExport, ComponentInstance, ComponentInstantiateArg, ComponentSection,
-    ComponentSort, ComponentStart, ComponentTypeDecl, ComponentTypeDef, ComponentValType,
-    CoreExportDecl, CoreInlineExport, CoreInstance, CoreInstantiateArg, CoreModuleDecl,
-    CoreModuleType, CoreType, ExternDesc, InstanceTypeDecl, Parsed, ParsedComponent,
+    ComponentInlineExport, ComponentInstantiateArg, ComponentSection, ComponentSort,
+    ComponentStart, ComponentTypeDecl, ComponentTypeDef, ComponentValType, CoreExportDecl,
+    CoreInlineExport, CoreInstance, CoreInstantiateArg, CoreModuleDecl, CoreModuleType, CoreType,
+    ExternDesc, InstanceTypeDecl, Parsed, ParsedComponent, ParsedComponentInstance,
     PrimitiveValType, StringEncoding, TypeBound, VariantCase,
 };
 
@@ -71,7 +71,7 @@ impl<'a> Parser<'a> {
                     let Parsed::Module(module) = self.parse()? else {
                         parse_err!("expected core module in section 1");
                     };
-                    sections.push(ComponentSection::CoreModule(module));
+                    sections.push(ComponentSection::CoreModule(Box::new(module)));
                     self.buffer = full_buffer;
                 }
                 2 => {
@@ -176,9 +176,9 @@ impl<'a> Parser<'a> {
         Ok(out)
     }
 
-    fn parse_component_instance(&mut self) -> Result<ComponentInstance> {
+    fn parse_component_instance(&mut self) -> Result<ParsedComponentInstance> {
         let out = match self.read_u8()? {
-            0 => ComponentInstance::Instantiate {
+            0 => ParsedComponentInstance::Instantiate {
                 component_idx: self.read_u32()?,
                 args: self.parse_vec(|p| {
                     Ok(ComponentInstantiateArg {
@@ -188,7 +188,7 @@ impl<'a> Parser<'a> {
                     })
                 })?,
             },
-            1 => ComponentInstance::FromExports(self.parse_vec(|p| {
+            1 => ParsedComponentInstance::FromExports(self.parse_vec(|p| {
                 Ok(ComponentInlineExport {
                     name: p.parse_component_name()?,
                     sort: p.parse_component_sort()?,

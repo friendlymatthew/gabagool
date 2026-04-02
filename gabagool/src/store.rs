@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Neg;
 use std::rc::Rc;
@@ -8,8 +9,9 @@ use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    compiler, ensure, instantiation_err, trap, AddrType, DataMode, ElementMode, ImportDescription,
-    Instruction, Module, Mutability, Trap,
+    compiler, ensure, instantiation_err, trap, AddrType, Alias, CanonicalDef, Component,
+    ComponentSection, ComponentSort, ComponentValue, CoreInstance, CoreSort, DataMode, ElementMode,
+    ImportDescription, InstantiatedComponent, Instruction, Module, Mutability, Trap,
 };
 
 use crate::binary_grammar::{
@@ -30,18 +32,18 @@ pub const PAGE_SIZE: usize = 65536;
 pub const MAX_CALL_DEPTH: usize = 1024;
 
 #[derive(Debug, Clone)]
-pub enum ExecutionState {
-    Completed(Vec<RawValue>),
+pub enum ExecutionState<V = RawValue> {
+    Completed(Vec<V>),
     FuelExhausted,
     Suspended {
         module_name: String,
         func_name: String,
-        args: Vec<RawValue>,
+        args: Vec<V>,
     },
 }
 
-impl ExecutionState {
-    pub fn into_completed(self) -> Result<Vec<RawValue>> {
+impl<V> ExecutionState<V> {
+    pub fn into_completed(self) -> Result<Vec<V>> {
         match self {
             Self::Completed(v) => Ok(v),
             Self::FuelExhausted => instantiation_err!("execution paused: fuel exhausted"),
@@ -202,6 +204,12 @@ enum RunOutcome {
 #[derive(Debug, Copy, Clone)]
 pub struct Instance(pub(crate) usize);
 
+/// A handle to an instantiated WASM module in the store
+///
+/// Only created by [`Store::instantiate`], so the handle is always valid
+#[derive(Debug, Copy, Clone)]
+pub struct ComponentInstance(pub(crate) usize);
+
 pub struct CallFrame {
     pub module_idx: u16,
     pub compiled_func_idx: u32,
@@ -259,6 +267,8 @@ pub struct Store {
     fuel: Option<u64>,
     pending_arity: Option<usize>,
     pending_suspension: Option<(String, String, Vec<RawValue>)>,
+
+    component_instances: Vec<InstantiatedComponent>,
 }
 
 impl Default for Store {
@@ -306,6 +316,7 @@ impl Store {
             pending_suspension: None,
             instances: vec![],
             func_addr_to_module: vec![],
+            component_instances: vec![],
         }
     }
 
@@ -902,14 +913,160 @@ impl Store {
         }
     }
 
-    pub fn invoke(
-        &mut self,
-        instance: Instance,
-        name: &str,
-        args: Vec<RawValue>,
-    ) -> Result<ExecutionState> {
+    pub fn instantiate_component(&mut self, component: &Component) -> Result<ComponentInstance> {
+        let mut core_modules = vec![];
+        let mut core_instances = vec![];
+        let mut core_funcs = vec![];
+        let mut component_funcs = vec![];
+        let mut component_exports = HashMap::new();
+
+        for section in &component.parsed.sections {
+            match section {
+                ComponentSection::CoreModule(parsed_module) => {
+                    let module = Module::from_parsed((**parsed_module).clone())?;
+                    core_modules.push(module);
+                }
+                ComponentSection::CoreInstance(instances) => {
+                    for instance in instances {
+                        match instance {
+                            CoreInstance::Instantiate {
+                                module_idx,
+                                args: _args,
+                            } => {
+                                let module = &core_modules[*module_idx as usize];
+                                // todo: resolve args into imports
+                                let inst = self.instantiate(module, vec![])?;
+                                core_instances.push(inst);
+                            }
+                            CoreInstance::FromExports(_exports) => {
+                                todo!("core instance from exports")
+                            }
+                        }
+                    }
+                }
+                ComponentSection::Alias(aliases) => {
+                    for alias in aliases {
+                        match alias {
+                            Alias::CoreExport {
+                                sort,
+                                instance_idx,
+                                name,
+                            } => {
+                                let instance = core_instances[*instance_idx as usize];
+
+                                match sort {
+                                    ComponentSort::Core(CoreSort::Func) => {
+                                        let func_addr = self.get_func(instance, name)?;
+                                        core_funcs.push(func_addr);
+                                    }
+                                    _ => todo!("alias core export sort {:?}", sort),
+                                }
+                            }
+                            _ => todo!("alias kind {:?}", alias),
+                        }
+                    }
+                }
+                ComponentSection::Canonical(defs) => {
+                    for def in defs {
+                        match def {
+                            CanonicalDef::Lift {
+                                core_func_idx,
+                                opts: _opts,
+                                type_idx: _type_idx,
+                            } => {
+                                // For primitives (s32 → i32), lift is a passthrough
+                                let func_addr = core_funcs[*core_func_idx as usize];
+
+                                component_funcs.push(func_addr);
+                            }
+                            CanonicalDef::Lower {
+                                func_idx: _func_idx,
+                                opts: _opts,
+                            } => {
+                                todo!("canon lower")
+                            }
+                            _ => todo!("canonical def {:?}", def),
+                        }
+                    }
+                }
+                ComponentSection::Export(exports) => {
+                    for export in exports {
+                        match export.sort {
+                            ComponentSort::Func => {
+                                let func_addr = component_funcs[export.idx as usize];
+
+                                component_exports.insert(export.name.clone(), func_addr);
+                            }
+                            _ => todo!("export sort {:?}", export.sort),
+                        }
+                    }
+                }
+                ComponentSection::CoreType(_) | ComponentSection::ComponentType(_) => {}
+                other => todo!("what do {other:?} section look like"),
+            }
+        }
+
+        self.component_instances.push(InstantiatedComponent {
+            exports: component_exports,
+            may_leave: true,
+        });
+
+        Ok(ComponentInstance(self.component_instances.len() - 1))
+    }
+
+    pub fn invoke<I>(&mut self, instance: Instance, name: &str, args: I) -> Result<ExecutionState>
+    where
+        I: IntoIterator<IntoIter: ExactSizeIterator>,
+        I::Item: Into<RawValue>,
+    {
         let addr = self.get_func(instance, name)?;
         self.invoke_by_addr(addr, args)
+    }
+
+    pub fn invoke_component<I>(
+        &mut self,
+        instance: ComponentInstance,
+        name: &str,
+        args: I,
+    ) -> Result<ExecutionState<ComponentValue>>
+    where
+        I: IntoIterator<IntoIter: ExactSizeIterator>,
+        I::Item: Into<ComponentValue>,
+    {
+        let inst = &self.component_instances[instance.0];
+        let &addr = inst
+            .exports
+            .get(name)
+            .ok_or_else(|| Error::Instantiation(format!("export '{name}' not found")))?;
+
+        let raw_args = args.into_iter().map(|v| match v.into() {
+            ComponentValue::S32(v) => RawValue::from(v),
+            _ => todo!("lower"),
+        });
+
+        let result = self.invoke_by_addr(addr, raw_args)?;
+
+        Ok(match result {
+            ExecutionState::Completed(raw_values) => ExecutionState::Completed(
+                raw_values
+                    .iter()
+                    .map(|r| ComponentValue::S32(r.as_i32()))
+                    .collect(),
+            ),
+            ExecutionState::FuelExhausted => ExecutionState::FuelExhausted,
+            ExecutionState::Suspended {
+                module_name,
+                func_name,
+                args,
+            } => ExecutionState::Suspended {
+                module_name,
+                func_name,
+                args: args
+                    .iter()
+                    .map(|r| ComponentValue::S32(r.as_i32()))
+                    .collect(),
+            },
+        })
     }
 
     pub fn resume(&mut self) -> Result<ExecutionState> {
@@ -962,11 +1119,17 @@ impl Store {
         }
     }
 
-    fn invoke_by_addr(
+    fn invoke_by_addr<I>(
         &mut self,
         function_addr: usize,
-        args: Vec<RawValue>,
-    ) -> Result<ExecutionState> {
+        args: I,
+    ) -> Result<ExecutionState<RawValue>>
+    where
+        I: IntoIterator<IntoIter: ExactSizeIterator>,
+        I::Item: Into<RawValue>,
+    {
+        let args = args.into_iter().map(Into::into);
+
         if self.pending_arity.is_some() {
             instantiation_err!("cannot invoke while execution is paused; call resume() first");
         }
@@ -983,12 +1146,14 @@ impl Store {
             }
         };
 
+        let args_len = args.size_hint().0;
+
         ensure!(
-            num_args == args.len(),
-            Error::Instantiation(format!("expected {} args, got {}", num_args, args.len()))
+            num_args == args_len,
+            Error::Instantiation(format!("expected {} args, got {}", num_args, args_len))
         );
 
-        self.stack.extend_from_slice(&args);
+        self.stack.extend_exact(args);
         let suspended = self.push_function_call(function_addr)?;
 
         if suspended {
@@ -3043,6 +3208,7 @@ impl Store {
             fuel,
             pending_arity,
             pending_suspension: None,
+            component_instances: Vec::new(),
         }
     }
 }
