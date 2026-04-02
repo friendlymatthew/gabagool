@@ -1298,10 +1298,14 @@ impl Store {
                 let payload_count = inner_ty.flat_count(types);
 
                 match opt {
-                    None => flat.extend(std::iter::repeat_n(
-                        RawValue::from(i32::MAX),
-                        payload_count + 1,
-                    )),
+                    None => {
+                        flat.extend(
+                            std::iter::once(RawValue::from(0i32)).chain(std::iter::repeat_n(
+                                RawValue::from(i32::MAX),
+                                payload_count,
+                            )),
+                        );
+                    }
                     Some(value) => {
                         flat.push(RawValue::from(1i32));
                         self.lower_value(*value, None, types, lifted, flat)?;
