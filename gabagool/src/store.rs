@@ -23,7 +23,7 @@ use crate::execution_grammar::{
     AddressMap, DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance,
     GlobalInstance, MemoryInstance, Ref, TableInstance, TagInstance,
 };
-use crate::ir::{CatchKind, CompiledFunction, Op};
+use crate::ir::{CatchKind, CompiledFunction, CompilerMode, Op};
 use crate::snapshot::{decode_bulk, encode_bulk, Snapshot, SNAPSHOT_MAGIC, SNAPSHOT_VERSION};
 use crate::value_stack::ValueStack;
 use crate::RawValue;
@@ -848,7 +848,12 @@ impl Store {
             }
             if let FunctionInstance::Local { code, .. } = &self.functions[addr] {
                 let code_mut = Arc::make_mut(&mut entity.code);
-                let cf = compiler::compile_function_into_code(&types_for_compile, code, code_mut);
+                let cf = compiler::compile_function_into_code(
+                    &types_for_compile,
+                    code,
+                    code_mut,
+                    module.compile_mode,
+                );
                 let idx = code_mut.compiled_funcs.len();
                 code_mut.compiled_funcs.push(cf);
                 if addr < self.func_addr_to_module.len() {
@@ -923,7 +928,8 @@ impl Store {
         for section in &component.parsed.sections {
             match section {
                 ComponentSection::CoreModule(parsed_module) => {
-                    let module = Module::from_parsed((**parsed_module).clone())?;
+                    let module =
+                        Module::from_parsed((**parsed_module).clone(), CompilerMode::Optimize)?;
                     core_modules.push(module);
                 }
                 ComponentSection::CoreInstance(instances) => {
@@ -2823,8 +2829,7 @@ impl Store {
         let max_stack_height = ops.len() as u32;
 
         let cf = CompiledFunction {
-            #[cfg(feature = "debugger")]
-            source_positions: vec![0; ops.len()],
+            source_positions: Vec::new(),
             ops,
             type_index: 0,
             num_args: 0,

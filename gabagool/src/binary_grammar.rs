@@ -1,5 +1,6 @@
 use crate::{
     compiler::{self, ModuleCode},
+    ir::CompilerMode,
     parse_err,
     parser::Parser,
     Error, Result,
@@ -34,32 +35,23 @@ pub struct Module {
     pub(crate) import_declarations: Vec<ImportDeclaration>,
     pub(crate) exports: Vec<Export>,
     pub(crate) tags: Vec<Tag>,
+
+    pub(crate) compile_mode: CompilerMode,
 }
 
 impl Module {
     pub fn new(bytes: &[u8]) -> Result<Self> {
-        let module = Parser::new(bytes).parse()?.try_as_module()?;
-
-        let code = compiler::compile(&module);
-
-        Ok(Self {
-            code: Arc::new(code),
-
-            functions: module.functions,
-            tables: module.tables,
-            mems: module.mems,
-            element_segments: module.element_segments,
-            globals: module.globals,
-            data_segments: module.data_segments,
-            start: module.start,
-            import_declarations: module.import_declarations,
-            exports: module.exports,
-            tags: module.tags,
-        })
+        Self::new_with_mode(bytes, CompilerMode::Optimize)
     }
 
-    pub fn from_parsed(parsed: ParsedModule) -> Result<Self> {
-        let code = compiler::compile(&parsed);
+    pub fn new_with_mode(bytes: &[u8], compile_mode: CompilerMode) -> Result<Self> {
+        let module = Parser::new(bytes).parse()?.try_as_module()?;
+        Self::from_parsed(module, compile_mode)
+    }
+
+    pub fn from_parsed(parsed: ParsedModule, compile_mode: CompilerMode) -> Result<Self> {
+        let code = compiler::compile(&parsed, compile_mode);
+
         Ok(Self {
             code: Arc::new(code),
             functions: parsed.functions,
@@ -72,6 +64,7 @@ impl Module {
             import_declarations: parsed.import_declarations,
             exports: parsed.exports,
             tags: parsed.tags,
+            compile_mode,
         })
     }
 

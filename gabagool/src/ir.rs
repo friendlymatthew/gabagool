@@ -25,6 +25,12 @@ pub struct CompiledCatchClause {
     pub drop: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompilerMode {
+    Optimize,
+    Debug,
+}
+
 #[derive(Debug, Clone)]
 pub struct CompiledFunction {
     pub ops: Vec<Op>,
@@ -34,7 +40,6 @@ pub struct CompiledFunction {
     pub local_types: Vec<ValueType>,
     pub(crate) max_stack_height: u32,
     /// maps each compiled op to the source instruction index that produced it
-    #[cfg(feature = "debugger")]
     pub source_positions: Vec<u32>,
 }
 

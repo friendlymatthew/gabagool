@@ -18,7 +18,6 @@ object = { version = "0.38.1", optional = true }
 [features]
 core-tests = ["wast"]
 component-tests = []
-debugger = []
 jit = ["cc", "libc", "object"]
 
 [dev-dependencies]

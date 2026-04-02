@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-gabagool = { path = "../gabagool", features = ["debugger"] }
+gabagool = { path = "../gabagool" }
 serde_json = "1"
 wast = "245"
 

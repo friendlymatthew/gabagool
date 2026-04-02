@@ -138,19 +138,11 @@ impl Debugger {
                 pc: frame.pc,
                 locals: frame.locals.clone(),
                 local_types: cf.local_types.clone(),
-                source_position: {
-                    #[cfg(feature = "debugger")]
-                    {
-                        cf.source_positions
-                            .get(frame.pc)
-                            .copied()
-                            .unwrap_or(frame.pc as u32)
-                    }
-                    #[cfg(not(feature = "debugger"))]
-                    {
-                        frame.pc as u32
-                    }
-                },
+                source_position: cf
+                    .source_positions
+                    .get(frame.pc)
+                    .copied()
+                    .unwrap_or(frame.pc as u32),
             }
         })
     }
@@ -323,14 +315,14 @@ impl Debugger {
 #[cfg(all(test, not(feature = "jit")))]
 mod tests {
     use super::*;
-    use crate::Module;
+    use crate::{ir::CompilerMode, Module};
 
     fn setup_debugger(wasm_path: &str, func: &str, args: Vec<RawValue>) -> Debugger {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
         let wasm = std::fs::read(workspace_root.join(wasm_path)).unwrap();
-        let module = Module::new(&wasm).unwrap();
+        let module = Module::new_with_mode(&wasm, CompilerMode::Debug).unwrap();
         let mut store = Store::new();
         let instance = store.instantiate(&module, vec![]).unwrap();
         let mut debugger = Debugger::new_with_config(
@@ -593,7 +585,6 @@ mod tests {
         assert_eq!(dbg.instruction_count(), 0);
     }
 
-    #[cfg(feature = "debugger")]
     #[test]
     fn test_step_back_preserves_source_positions() {
         let mut dbg = setup_debugger(
