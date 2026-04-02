@@ -380,4 +380,4 @@ fn resolve_imports_with_registered(
         .collect()
 }
 
-include!(concat!(env!("OUT_DIR"), "/spec_tests_generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/core_tests_generated.rs"));

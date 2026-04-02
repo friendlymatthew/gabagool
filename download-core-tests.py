@@ -8,7 +8,7 @@ import urllib.request
 
 REPO = "WebAssembly/spec"
 BRANCH = "main"
-OUT = os.path.join(os.path.dirname(__file__), "..", "tests", "spec")
+OUT = os.path.join(os.path.dirname(__file__), "gabagool", "tests", "spec")
 
 
 def main():

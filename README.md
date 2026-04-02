@@ -24,7 +24,7 @@ This project aims to build a fully spec-compliant, performant interpreter whose 
 
 ```sh
 # run the core test suite
-uv run download-spec-tests.py
+uv run download-core-tests.py
 cargo t --features core-tests
 
 # run the component test suite

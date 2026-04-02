@@ -17,6 +17,23 @@ jobs:
       - name: Run tests
         run: cargo test
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Download core spec tests
+        run: uv run download-core-tests.py
+
+      - name: Core spec compliance (expect 1960+ passing)
+        run: |
+          OUTPUT=$(cargo test --features core-tests --test core_tests -- -q 2>&1 || true)
+          echo "$OUTPUT"
+          PASSED=$(echo "$OUTPUT" | grep -oP '\d+ passed' | grep -oP '\d+')
+          echo "Passed: $PASSED"
+          if [ "$PASSED" -lt 1960 ]; then
+            echo "FAIL: expected at least 1960 passing, got $PASSED"
+            exit 1
+          fi
+
   fmt:
     runs-on: ubuntu-latest
     steps:

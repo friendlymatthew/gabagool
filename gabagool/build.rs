@@ -1,12 +1,12 @@
 fn main() {
     #[cfg(feature = "core-tests")]
-    spec_tests::generate();
+    core_tests::generate();
 
     #[cfg(not(feature = "core-tests"))]
     {
         let out_dir = std::env::var("OUT_DIR").unwrap();
         std::fs::write(
-            std::path::Path::new(&out_dir).join("spec_tests_generated.rs"),
+            std::path::Path::new(&out_dir).join("core_tests_generated.rs"),
             "",
         )
         .unwrap();
@@ -91,7 +91,7 @@ mod component_tests {
 }
 
 #[cfg(feature = "core-tests")]
-mod spec_tests {
+mod core_tests {
     use std::env;
     use std::fs;
     use std::path::Path;
@@ -109,7 +109,7 @@ mod spec_tests {
 
         let spec_dir = Path::new("tests/spec");
         if !spec_dir.exists() {
-            fs::write(Path::new(&out_dir).join("spec_tests_generated.rs"), "").unwrap();
+            fs::write(Path::new(&out_dir).join("core_tests_generated.rs"), "").unwrap();
             return;
         }
 
@@ -500,7 +500,7 @@ mod spec_tests {
         }
 
         fs::write(
-            Path::new(&out_dir).join("spec_tests_generated.rs"),
+            Path::new(&out_dir).join("core_tests_generated.rs"),
             all_tests,
         )
         .unwrap();
