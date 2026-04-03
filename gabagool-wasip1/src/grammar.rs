@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{io::ErrorKind, path::PathBuf};
 
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +81,17 @@ pub enum Errno {
     TxtBsy = 74,
     Xdev = 75,
     NotCapable = 76,
+}
+
+impl From<std::io::Error> for Errno {
+    fn from(e: std::io::Error) -> Self {
+        match e.kind() {
+            ErrorKind::NotFound => Self::NoEnt,
+            ErrorKind::PermissionDenied => Self::Access,
+            ErrorKind::AlreadyExists => Self::Exist,
+            _ => Self::Io,
+        }
+    }
 }
 
 #[repr(u32)]

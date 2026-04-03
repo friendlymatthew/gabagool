@@ -156,6 +156,15 @@ impl WasiCtx {
             "fd_advise" => Errno::Success,
             "fd_allocate" => Errno::Success,
             "path_open" => self.path_open(store, args),
+            "path_create_directory" => self.path_create_directory(store, args),
+            "path_remove_directory" => self.path_remove_directory(store, args),
+            "path_unlink_file" => self.path_unlink_file(store, args),
+            "path_rename" => self.path_rename(store, args),
+            "path_symlink" => self.path_symlink(store, args),
+            "path_link" => self.path_link(store, args),
+            "path_readlink" => self.path_readlink(store, args),
+            "path_filestat_get" => self.path_filestat_get(store, args),
+            "path_filestat_set_times" => self.path_filestat_set_times(store, args),
             "args_sizes_get" => self.args_sizes_get(store, args),
             "args_get" => self.args_get(store, args),
             "environ_sizes_get" => self.environ_sizes_get(store, args),
@@ -201,6 +210,22 @@ impl WasiCtx {
             FdKind::Directory { host_path } => Ok(host_path.clone()),
             _ => Err(Errno::NotDir),
         }
+    }
+
+    fn resolve_guest_path(
+        &self,
+        store: &Store,
+        dirfd: u32,
+        path_ptr: usize,
+        path_len: usize,
+    ) -> Result<PathBuf, Errno> {
+        let mem = &store.memories[0].data;
+        let guest_path =
+            str::from_utf8(mem.read_bytes(path_ptr, path_len)).map_err(|_| Errno::Inval)?;
+
+        let dir = self.dir_host_path(dirfd)?.join(guest_path);
+
+        Ok(dir)
     }
 
     fn fd_read(&mut self, store: &mut Store, args: &[RawValue]) -> Errno {
@@ -1016,6 +1041,193 @@ impl WasiCtx {
         mem.write_u32(fd_out_ptr, new_fd);
 
         Errno::Success
+    }
+
+    fn path_create_directory(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let dirfd = args[0].as_i32() as u32;
+        let path_ptr = args[1].as_i32() as usize;
+        let path_len = args[2].as_i32() as usize;
+
+        let host_path = match self.resolve_guest_path(store, dirfd, path_ptr, path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        std::fs::create_dir(&host_path).map_or_else(Into::into, |()| Errno::Success)
+    }
+
+    fn path_remove_directory(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let dirfd = args[0].as_i32() as u32;
+        let path_ptr = args[1].as_i32() as usize;
+        let path_len = args[2].as_i32() as usize;
+
+        let host_path = match self.resolve_guest_path(store, dirfd, path_ptr, path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        std::fs::remove_dir(&host_path).map_or_else(Into::into, |()| Errno::Success)
+    }
+
+    fn path_unlink_file(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let dirfd = args[0].as_i32() as u32;
+        let path_ptr = args[1].as_i32() as usize;
+        let path_len = args[2].as_i32() as usize;
+
+        let host_path = match self.resolve_guest_path(store, dirfd, path_ptr, path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        std::fs::remove_file(&host_path).map_or_else(Into::into, |()| Errno::Success)
+    }
+
+    fn path_rename(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let old_dirfd = args[0].as_i32() as u32;
+        let old_path_ptr = args[1].as_i32() as usize;
+        let old_path_len = args[2].as_i32() as usize;
+        let new_dirfd = args[3].as_i32() as u32;
+        let new_path_ptr = args[4].as_i32() as usize;
+        let new_path_len = args[5].as_i32() as usize;
+
+        let old = match self.resolve_guest_path(store, old_dirfd, old_path_ptr, old_path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        let new = match self.resolve_guest_path(store, new_dirfd, new_path_ptr, new_path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        std::fs::rename(&old, &new).map_or_else(Into::into, |()| Errno::Success)
+    }
+
+    fn path_symlink(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let old_path_ptr = args[0].as_i32() as usize;
+        let old_path_len = args[1].as_i32() as usize;
+        let dirfd = args[2].as_i32() as u32;
+        let new_path_ptr = args[3].as_i32() as usize;
+        let new_path_len = args[4].as_i32() as usize;
+
+        let mem = &store.memories[0].data;
+        let old_path = match str::from_utf8(mem.read_bytes(old_path_ptr, old_path_len)) {
+            Ok(s) => s.to_string(),
+            Err(_) => return Errno::Inval,
+        };
+
+        let new_host = match self.resolve_guest_path(store, dirfd, new_path_ptr, new_path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&old_path, &new_host)
+                .map_or_else(Into::into, |()| Errno::Success)
+        }
+
+        #[cfg(not(unix))]
+        Errno::NoSys
+    }
+
+    fn path_link(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let old_dirfd = args[0].as_i32() as u32;
+        let _old_flags = args[1].as_i32() as u32;
+        let old_path_ptr = args[2].as_i32() as usize;
+        let old_path_len = args[3].as_i32() as usize;
+        let new_dirfd = args[4].as_i32() as u32;
+        let new_path_ptr = args[5].as_i32() as usize;
+        let new_path_len = args[6].as_i32() as usize;
+
+        let old = match self.resolve_guest_path(store, old_dirfd, old_path_ptr, old_path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        let new = match self.resolve_guest_path(store, new_dirfd, new_path_ptr, new_path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        std::fs::hard_link(&old, &new).map_or_else(Into::into, |()| Errno::Success)
+    }
+
+    fn path_readlink(&self, store: &mut Store, args: &[RawValue]) -> Errno {
+        let dirfd = args[0].as_i32() as u32;
+        let path_ptr = args[1].as_i32() as usize;
+        let path_len = args[2].as_i32() as usize;
+        let buf_ptr = args[3].as_i32() as usize;
+        let buf_len = args[4].as_i32() as usize;
+        let bufused_ptr = args[5].as_i32() as usize;
+
+        let host_path = match self.resolve_guest_path(store, dirfd, path_ptr, path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        let target = match std::fs::read_link(&host_path) {
+            Ok(t) => t,
+            Err(e) => return e.into(),
+        };
+
+        let target_bytes = target.as_os_str().as_encoded_bytes();
+        let write_len = target_bytes.len().min(buf_len);
+
+        let mem = &mut store.memories[0].data;
+        mem.write_bytes(buf_ptr, &target_bytes[..write_len]);
+        mem.write_u32(bufused_ptr, write_len as u32);
+
+        Errno::Success
+    }
+
+    fn path_filestat_get(&self, store: &mut Store, args: &[RawValue]) -> Errno {
+        let dirfd = args[0].as_i32() as u32;
+        let _flags = args[1].as_i32() as u32;
+        let path_ptr = args[2].as_i32() as usize;
+        let path_len = args[3].as_i32() as usize;
+        let buf_ptr = args[4].as_i32() as usize;
+
+        let host_path = match self.resolve_guest_path(store, dirfd, path_ptr, path_len) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        let metadata = match std::fs::metadata(&host_path) {
+            Ok(m) => m,
+            Err(e) => return e.into(),
+        };
+
+        let filetype = if metadata.is_dir() {
+            FileType::Directory
+        } else if metadata.is_symlink() {
+            FileType::SymbolicLink
+        } else {
+            FileType::RegularFile
+        };
+
+        let mem = &mut store.memories[0].data;
+        mem.fill(buf_ptr, 64, 0);
+        mem.write_u8(buf_ptr + 16, filetype as u8);
+        mem.write_u64(buf_ptr + 24, 1);
+        mem.write_u64(buf_ptr + 32, metadata.len());
+
+        Errno::Success
+    }
+
+    fn path_filestat_set_times(&self, store: &Store, args: &[RawValue]) -> Errno {
+        let dirfd = args[0].as_i32() as u32;
+        let _flags = args[1].as_i32() as u32;
+        let path_ptr = args[2].as_i32() as usize;
+        let path_len = args[3].as_i32() as usize;
+        let _atim = args[4].as_i64() as u64;
+        let _mtim = args[5].as_i64() as u64;
+        let _fst_flags = args[6].as_i32() as u16;
+
+        match self.resolve_guest_path(store, dirfd, path_ptr, path_len) {
+            Ok(_) => Errno::Success,
+            Err(e) => e,
+        }
     }
 }
 
