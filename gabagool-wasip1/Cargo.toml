@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 gabagool = { path = "../gabagool" }
+
+[dev-dependencies]
+tempfile = "3"

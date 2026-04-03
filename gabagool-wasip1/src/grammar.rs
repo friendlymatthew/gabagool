@@ -350,7 +350,7 @@ pub struct FdEntry {
 
 #[derive(Debug)]
 pub struct FdTable {
-    entries: Vec<Option<FdEntry>>,
+    pub(crate) entries: Vec<Option<FdEntry>>,
 }
 
 impl Default for FdTable {
@@ -387,6 +387,14 @@ impl Default for FdTable {
 }
 
 impl FdTable {
+    pub const fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn get(&self, fd: u32) -> Result<&FdEntry, Errno> {
         self.entries
             .get(fd as usize)
