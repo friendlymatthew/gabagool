@@ -432,9 +432,7 @@ impl DAPServer {
             .unwrap_or((0, 0));
 
         let dbg = self.debugger()?;
-        let data = dbg
-            .read_memory(module_idx, mem_idx, offset, count)
-            .ok_or_else(|| err("mem not found"))?;
+        let data = dbg.read_memory(module_idx, mem_idx, offset, count);
 
         self.send_response(
             request_seq,

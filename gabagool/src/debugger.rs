@@ -165,18 +165,12 @@ impl Debugger {
             .collect()
     }
 
-    pub fn read_memory(
-        &self,
-        module_i: u16,
-        mem_i: usize,
-        offset: usize,
-        length: usize,
-    ) -> Option<&[u8]> {
+    pub fn read_memory(&self, module_i: u16, mem_i: usize, offset: usize, length: usize) -> &[u8] {
         let inst = &self.store.instances[module_i as usize];
-        let mem_addr = *inst.mem_addrs.get(mem_i)?;
+        let mem_addr = inst.mem_addrs[mem_i];
         self.store.memories[mem_addr]
             .data
-            .get(offset..offset + length)
+            .read_bytes(offset, length)
     }
 
     pub fn memory_size(&self, module_i: u16, mem_i: usize) -> Option<usize> {
@@ -478,7 +472,7 @@ mod tests {
         let mem_at_100 = dbg.store.memories[0].data.clone();
 
         // we've stepped to a point where we're modifying memory
-        assert!(mem_at_100.iter().any(|&b| b != 0));
+        assert!(mem_at_100.as_slice().iter().any(|&b| b != 0));
 
         for _ in 0..100 {
             dbg.step_forward().unwrap();

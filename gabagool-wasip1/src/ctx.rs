@@ -204,8 +204,8 @@ impl WasiCtx {
         for i in 0..iovs_len {
             let base = (iovs + i * 8) as usize;
 
-            let buf_ptr = u32::from_le_bytes(mem[base..base + 4].try_into().unwrap()) as usize;
-            let buf_len = u32::from_le_bytes(mem[base + 4..base + 8].try_into().unwrap()) as usize;
+            let buf_ptr = mem.read_u32(base) as usize;
+            let buf_len = mem.read_u32(base + 4) as usize;
 
             iov_entries.push((buf_ptr, buf_len));
         }
@@ -222,8 +222,7 @@ impl WasiCtx {
 
                     let drained = self.stdin_buf.drain(..available).collect::<Vec<_>>();
 
-                    store.memories[0].data[*buf_ptr..*buf_ptr + available]
-                        .copy_from_slice(&drained);
+                    store.memories[0].data.write_bytes(*buf_ptr, &drained);
 
                     total_read += available as u32;
                 }
@@ -235,8 +234,7 @@ impl WasiCtx {
                     match f.read(&mut tmp) {
                         Ok(0) => break,
                         Ok(n) => {
-                            store.memories[0].data[*buf_ptr..*buf_ptr + n]
-                                .copy_from_slice(&tmp[..n]);
+                            store.memories[0].data.write_bytes(*buf_ptr, &tmp[..n]);
 
                             total_read += n as u32;
                         }
@@ -249,7 +247,7 @@ impl WasiCtx {
 
         let mem = &mut store.memories[0].data;
         let ptr = nread_ptr as usize;
-        mem[ptr..ptr + 4].copy_from_slice(&total_read.to_le_bytes());
+        mem.write_u32(ptr, total_read);
 
         Errno::Success
     }
@@ -279,10 +277,10 @@ impl WasiCtx {
 
         for i in 0..iovs_len {
             let base = (iovs + i * 8) as usize;
-            let buf_ptr = u32::from_le_bytes(mem[base..base + 4].try_into().unwrap()) as usize;
-            let buf_len = u32::from_le_bytes(mem[base + 4..base + 8].try_into().unwrap()) as usize;
+            let buf_ptr = mem.read_u32(base) as usize;
+            let buf_len = mem.read_u32(base + 4) as usize;
 
-            bufs.push(mem[buf_ptr..buf_ptr + buf_len].to_vec());
+            bufs.push(mem.read_bytes(buf_ptr, buf_len).to_vec());
 
             total_written += buf_len as u32;
         }
@@ -314,7 +312,7 @@ impl WasiCtx {
 
         let mem = &mut store.memories[0].data;
         let ptr = nwritten_ptr as usize;
-        mem[ptr..ptr + 4].copy_from_slice(&total_written.to_le_bytes());
+        mem.write_u32(ptr, total_written);
 
         Errno::Success
     }
@@ -336,9 +334,9 @@ impl WasiCtx {
         let mem = &mut store.memories[0].data;
 
         let ptr = prestat_ptr as usize;
-        mem[ptr] = 0;
-        mem[ptr + 1..ptr + 4].fill(0);
-        mem[ptr + 4..ptr + 8].copy_from_slice(&(guest_path.len() as u32).to_le_bytes());
+        mem.write_u8(ptr, 0);
+        mem.fill(ptr + 1, 3, 0);
+        mem.write_u32(ptr + 4, guest_path.len() as u32);
 
         Errno::Success
     }
@@ -363,7 +361,7 @@ impl WasiCtx {
 
         let mem = &mut store.memories[0].data;
         let ptr = path_ptr as usize;
-        mem[ptr..ptr + len].copy_from_slice(&bytes[..len]);
+        mem.write_bytes(ptr, &bytes[..len]);
 
         Errno::Success
     }
@@ -376,8 +374,8 @@ impl WasiCtx {
         let buf_size = self.args.iter().map(|a| a.len() as u32 + 1).sum::<u32>();
 
         let mem = &mut store.memories[0].data;
-        mem[argc_ptr..argc_ptr + 4].copy_from_slice(&argc.to_le_bytes());
-        mem[buf_size_ptr..buf_size_ptr + 4].copy_from_slice(&buf_size.to_le_bytes());
+        mem.write_u32(argc_ptr, argc);
+        mem.write_u32(buf_size_ptr, buf_size);
 
         Errno::Success
     }
@@ -392,12 +390,11 @@ impl WasiCtx {
         for (i, arg) in self.args.iter().enumerate() {
             let bytes = arg.as_bytes();
 
-            mem[argv_ptr + i * 4..argv_ptr + i * 4 + 4]
-                .copy_from_slice(&(buf_offset as u32).to_le_bytes());
+            mem.write_u32(argv_ptr + i * 4, buf_offset as u32);
 
-            mem[buf_offset..buf_offset + bytes.len()].copy_from_slice(bytes);
+            mem.write_bytes(buf_offset, bytes);
 
-            mem[buf_offset + bytes.len()] = 0;
+            mem.write_u8(buf_offset + bytes.len(), 0);
             buf_offset += bytes.len() + 1;
         }
 
@@ -416,8 +413,8 @@ impl WasiCtx {
             .sum::<u32>();
 
         let mem = &mut store.memories[0].data;
-        mem[count_ptr..count_ptr + 4].copy_from_slice(&count.to_le_bytes());
-        mem[buf_size_ptr..buf_size_ptr + 4].copy_from_slice(&buf_size.to_le_bytes());
+        mem.write_u32(count_ptr, count);
+        mem.write_u32(buf_size_ptr, buf_size);
 
         Errno::Success
     }
@@ -430,14 +427,13 @@ impl WasiCtx {
         let mut buf_offset = environ_buf_ptr;
 
         for (i, (key, val)) in self.environ.iter().enumerate() {
-            mem[environ_ptr + i * 4..environ_ptr + i * 4 + 4]
-                .copy_from_slice(&(buf_offset as u32).to_le_bytes());
+            mem.write_u32(environ_ptr + i * 4, buf_offset as u32);
 
             let entry = format!("{key}={val}");
             let bytes = entry.as_bytes();
 
-            mem[buf_offset..buf_offset + bytes.len()].copy_from_slice(bytes);
-            mem[buf_offset + bytes.len()] = 0;
+            mem.write_bytes(buf_offset, bytes);
+            mem.write_u8(buf_offset + bytes.len(), 0);
 
             buf_offset += bytes.len() + 1;
         }
@@ -461,7 +457,7 @@ impl WasiCtx {
         };
 
         let mem = &mut store.memories[0].data;
-        mem[timestamp_ptr..timestamp_ptr + 8].copy_from_slice(&nanos.to_le_bytes());
+        mem.write_u64(timestamp_ptr, nanos);
 
         Errno::Success
     }
@@ -477,7 +473,7 @@ impl WasiCtx {
         };
 
         let mem = &mut store.memories[0].data;
-        mem[resolution_ptr..resolution_ptr + 8].copy_from_slice(&res.to_le_bytes());
+        mem.write_u64(resolution_ptr, res);
 
         Errno::Success
     }
@@ -493,12 +489,14 @@ impl WasiCtx {
             .unwrap_or_default()
             .as_nanos() as u64;
 
-        for byte in &mut mem[buf_ptr..buf_ptr + buf_len] {
+        let mut random_bytes = Vec::with_capacity(buf_len);
+        for _ in 0..buf_len {
             seed ^= seed << 13;
             seed ^= seed >> 7;
             seed ^= seed << 17;
-            *byte = seed as u8;
+            random_bytes.push(seed as u8);
         }
+        mem.write_bytes(buf_ptr, &random_bytes);
 
         Errno::Success
     }
@@ -539,8 +537,7 @@ impl WasiCtx {
                         entry.offset = new_pos;
 
                         let mem = &mut store.memories[0].data;
-                        mem[newoffset_ptr..newoffset_ptr + 8]
-                            .copy_from_slice(&new_pos.to_le_bytes());
+                        mem.write_u64(newoffset_ptr, new_pos);
 
                         Errno::Success
                     }
@@ -558,7 +555,7 @@ impl WasiCtx {
                 entry.offset = new_pos;
 
                 let mem = &mut store.memories[0].data;
-                mem[newoffset_ptr..newoffset_ptr + 8].copy_from_slice(&new_pos.to_le_bytes());
+                mem.write_u64(newoffset_ptr, new_pos);
 
                 Errno::Success
             }
@@ -579,7 +576,7 @@ impl WasiCtx {
         }
 
         let mem = &mut store.memories[0].data;
-        mem[offset_ptr..offset_ptr + 8].copy_from_slice(&entry.offset.to_le_bytes());
+        mem.write_u64(offset_ptr, entry.offset);
 
         Errno::Success
     }
@@ -613,11 +610,11 @@ impl WasiCtx {
         };
 
         let mem = &mut store.memories[0].data;
-        mem[buf_ptr..buf_ptr + 24].fill(0);
-        mem[buf_ptr] = entry.file_type as u8;
-        mem[buf_ptr + 2..buf_ptr + 4].copy_from_slice(&entry.flags.0.to_le_bytes());
-        mem[buf_ptr + 8..buf_ptr + 16].copy_from_slice(&entry.rights_base.0.to_le_bytes());
-        mem[buf_ptr + 16..buf_ptr + 24].copy_from_slice(&entry.rights_inheriting.0.to_le_bytes());
+        mem.fill(buf_ptr, 24, 0);
+        mem.write_u8(buf_ptr, entry.file_type as u8);
+        mem.write_u16(buf_ptr + 2, entry.flags.0);
+        mem.write_u64(buf_ptr + 8, entry.rights_base.0);
+        mem.write_u64(buf_ptr + 16, entry.rights_inheriting.0);
 
         Errno::Success
     }
@@ -645,32 +642,32 @@ impl WasiCtx {
         };
 
         let mem = &mut store.memories[0].data;
-        mem[buf_ptr..buf_ptr + 64].fill(0);
-        mem[buf_ptr + 16] = entry.file_type as u8;
+        mem.fill(buf_ptr, 64, 0);
+        mem.write_u8(buf_ptr + 16, entry.file_type as u8);
 
         match &entry.kind {
             FdKind::File { file: Some(f), .. } => {
                 if let Ok(metadata) = f.metadata() {
                     let size = metadata.len();
-                    mem[buf_ptr + 32..buf_ptr + 40].copy_from_slice(&size.to_le_bytes());
+                    mem.write_u64(buf_ptr + 32, size);
 
                     let nlink = 1u64;
-                    mem[buf_ptr + 24..buf_ptr + 32].copy_from_slice(&nlink.to_le_bytes());
+                    mem.write_u64(buf_ptr + 24, nlink);
                 }
             }
             FdKind::File { host_path, .. } => {
                 if let Ok(metadata) = std::fs::metadata(host_path) {
                     let size = metadata.len();
-                    mem[buf_ptr + 32..buf_ptr + 40].copy_from_slice(&size.to_le_bytes());
+                    mem.write_u64(buf_ptr + 32, size);
 
                     let nlink = 1u64;
-                    mem[buf_ptr + 24..buf_ptr + 32].copy_from_slice(&nlink.to_le_bytes());
+                    mem.write_u64(buf_ptr + 24, nlink);
                 }
             }
             FdKind::Directory { host_path } | FdKind::Preopen { host_path, .. } => {
                 if let Ok(_metadata) = std::fs::metadata(host_path) {
                     let nlink = 1u64;
-                    mem[buf_ptr + 24..buf_ptr + 32].copy_from_slice(&nlink.to_le_bytes());
+                    mem.write_u64(buf_ptr + 24, nlink);
                 }
             }
             _ => {}
@@ -707,7 +704,7 @@ impl WasiCtx {
 
         let mem = &store.memories[0].data;
 
-        let guest_path = match str::from_utf8(&mem[path_ptr..path_ptr + path_len]) {
+        let guest_path = match str::from_utf8(mem.read_bytes(path_ptr, path_len)) {
             Ok(s) => s,
             Err(_) => return Errno::Inval,
         };
@@ -734,7 +731,7 @@ impl WasiCtx {
             });
 
             let mem = &mut store.memories[0].data;
-            mem[fd_out_ptr..fd_out_ptr + 4].copy_from_slice(&new_fd.to_le_bytes());
+            mem.write_u32(fd_out_ptr, new_fd);
 
             return Errno::Success;
         }
@@ -788,7 +785,7 @@ impl WasiCtx {
         });
 
         let mem = &mut store.memories[0].data;
-        mem[fd_out_ptr..fd_out_ptr + 4].copy_from_slice(&new_fd.to_le_bytes());
+        mem.write_u32(fd_out_ptr, new_fd);
 
         Errno::Success
     }
