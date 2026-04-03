@@ -311,6 +311,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gabagool-wasip1"
+version = "0.1.0"
+dependencies = [
+ "gabagool",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

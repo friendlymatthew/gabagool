@@ -1,5 +1,6 @@
 [workspace]
-members = ["gabagool", "gabagool-debug-adapter"]
+members = ["gabagool", "gabagool-debug-adapter", "gabagool-wasip1"]
+exclude = ["programs-wasi"]
 resolver = "2"
 
 [workspace.package]
