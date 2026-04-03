@@ -128,7 +128,9 @@ impl WasiCtx {
     ) -> DispatchResult {
         let errno = match func_name {
             "fd_read" => self.fd_read(store, args),
+            "fd_pread" => self.fd_pread(store, args),
             "fd_write" => self.fd_write(store, args),
+            "fd_pwrite" => self.fd_pwrite(store, args),
             "fd_close" => self.fd_close(args),
             "fd_seek" => self.fd_seek(store, args),
             "fd_tell" => self.fd_tell(store, args),
@@ -139,6 +141,18 @@ impl WasiCtx {
             "fd_filestat_get" => self.fd_filestat_get(store, args),
             "fd_prestat_get" => self.fd_prestat_get(store, args),
             "fd_prestat_dir_name" => self.fd_prestat_dir_name(store, args),
+            "fd_readdir" => self.fd_readdir(store, args),
+            "fd_renumber" => {
+                let from = args[0].as_i32() as u32;
+                let to = args[1].as_i32() as u32;
+                match self.fd_table.renumber(from, to) {
+                    Ok(()) => Errno::Success,
+                    Err(e) => e,
+                }
+            }
+            "fd_fdstat_set_rights" => self.fd_fdstat_set_rights(args),
+            "fd_filestat_set_size" => self.fd_filestat_set_size(args),
+            "fd_filestat_set_times" => self.fd_filestat_set_times(args),
             "fd_advise" => Errno::Success,
             "fd_allocate" => Errno::Success,
             "path_open" => self.path_open(store, args),
@@ -179,16 +193,55 @@ impl WasiCtx {
         }
     }
 
+    fn dir_host_path(&self, fd: u32) -> Result<PathBuf, Errno> {
+        let entry = self.fd_table.get(fd)?;
+
+        match &entry.kind {
+            FdKind::Preopen { host_path, .. } => Ok(host_path.clone()),
+            FdKind::Directory { host_path } => Ok(host_path.clone()),
+            _ => Err(Errno::NotDir),
+        }
+    }
+
     fn fd_read(&mut self, store: &mut Store, args: &[RawValue]) -> Errno {
         let [fd, iovs, iovs_len, nread_ptr] = args else {
             panic!("invalid argument");
         };
 
-        let fd = fd.as_i32() as u32;
-        let iovs = iovs.as_i32() as u32;
-        let iovs_len = iovs_len.as_i32() as u32;
-        let nread_ptr = nread_ptr.as_i32() as u32;
+        self.fd_read_impl(
+            store,
+            fd.as_i32() as u32,
+            iovs.as_i32() as u32,
+            iovs_len.as_i32() as u32,
+            nread_ptr.as_i32() as u32,
+            None,
+        )
+    }
 
+    fn fd_pread(&mut self, store: &mut Store, args: &[RawValue]) -> Errno {
+        let [fd, iovs, iovs_len, offset, nread_ptr] = args else {
+            panic!("invalid argument");
+        };
+
+        self.fd_read_impl(
+            store,
+            fd.as_i32() as u32,
+            iovs.as_i32() as u32,
+            iovs_len.as_i32() as u32,
+            nread_ptr.as_i32() as u32,
+            Some(offset.as_i64() as u64),
+        )
+    }
+
+    fn fd_read_impl(
+        &mut self,
+        store: &mut Store,
+        fd: u32,
+        iovs: u32,
+        iovs_len: u32,
+        nread_ptr: u32,
+        offset: Option<u64>,
+    ) -> Errno {
         let entry = match self.fd_table.get(fd) {
             Ok(e) => e,
             Err(e) => return e,
@@ -203,17 +256,17 @@ impl WasiCtx {
 
         for i in 0..iovs_len {
             let base = (iovs + i * 8) as usize;
-
-            let buf_ptr = mem.read_u32(base) as usize;
-            let buf_len = mem.read_u32(base + 4) as usize;
-
-            iov_entries.push((buf_ptr, buf_len));
+            iov_entries.push((mem.read_u32(base) as usize, mem.read_u32(base + 4) as usize));
         }
 
-        let mut total_read = 0;
+        let mut total_read = 0u32;
 
         match &mut self.fd_table.get_mut(fd).unwrap().kind {
             FdKind::Stdin => {
+                if offset.is_some() {
+                    return Errno::SPipe;
+                }
+
                 for (buf_ptr, buf_len) in &iov_entries {
                     let available = self.stdin_buf.len().min(*buf_len);
                     if available == 0 {
@@ -221,13 +274,18 @@ impl WasiCtx {
                     }
 
                     let drained = self.stdin_buf.drain(..available).collect::<Vec<_>>();
-
                     store.memories[0].data.write_bytes(*buf_ptr, &drained);
-
                     total_read += available as u32;
                 }
             }
             FdKind::File { file: Some(f), .. } => {
+                let original_pos = offset.map(|pos| {
+                    let orig = f.stream_position().unwrap_or(0);
+                    let _ = f.seek(SeekFrom::Start(pos));
+
+                    orig
+                });
+
                 for (buf_ptr, buf_len) in &iov_entries {
                     let mut tmp = vec![0u8; *buf_len];
 
@@ -235,33 +293,65 @@ impl WasiCtx {
                         Ok(0) => break,
                         Ok(n) => {
                             store.memories[0].data.write_bytes(*buf_ptr, &tmp[..n]);
-
                             total_read += n as u32;
                         }
                         Err(_) => return Errno::Io,
                     }
                 }
+
+                if let Some(orig) = original_pos {
+                    let _ = f.seek(SeekFrom::Start(orig));
+                }
             }
             _ => return Errno::BadF,
         }
 
-        let mem = &mut store.memories[0].data;
-        let ptr = nread_ptr as usize;
-        mem.write_u32(ptr, total_read);
+        store.memories[0]
+            .data
+            .write_u32(nread_ptr as usize, total_read);
 
         Errno::Success
     }
 
     fn fd_write(&mut self, store: &mut Store, args: &[RawValue]) -> Errno {
-        let [fd, iovs, iovs_len, nread_ptr] = args else {
+        let [fd, iovs, iovs_len, nwritten_ptr] = args else {
             panic!("invalid argument");
         };
 
-        let fd = fd.as_i32() as u32;
-        let iovs = iovs.as_i32() as u32;
-        let iovs_len = iovs_len.as_i32() as u32;
-        let nwritten_ptr = nread_ptr.as_i32() as u32;
+        self.fd_write_impl(
+            store,
+            fd.as_i32() as u32,
+            iovs.as_i32() as u32,
+            iovs_len.as_i32() as u32,
+            nwritten_ptr.as_i32() as u32,
+            None,
+        )
+    }
 
+    fn fd_pwrite(&mut self, store: &mut Store, args: &[RawValue]) -> Errno {
+        let [fd, iovs, iovs_len, offset, nwritten_ptr] = args else {
+            panic!("invalid argument");
+        };
+
+        self.fd_write_impl(
+            store,
+            fd.as_i32() as u32,
+            iovs.as_i32() as u32,
+            iovs_len.as_i32() as u32,
+            nwritten_ptr.as_i32() as u32,
+            Some(offset.as_i64() as u64),
+        )
+    }
+
+    fn fd_write_impl(
+        &mut self,
+        store: &mut Store,
+        fd: u32,
+        iovs: u32,
+        iovs_len: u32,
+        nwritten_ptr: u32,
+        offset: Option<u64>,
+    ) -> Errno {
         let entry = match self.fd_table.get(fd) {
             Ok(e) => e,
             Err(e) => return e,
@@ -272,7 +362,7 @@ impl WasiCtx {
         }
 
         let mem = &store.memories[0].data;
-        let mut total_written = 0;
+        let mut total_written = 0u32;
         let mut bufs = Vec::with_capacity(iovs_len as usize);
 
         for i in 0..iovs_len {
@@ -281,38 +371,121 @@ impl WasiCtx {
             let buf_len = mem.read_u32(base + 4) as usize;
 
             bufs.push(mem.read_bytes(buf_ptr, buf_len).to_vec());
-
             total_written += buf_len as u32;
         }
 
         match &mut self.fd_table.get_mut(fd).unwrap().kind {
             FdKind::Stdout => {
+                if offset.is_some() {
+                    return Errno::SPipe;
+                }
+
                 for buf in &bufs {
                     self.stdout_buf.extend_from_slice(buf);
-
                     let _ = std::io::stdout().lock().write_all(buf);
                 }
             }
             FdKind::Stderr => {
+                if offset.is_some() {
+                    return Errno::SPipe;
+                }
+
                 for buf in &bufs {
                     self.stderr_buf.extend_from_slice(buf);
-
                     let _ = std::io::stderr().lock().write_all(buf);
                 }
             }
             FdKind::File { file: Some(f), .. } => {
+                let original_pos = offset.map(|pos| {
+                    let orig = f.stream_position().unwrap_or(0);
+                    let _ = f.seek(SeekFrom::Start(pos));
+
+                    orig
+                });
+
                 for buf in &bufs {
                     if f.write_all(buf).is_err() {
                         return Errno::Io;
                     }
                 }
+
+                if let Some(orig) = original_pos {
+                    let _ = f.seek(SeekFrom::Start(orig));
+                }
             }
             _ => return Errno::BadF,
         }
 
+        store.memories[0]
+            .data
+            .write_u32(nwritten_ptr as usize, total_written);
+
+        Errno::Success
+    }
+
+    fn fd_readdir(&self, store: &mut Store, args: &[RawValue]) -> Errno {
+        let [fd, buf, buf_len, cookie, bufused_ptr] = args else {
+            panic!("invalid argument");
+        };
+
+        let fd = fd.as_i32() as u32;
+        let buf = buf.as_i32() as usize;
+        let buf_len = buf_len.as_i32() as usize;
+        let cookie = cookie.as_i64() as u64;
+        let bufused_ptr = bufused_ptr.as_i32() as usize;
+
+        let host_path = match self.dir_host_path(fd) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+
+        let entries = match std::fs::read_dir(&host_path) {
+            Ok(rd) => rd,
+            Err(_) => return Errno::Io,
+        };
+
         let mem = &mut store.memories[0].data;
-        let ptr = nwritten_ptr as usize;
-        mem.write_u32(ptr, total_written);
+        let mut offset = 0;
+
+        for (i, entry) in entries.enumerate() {
+            if (i as u64) < cookie {
+                continue;
+            }
+
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let name = entry.file_name();
+            let name_bytes = name.as_encoded_bytes();
+            let entry_size = 24 + name_bytes.len();
+
+            if offset + entry_size > buf_len {
+                break;
+            }
+
+            let d_next = (i + 1) as u64;
+            let d_type = if entry.path().is_dir() {
+                FileType::Directory as u8
+            } else if entry.path().is_symlink() {
+                FileType::SymbolicLink as u8
+            } else {
+                FileType::RegularFile as u8
+            };
+
+            let ptr = buf + offset;
+            mem.write_u64(ptr, d_next);
+            mem.write_u64(ptr + 8, 0);
+            mem.write_u32(ptr + 16, name_bytes.len() as u32);
+            mem.write_u8(ptr + 20, d_type);
+            mem.fill(ptr + 21, 3, 0);
+            mem.write_bytes(ptr + 24, name_bytes);
+
+            offset += entry_size;
+        }
+
+        mem.write_u32(bufused_ptr, offset as u32);
 
         Errno::Success
     }
@@ -630,6 +803,61 @@ impl WasiCtx {
 
         entry.flags = FdFlags(flags);
         Errno::Success
+    }
+
+    fn fd_fdstat_set_rights(&mut self, args: &[RawValue]) -> Errno {
+        let fd = args[0].as_i32() as u32;
+        let rights_base = args[1].as_i64() as u64;
+        let rights_inheriting = args[2].as_i64() as u64;
+
+        let entry = match self.fd_table.get_mut(fd) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+
+        if rights_base & !entry.rights_base.0 != 0 {
+            return Errno::NotCapable;
+        }
+
+        if rights_inheriting & !entry.rights_inheriting.0 != 0 {
+            return Errno::NotCapable;
+        }
+
+        entry.rights_base = Rights(rights_base);
+        entry.rights_inheriting = Rights(rights_inheriting);
+        Errno::Success
+    }
+
+    fn fd_filestat_set_size(&mut self, args: &[RawValue]) -> Errno {
+        let fd = args[0].as_i32() as u32;
+        let size = args[1].as_i64() as u64;
+
+        let entry = match self.fd_table.get_mut(fd) {
+            Ok(e) => e,
+            Err(e) => return e,
+        };
+
+        match &entry.kind {
+            FdKind::File { file: Some(f), .. } => {
+                if f.set_len(size).is_err() {
+                    return Errno::Io;
+                }
+                Errno::Success
+            }
+            _ => Errno::BadF,
+        }
+    }
+
+    fn fd_filestat_set_times(&self, args: &[RawValue]) -> Errno {
+        let fd = args[0].as_i32() as u32;
+        let _atim = args[1].as_i64() as u64;
+        let _mtim = args[2].as_i64() as u64;
+        let _fst_flags = args[3].as_i32() as u16;
+
+        match self.fd_table.get(fd) {
+            Ok(_) => Errno::Success,
+            Err(e) => e,
+        }
     }
 
     fn fd_filestat_get(&self, store: &mut Store, args: &[RawValue]) -> Errno {
