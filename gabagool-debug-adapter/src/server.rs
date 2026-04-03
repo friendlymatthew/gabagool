@@ -188,7 +188,7 @@ impl DAPServer {
             .enumerate()
             .map(|(i, frame)| {
                 let local_func_idx = frame
-                    .compiled_func_idx
+                    .compiled_func_i
                     .saturating_sub(self.num_imported_funcs)
                     as usize;
 
@@ -198,7 +198,7 @@ impl DAPServer {
                     .expect("source map not initialized");
                 let name = sm
                     .func_name(local_func_idx)
-                    .unwrap_or(&format!("func_{}", frame.compiled_func_idx))
+                    .unwrap_or(&format!("func_{}", frame.compiled_func_i))
                     .to_string();
                 let line = sm
                     .instruction_to_line(local_func_idx, frame.source_position)
@@ -289,7 +289,7 @@ impl DAPServer {
             }
             Scope::Globals => {
                 let frame = &frames[frame_idx];
-                let globals = dbg.globals(frame.module_idx);
+                let globals = dbg.globals(frame.module_i);
                 globals
                     .iter()
                     .enumerate()
@@ -306,7 +306,7 @@ impl DAPServer {
             Scope::Locals => {
                 let frame = &frames[frame_idx];
                 let local_func_idx = frame
-                    .compiled_func_idx
+                    .compiled_func_i
                     .saturating_sub(self.num_imported_funcs)
                     as usize;
 
@@ -336,8 +336,8 @@ impl DAPServer {
             }
             Scope::Memory => {
                 let frame = &frames[frame_idx];
-                let total = dbg.memory_size(frame.module_idx, 0).unwrap_or(0);
-                let mem_ref = format!("mem_{}_{}", frame.module_idx, 0);
+                let total = dbg.memory_size(frame.module_i, 0).unwrap_or(0);
+                let mem_ref = format!("mem_{}_{}", frame.module_i, 0);
 
                 vec![json!({
                     "name": "memory[0]",

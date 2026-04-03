@@ -1,6 +1,5 @@
 [workspace]
-members = ["gabagool", "gabagool-debug-adapter", "gabagool-stencils"]
-default-members = ["gabagool"]
+members = ["gabagool", "gabagool-debug-adapter"]
 resolver = "2"
 
 [workspace.package]

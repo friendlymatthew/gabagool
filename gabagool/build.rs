@@ -643,14 +643,14 @@ mod jit {
     }
 
     pub fn generate() {
-        println!("cargo::rerun-if-changed=../gabagool-stencils/src/stencils.c");
-        println!("cargo::rerun-if-changed=../gabagool-stencils/src/stencil_context.h");
+        println!("cargo::rerun-if-changed=src/stencils/stencils.c");
+        println!("cargo::rerun-if-changed=src/stencils/stencil_context.h");
 
         let out_dir = env::var("OUT_DIR").unwrap();
 
         let objects = cc::Build::new()
-            .file("../gabagool-stencils/src/stencils.c")
-            .include("../gabagool-stencils/src")
+            .file("src/stencils/stencils.c")
+            .include("src/stencils")
             .opt_level(3)
             .flag("-fno-stack-protector")
             .flag("-fno-asynchronous-unwind-tables")

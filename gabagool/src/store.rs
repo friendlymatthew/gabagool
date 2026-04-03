@@ -1368,7 +1368,6 @@ impl Store {
                     flat.push(RawValue::from(w as i32));
                 }
             }
-            _ => todo!("lower {:?}", value),
         }
         Ok(())
     }
