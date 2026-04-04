@@ -358,7 +358,7 @@ mod core_tests {
                                 ));
                             }
                             setup.push_str("];\n");
-                            setup.push_str("    let resolve_result = try_resolve_imports_with_registered(&mut store, &module, &registered_exports);\n");
+                            setup.push_str("    let resolve_result = try_resolve_imports_with_registered(&module, &registered_exports);\n");
                         } else {
                             setup.push_str("    let resolve_result = try_resolve_spectest_imports(&mut store, &module);\n");
                         }
@@ -474,28 +474,51 @@ mod core_tests {
                     "    let imports = setup_spectest_imports(&mut store, &module);\n".to_string()
                 };
 
-                all_tests.push_str(&format!(
-                    concat!(
-                        "#[test]\n",
-                        "fn {test_name}() {{\n",
-                        "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
-                        "    let module = Module::new(wasm_bytes).unwrap();\n",
-                        "    let mut store = Store::new();\n",
-                        "{setup}",
-                        "    let instance = store.instantiate(&module, imports).unwrap();\n",
-                        "    let mut failures: Vec<String> = Vec::new();\n",
-                        "{steps}\n",
-                        "    if !failures.is_empty() {{\n",
-                        "        panic!(\"{{}} assertion(s) failed in {test_name}:\\n{{}}\", failures.len(), failures.join(\"\\n\"));\n",
-                        "    }}\n",
-                        "}}\n",
-                    ),
-                    test_name = test_name,
-                    file = safe_name,
-                    midx = midx,
-                    setup = setup_code,
-                    steps = steps_code,
-                ));
+                let uses_failures = steps.iter().any(|s| s.contains("failures"));
+
+                if uses_failures {
+                    all_tests.push_str(&format!(
+                        concat!(
+                            "#[test]\n",
+                            "fn {test_name}() {{\n",
+                            "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
+                            "    let module = Module::new(wasm_bytes).unwrap();\n",
+                            "    let mut store = Store::new();\n",
+                            "{setup}",
+                            "    let instance = store.instantiate(&module, imports).unwrap();\n",
+                            "    let mut failures = Vec::new();\n",
+                            "{steps}\n",
+                            "    if !failures.is_empty() {{\n",
+                            "        panic!(\"{{}} assertion(s) failed in {test_name}:\\n{{}}\", failures.len(), failures.join(\"\\n\"));\n",
+                            "    }}\n",
+                            "}}\n",
+                        ),
+                        test_name = test_name,
+                        file = safe_name,
+                        midx = midx,
+                        setup = setup_code,
+                        steps = steps_code,
+                    ));
+                } else {
+                    all_tests.push_str(&format!(
+                        concat!(
+                            "#[test]\n",
+                            "fn {test_name}() {{\n",
+                            "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
+                            "    let module = Module::new(wasm_bytes).unwrap();\n",
+                            "    let mut store = Store::new();\n",
+                            "{setup}",
+                            "    let instance = store.instantiate(&module, imports).unwrap();\n",
+                            "{steps}\n",
+                            "}}\n",
+                        ),
+                        test_name = test_name,
+                        file = safe_name,
+                        midx = midx,
+                        setup = setup_code,
+                        steps = steps_code,
+                    ));
+                }
             }
         }
 

@@ -2,8 +2,8 @@
 
 use gabagool::{
     parser::Parser, AddrType, CompositeType, ExportInstance, ExternalValue, FunctionInstance,
-    GlobalInstance, GlobalType, ImportDescription, Instance, Limit, MemoryInstance, MemoryType,
-    Module, RawValue, Ref, Store, TagInstance, ValueType,
+    GlobalInstance, GlobalType, GuestMemory, ImportDescription, Instance, Limit, MemoryInstance,
+    MemoryType, Module, RawValue, Ref, Store, ValueType,
 };
 
 #[derive(Debug)]
@@ -41,7 +41,7 @@ fn create_spectest_memory(store: &mut Store, mt: &MemoryType) -> ExternalValue {
             addr_type: mt.addr_type,
             limit: Limit { min: 1, max: 2 },
         },
-        data: vec![0u8; 65536],
+        data: GuestMemory::new(65536),
     });
     ExternalValue::Memory { addr }
 }
@@ -250,14 +250,13 @@ fn values_match(expected: &[ExpectedValue], actual: &[RawValue]) -> bool {
 }
 
 fn try_resolve_spectest_imports(
-    store: &mut Store,
+    _store: &mut Store,
     module: &Module,
 ) -> Result<Vec<ExternalValue>, gabagool::Error> {
-    try_resolve_imports_with_registered(store, module, &[])
+    try_resolve_imports_with_registered(module, &[])
 }
 
 fn try_resolve_imports_with_registered(
-    store: &mut Store,
     module: &Module,
     registered_exports: &[(&str, &[ExportInstance])],
 ) -> Result<Vec<ExternalValue>, gabagool::Error> {

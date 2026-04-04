@@ -173,6 +173,11 @@ impl WasiCtx {
             "clock_res_get" => self.clock_res_get(store, args),
             "random_get" => self.random_get(store, args),
             "sched_yield" => Errno::Success,
+            "proc_raise" => Errno::NoSys,
+            "sock_accept" => Errno::NoSys,
+            "sock_recv" => Errno::NoSys,
+            "sock_send" => Errno::NoSys,
+            "sock_shutdown" => Errno::NoSys,
             "proc_exit" => {
                 self.exit_code = Some(args[0].as_i32() as u32);
                 return DispatchResult::Exit(args[0].as_i32() as u32);
