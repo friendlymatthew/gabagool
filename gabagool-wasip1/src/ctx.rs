@@ -60,9 +60,24 @@ impl<'a> MemCursor<'a> {
         self.pos += 2;
     }
 
+    fn write_u32(&mut self, val: u32) {
+        self.mem.write_u32(self.pos, val);
+        self.pos += 4;
+    }
+
     fn write_u64(&mut self, val: u64) {
         self.mem.write_u64(self.pos, val);
         self.pos += 8;
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) {
+        self.mem.write_bytes(self.pos, data);
+        self.pos += data.len();
+    }
+
+    fn zero(&mut self, n: usize) {
+        self.mem.fill(self.pos, n, 0);
+        self.pos += n;
     }
 }
 
@@ -287,6 +302,25 @@ impl WasiCtx {
         }
     }
 
+    fn write_filestat(
+        mem: &mut GuestMemory,
+        ptr: usize,
+        filetype: FileType,
+        nlink: u64,
+        size: u64,
+    ) {
+        let mut c = MemCursor::new(mem, ptr);
+        c.write_u64(0);
+        c.write_u64(0);
+        c.write_u8(filetype as u8);
+        c.align(8);
+        c.write_u64(nlink);
+        c.write_u64(size);
+        c.write_u64(0);
+        c.write_u64(0);
+        c.write_u64(0);
+    }
+
     fn dir_host_path(&self, fd: u32) -> Result<PathBuf, Errno> {
         let entry = self.fd_table.get(fd)?;
 
@@ -361,12 +395,12 @@ impl WasiCtx {
             return Errno::NotCapable;
         }
 
-        let mem = &store.memories[0].data;
+        let mem = &mut store.memories[0].data;
         let mut iov_entries = Vec::with_capacity(iovs_len as usize);
 
         for i in 0..iovs_len {
-            let base = (iovs + i * 8) as usize;
-            iov_entries.push((mem.read_u32(base) as usize, mem.read_u32(base + 4) as usize));
+            let mut c = MemCursor::new(mem, (iovs + i * 8) as usize);
+            iov_entries.push((c.read_u32() as usize, c.read_u32() as usize));
         }
 
         let mut total_read = 0u32;
@@ -471,14 +505,14 @@ impl WasiCtx {
             return Errno::NotCapable;
         }
 
-        let mem = &store.memories[0].data;
+        let mem = &mut store.memories[0].data;
         let mut total_written = 0u32;
         let mut bufs = Vec::with_capacity(iovs_len as usize);
 
         for i in 0..iovs_len {
-            let base = (iovs + i * 8) as usize;
-            let buf_ptr = mem.read_u32(base) as usize;
-            let buf_len = mem.read_u32(base + 4) as usize;
+            let mut c = MemCursor::new(mem, (iovs + i * 8) as usize);
+            let buf_ptr = c.read_u32() as usize;
+            let buf_len = c.read_u32() as usize;
 
             bufs.push(mem.read_bytes(buf_ptr, buf_len).to_vec());
             total_written += buf_len as u32;
@@ -584,13 +618,13 @@ impl WasiCtx {
                 FileType::RegularFile as u8
             };
 
-            let ptr = buf + offset;
-            mem.write_u64(ptr, d_next);
-            mem.write_u64(ptr + 8, 0);
-            mem.write_u32(ptr + 16, name_bytes.len() as u32);
-            mem.write_u8(ptr + 20, d_type);
-            mem.fill(ptr + 21, 3, 0);
-            mem.write_bytes(ptr + 24, name_bytes);
+            let mut c = MemCursor::new(mem, buf + offset);
+            c.write_u64(d_next);
+            c.write_u64(0);
+            c.write_u32(name_bytes.len() as u32);
+            c.write_u8(d_type);
+            c.zero(3);
+            c.write_bytes(name_bytes);
 
             offset += entry_size;
         }
@@ -614,12 +648,10 @@ impl WasiCtx {
             _ => return Errno::BadF,
         };
 
-        let mem = &mut store.memories[0].data;
-
-        let ptr = prestat_ptr as usize;
-        mem.write_u8(ptr, 0);
-        mem.fill(ptr + 1, 3, 0);
-        mem.write_u32(ptr + 4, guest_path.len() as u32);
+        let mut c = MemCursor::new(&mut store.memories[0].data, prestat_ptr as usize);
+        c.write_u8(0);
+        c.zero(3);
+        c.write_u32(guest_path.len() as u32);
 
         Errno::Success
     }
@@ -949,12 +981,13 @@ impl WasiCtx {
             Err(e) => return e,
         };
 
-        let mem = &mut store.memories[0].data;
-        mem.fill(buf_ptr, 24, 0);
-        mem.write_u8(buf_ptr, entry.file_type as u8);
-        mem.write_u16(buf_ptr + 2, entry.flags.0);
-        mem.write_u64(buf_ptr + 8, entry.rights_base.0);
-        mem.write_u64(buf_ptr + 16, entry.rights_inheriting.0);
+        let mut c = MemCursor::new(&mut store.memories[0].data, buf_ptr);
+        c.write_u8(entry.file_type as u8);
+        c.zero(1);
+        c.write_u16(entry.flags.0);
+        c.zero(4);
+        c.write_u64(entry.rights_base.0);
+        c.write_u64(entry.rights_inheriting.0);
 
         Errno::Success
     }
@@ -1036,38 +1069,29 @@ impl WasiCtx {
             Err(e) => return e,
         };
 
-        let mem = &mut store.memories[0].data;
-        mem.fill(buf_ptr, 64, 0);
-        mem.write_u8(buf_ptr + 16, entry.file_type as u8);
-
-        match &entry.kind {
+        let (nlink, size) = match &entry.kind {
             FdKind::File { file: Some(f), .. } => {
-                if let Ok(metadata) = f.metadata() {
-                    let size = metadata.len();
-                    mem.write_u64(buf_ptr + 32, size);
-
-                    let nlink = 1u64;
-                    mem.write_u64(buf_ptr + 24, nlink);
-                }
+                let m = f.metadata().ok();
+                (1, m.map_or(0, |m| m.len()))
             }
             FdKind::File { host_path, .. } => {
-                if let Ok(metadata) = std::fs::metadata(host_path) {
-                    let size = metadata.len();
-                    mem.write_u64(buf_ptr + 32, size);
-
-                    let nlink = 1u64;
-                    mem.write_u64(buf_ptr + 24, nlink);
-                }
+                let m = std::fs::metadata(host_path).ok();
+                (1, m.map_or(0, |m| m.len()))
             }
             FdKind::Directory { host_path } | FdKind::Preopen { host_path, .. } => {
-                if let Ok(_metadata) = std::fs::metadata(host_path) {
-                    let nlink = 1u64;
-                    mem.write_u64(buf_ptr + 24, nlink);
-                }
+                let has = std::fs::metadata(host_path).is_ok();
+                (if has { 1 } else { 0 }, 0)
             }
-            _ => {}
-        }
+            _ => (0, 0),
+        };
 
+        Self::write_filestat(
+            &mut store.memories[0].data,
+            buf_ptr,
+            entry.file_type,
+            nlink,
+            size,
+        );
         Errno::Success
     }
 
@@ -1348,11 +1372,13 @@ impl WasiCtx {
             FileType::RegularFile
         };
 
-        let mem = &mut store.memories[0].data;
-        mem.fill(buf_ptr, 64, 0);
-        mem.write_u8(buf_ptr + 16, filetype as u8);
-        mem.write_u64(buf_ptr + 24, 1);
-        mem.write_u64(buf_ptr + 32, metadata.len());
+        Self::write_filestat(
+            &mut store.memories[0].data,
+            buf_ptr,
+            filetype,
+            1,
+            metadata.len(),
+        );
 
         Errno::Success
     }
