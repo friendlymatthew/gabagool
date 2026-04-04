@@ -4,18 +4,78 @@ use std::str;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use gabagool::{
-    CompositeType, ExecutionState, ExternalValue, FunctionInstance, ImportDescription, Instance,
-    Module, RawValue, Store,
+    CompositeType, ExecutionState, ExternalValue, FunctionInstance, GuestMemory, ImportDescription,
+    Instance, Module, RawValue, Store,
 };
 
-use crate::{Errno, FdEntry, FdFlags, FdKind, FdTable, FileType, Rights};
+struct MemCursor<'a> {
+    mem: &'a mut GuestMemory,
+    pos: usize,
+}
+
+impl<'a> MemCursor<'a> {
+    const fn new(mem: &'a mut GuestMemory, pos: usize) -> Self {
+        Self { mem, pos }
+    }
+
+    const fn align(&mut self, n: usize) {
+        self.pos = (self.pos + n - 1) & !(n - 1);
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        let v = self.mem.read_u8(self.pos);
+        self.pos += 1;
+
+        v
+    }
+
+    fn read_u16(&mut self) -> u16 {
+        let v = self.mem.read_u16(self.pos);
+        self.pos += 2;
+
+        v
+    }
+
+    fn read_u32(&mut self) -> u32 {
+        let v = self.mem.read_u32(self.pos);
+        self.pos += 4;
+
+        v
+    }
+
+    fn read_u64(&mut self) -> u64 {
+        let v = self.mem.read_u64(self.pos);
+        self.pos += 8;
+
+        v
+    }
+
+    fn write_u8(&mut self, val: u8) {
+        self.mem.write_u8(self.pos, val);
+        self.pos += 1;
+    }
+
+    fn write_u16(&mut self, val: u16) {
+        self.mem.write_u16(self.pos, val);
+        self.pos += 2;
+    }
+
+    fn write_u64(&mut self, val: u64) {
+        self.mem.write_u64(self.pos, val);
+        self.pos += 8;
+    }
+}
+
+use crate::{
+    Errno, FdEntry, FdFlags, FdKind, FdTable, FileType, Rights, EVENT_SIZE, SUBSCRIPTION_SIZE,
+};
 
 pub enum DispatchResult {
     Values(Vec<RawValue>),
     Exit(u32),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct WasiCtx {
     pub fd_table: FdTable,
     pub args: Vec<String>,
@@ -24,6 +84,25 @@ pub struct WasiCtx {
     pub stdin_buf: Vec<u8>,
     pub stdout_buf: Vec<u8>,
     pub stderr_buf: Vec<u8>,
+    pub clock_nanos: u64,
+}
+
+impl Default for WasiCtx {
+    fn default() -> Self {
+        Self {
+            fd_table: FdTable::default(),
+            args: Vec::new(),
+            environ: Vec::new(),
+            exit_code: None,
+            stdin_buf: Vec::new(),
+            stdout_buf: Vec::new(),
+            stderr_buf: Vec::new(),
+            clock_nanos: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64,
+        }
+    }
 }
 
 impl WasiCtx {
@@ -172,6 +251,7 @@ impl WasiCtx {
             "clock_time_get" => self.clock_time_get(store, args),
             "clock_res_get" => self.clock_res_get(store, args),
             "random_get" => self.random_get(store, args),
+            "poll_oneoff" => self.poll_oneoff(store, args),
             "sched_yield" => Errno::Success,
             "proc_raise" => Errno::NoSys,
             "sock_accept" => Errno::NoSys,
@@ -650,12 +730,7 @@ impl WasiCtx {
         let timestamp_ptr = args[2].as_i32() as usize;
 
         let nanos = match clock_id {
-            0 | 1 => {
-                let duration = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default();
-                duration.as_nanos() as u64
-            }
+            0 | 1 => self.clock_nanos,
             _ => return Errno::Inval,
         };
 
@@ -677,6 +752,68 @@ impl WasiCtx {
 
         let mem = &mut store.memories[0].data;
         mem.write_u64(resolution_ptr, res);
+
+        Errno::Success
+    }
+
+    fn poll_oneoff(&mut self, store: &mut Store, args: &[RawValue]) -> Errno {
+        let in_ptr = args[0].as_i32() as usize;
+        let out_ptr = args[1].as_i32() as usize;
+        let nsubscriptions = args[2].as_i32() as u32;
+        let nevents_ptr = args[3].as_i32() as usize;
+
+        let mem = &mut store.memories[0].data;
+        let mut nevents = 0u32;
+
+        for i in 0..nsubscriptions {
+            let sub_base = in_ptr + (i * SUBSCRIPTION_SIZE) as usize;
+
+            let mut r = MemCursor::new(mem, sub_base);
+
+            let userdata = r.read_u64();
+            let tag = r.read_u8();
+            r.align(8);
+            let _clock_id = r.read_u32();
+            r.align(8);
+            let timeout = r.read_u64();
+            let _precision = r.read_u64();
+            let flags = r.read_u16();
+
+            let evt_base = out_ptr + (nevents * EVENT_SIZE) as usize;
+            let mut w = MemCursor::new(mem, evt_base);
+
+            match tag {
+                0 => {
+                    if flags & 1 == 0 {
+                        self.clock_nanos += timeout;
+                    } else if timeout > self.clock_nanos {
+                        self.clock_nanos = timeout;
+                    }
+
+                    w.write_u64(userdata);
+                    w.write_u16(0);
+                    w.write_u8(0);
+                    nevents += 1;
+                }
+                1 | 2 => {
+                    w.write_u64(userdata);
+                    w.write_u16(0);
+                    w.write_u8(tag);
+                    w.align(8);
+                    w.write_u64(0);
+                    w.write_u16(0);
+                    nevents += 1;
+                }
+                _ => {
+                    w.write_u64(userdata);
+                    w.write_u16(Errno::Inval as u16);
+                    w.write_u8(tag);
+                    nevents += 1;
+                }
+            }
+        }
+
+        store.memories[0].data.write_u32(nevents_ptr, nevents);
 
         Errno::Success
     }
@@ -1275,6 +1412,23 @@ mod tests {
 
         let on_disk = std::fs::read_to_string(dir.path().join("test.txt")).unwrap();
         assert_eq!(on_disk, "howdy from file");
+    }
+
+    #[test]
+    fn sleep() {
+        let wasm = std::fs::read("../programs-wasi/sleep.wasm").unwrap();
+        let module = Module::new(&wasm).unwrap();
+        let mut store = Store::new();
+        let mut wasi = WasiCtx::new();
+
+        let before = wasi.clock_nanos;
+        let imports = wasi.imports(&mut store, &module);
+        let instance = store.instantiate(&module, imports).unwrap();
+        let exit_code = wasi.run(&mut store, instance).unwrap();
+
+        assert_eq!(exit_code, 0);
+        assert_eq!(&wasi.stdout_buf, b"slept ok\n");
+        assert!(wasi.clock_nanos >= before + 100_000_000);
     }
 
     #[test]

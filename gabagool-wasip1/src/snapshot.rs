@@ -146,6 +146,7 @@ impl Snapshot for WasiCtx {
         self.stdin_buf.encode(buf);
         self.stdout_buf.encode(buf);
         self.stderr_buf.encode(buf);
+        self.clock_nanos.encode(buf);
     }
     fn decode(buf: &mut &[u8]) -> Self {
         let fd_table = FdTable::decode(buf);
@@ -161,6 +162,7 @@ impl Snapshot for WasiCtx {
         let stdin_buf = Vec::<u8>::decode(buf);
         let stdout_buf = Vec::<u8>::decode(buf);
         let stderr_buf = Vec::<u8>::decode(buf);
+        let clock_nanos = u64::decode(buf);
 
         let mut ctx = Self {
             fd_table,
@@ -170,6 +172,7 @@ impl Snapshot for WasiCtx {
             stdin_buf,
             stdout_buf,
             stderr_buf,
+            clock_nanos,
         };
 
         ctx.reopen_files();
