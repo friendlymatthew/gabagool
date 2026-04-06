@@ -1,0 +1,8 @@
+[package]
+name = "python"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gabagool = { path = "../../gabagool" }
+gabagool-wasip1 = { path = "../../gabagool-wasip1" }

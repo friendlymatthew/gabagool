@@ -8,3 +8,5 @@ programs/*.wat
 !programs/fibonacci.wat
 !programs/add.wat
 !programs/stair_climb.wat
+examples/python/python.wasm
+examples/python/lib/
