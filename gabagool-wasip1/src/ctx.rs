@@ -605,10 +605,6 @@ impl WasiCtx {
             let name_bytes = name.as_encoded_bytes();
             let entry_size = 24 + name_bytes.len();
 
-            if offset + entry_size > buf_len {
-                break;
-            }
-
             let d_next = (i + 1) as u64;
             let d_type = if entry.path().is_dir() {
                 FileType::Directory as u8
@@ -618,15 +614,30 @@ impl WasiCtx {
                 FileType::RegularFile as u8
             };
 
-            let mut c = MemCursor::new(mem, buf + offset);
-            c.write_u64(d_next);
-            c.write_u64(0);
-            c.write_u32(name_bytes.len() as u32);
-            c.write_u8(d_type);
-            c.zero(3);
-            c.write_bytes(name_bytes);
+            let remaining = buf_len - offset;
+            if remaining == 0 {
+                break;
+            }
 
-            offset += entry_size;
+            if entry_size <= remaining {
+                let mut c = MemCursor::new(mem, buf + offset);
+                c.write_u64(d_next);
+                c.write_u64(0);
+                c.write_u32(name_bytes.len() as u32);
+                c.write_u8(d_type);
+                c.zero(3);
+                c.write_bytes(name_bytes);
+                offset += entry_size;
+            } else {
+                let mut tmp = vec![0u8; entry_size];
+                tmp[0..8].copy_from_slice(&d_next.to_le_bytes());
+                tmp[16..20].copy_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+                tmp[20] = d_type;
+                tmp[24..].copy_from_slice(name_bytes);
+                mem.write_bytes(buf + offset, &tmp[..remaining]);
+                offset += remaining;
+                break;
+            }
         }
 
         mem.write_u32(bufused_ptr, offset as u32);
