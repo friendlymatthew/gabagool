@@ -53,11 +53,16 @@ impl DAPServer {
                 "scopes" => self.handle_scopes(request_seq, &msg)?,
                 "variables" => self.handle_variables(request_seq, &msg)?,
                 "setBreakpoints" => self.handle_set_breakpoints(request_seq, &msg)?,
-                "next" | "stepIn" => self.handle_step_forward(request_seq, command)?,
-                "stepOut" => self.handle_step_out(request_seq)?,
-                "stepBack" => self.handle_step_back(request_seq)?,
-                "continue" => self.handle_continue(request_seq)?,
-                "reverseContinue" => self.handle_reverse_continue(request_seq)?,
+                "next" => self.handle_request(request_seq, command, Debugger::step_over)?,
+                "stepIn" => self.handle_request(request_seq, command, Debugger::step_forward)?,
+                "stepOut" => self.handle_request(request_seq, command, Debugger::step_out)?,
+                "stepBack" => self.handle_request(request_seq, command, Debugger::step_back)?,
+                "continue" => {
+                    self.handle_request(request_seq, command, Debugger::continue_forward)?
+                }
+                "reverseContinue" => {
+                    self.handle_request(request_seq, command, Debugger::continue_backward)?
+                }
                 "readMemory" => self.handle_read_memory(request_seq, &msg)?,
                 "disconnect" => {
                     self.send_response(request_seq, "disconnect", json!({}))?;
@@ -389,33 +394,15 @@ impl DAPServer {
         )
     }
 
-    fn handle_step_out(&mut self, request_seq: i64) -> Result<()> {
-        let result = self.debugger_mut()?.step_out().map_err(err)?;
-        self.send_response(request_seq, "stepOut", json!({}))?;
-        self.send_step_event(result)
-    }
+    fn handle_request(
+        &mut self,
+        request_seq: i64,
+        command: &str,
+        action: impl FnOnce(&mut Debugger) -> gabagool::Result<StepResult>,
+    ) -> Result<()> {
+        let result = action(self.debugger_mut()?).map_err(err)?;
 
-    fn handle_step_forward(&mut self, request_seq: i64, command: &str) -> Result<()> {
-        let result = self.debugger_mut()?.step_forward().map_err(err)?;
         self.send_response(request_seq, command, json!({}))?;
-        self.send_step_event(result)
-    }
-
-    fn handle_step_back(&mut self, request_seq: i64) -> Result<()> {
-        let result = self.debugger_mut()?.step_back().map_err(err)?;
-        self.send_response(request_seq, "stepBack", json!({}))?;
-        self.send_step_event(result)
-    }
-
-    fn handle_continue(&mut self, request_seq: i64) -> Result<()> {
-        let result = self.debugger_mut()?.continue_forward().map_err(err)?;
-        self.send_response(request_seq, "continue", json!({}))?;
-        self.send_step_event(result)
-    }
-
-    fn handle_reverse_continue(&mut self, request_seq: i64) -> Result<()> {
-        let result = self.debugger_mut()?.continue_backward().map_err(err)?;
-        self.send_response(request_seq, "reverseContinue", json!({}))?;
         self.send_step_event(result)
     }
 

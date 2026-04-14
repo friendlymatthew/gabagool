@@ -273,6 +273,20 @@ impl Debugger {
         Ok(StepResult::Stepped)
     }
 
+    pub fn step_over(&mut self) -> Result<StepResult> {
+        let target_depth = self.store.call_stack().len();
+        loop {
+            let out = self.step_forward()?;
+            match out {
+                StepResult::Stepped if self.store.call_stack().len() <= target_depth => {
+                    return Ok(StepResult::Stepped);
+                }
+                StepResult::Stepped => continue,
+                other => return Ok(other),
+            }
+        }
+    }
+
     pub fn step_out(&mut self) -> Result<StepResult> {
         let target_depth = self.store.call_stack().len().saturating_sub(1);
         loop {
