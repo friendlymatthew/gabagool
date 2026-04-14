@@ -329,7 +329,10 @@ mod tests {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
-        let wasm = std::fs::read(workspace_root.join(wasm_path)).unwrap();
+        let full_path = workspace_root
+            .join("test-programs")
+            .join(std::path::Path::new(wasm_path).file_name().unwrap());
+        let wasm = std::fs::read(full_path).unwrap();
         let module = Module::new_with_mode(&wasm, CompilerMode::Debug).unwrap();
         let mut store = Store::new();
         let instance = store.instantiate(&module, vec![]).unwrap();

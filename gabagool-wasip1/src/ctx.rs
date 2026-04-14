@@ -1416,7 +1416,7 @@ mod tests {
 
     #[test]
     fn howdy() {
-        let wasm = std::fs::read("../programs-wasi/howdy.wasm").unwrap();
+        let wasm = std::fs::read("../test-programs-wasip1/howdy.wasm").unwrap();
         let module = Module::new(&wasm).unwrap();
         let mut store = Store::new();
         let mut wasi = WasiCtx::new();
@@ -1435,7 +1435,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sandbox = dir.path().to_str().unwrap();
 
-        let wasm = std::fs::read("../programs-wasi/file_io.wasm").unwrap();
+        let wasm = std::fs::read("../test-programs-wasip1/file_io.wasm").unwrap();
         let module = Module::new(&wasm).unwrap();
         let mut store = Store::new();
         let mut wasi = WasiCtx::new().preopen("/sandbox", sandbox);
@@ -1453,7 +1453,7 @@ mod tests {
 
     #[test]
     fn sleep() {
-        let wasm = std::fs::read("../programs-wasi/sleep.wasm").unwrap();
+        let wasm = std::fs::read("../test-programs-wasip1/sleep.wasm").unwrap();
         let module = Module::new(&wasm).unwrap();
         let mut store = Store::new();
         let mut wasi = WasiCtx::new();
@@ -1472,7 +1472,7 @@ mod tests {
     fn snapshot_howdy() {
         use gabagool::snapshot::Snapshot;
 
-        let wasm = std::fs::read("../programs-wasi/howdy.wasm").unwrap();
+        let wasm = std::fs::read("../test-programs-wasip1/howdy.wasm").unwrap();
         let module = Module::new(&wasm).unwrap();
         let mut store = Store::new();
         let mut wasi = WasiCtx::new();
@@ -1537,7 +1537,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sandbox = dir.path().to_str().unwrap();
 
-        let wasm = std::fs::read("../programs-wasi/file_io.wasm").unwrap();
+        let wasm = std::fs::read("../test-programs-wasip1/file_io.wasm").unwrap();
         let module = Module::new(&wasm).unwrap();
         let mut store = Store::new();
         let mut wasi = WasiCtx::new().preopen("/sandbox", sandbox);

@@ -178,7 +178,7 @@ mod tests {
     fn test_fibonacci_source_map() {
         let wat = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../programs/fibonacci.wat"
+            "/../test-programs/fibonacci.wat"
         ))
         .unwrap();
         let sm = WatSourceMap::from_wat("fibonacci.wat", &wat);
