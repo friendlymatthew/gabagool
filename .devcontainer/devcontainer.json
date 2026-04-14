@@ -5,11 +5,11 @@
         "ghcr.io/devcontainers/features/node:1": {}
     },
     "postCreateCommand": ".devcontainer/setup.sh",
-    "postAttachCommand": "code --install-extension gabagool-debug-adapter/gabagool-debug.vsix --force",
+    "postAttachCommand": ".devcontainer/setup.sh && code --install-extension gabagool-debug-adapter/gabagool-debug.vsix --force",
     "customizations": {
         "vscode": {
             "settings": {
-                "rust-analyzer.cargo.features": ["debug"]
+                "rust-analyzer.cargo.features": []
             }
         }
     }

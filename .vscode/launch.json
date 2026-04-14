@@ -5,28 +5,28 @@
             "type": "gabagool",
             "request": "launch",
             "name": "demo(5)",
-            "program": "${workspaceFolder}/programs/demo.wasm",
+            "program": "${workspaceFolder}/test-programs/demo.wasm",
             "args": "5"
         },
         {
             "type": "gabagool",
             "request": "launch",
             "name": "fibonacci(10)",
-            "program": "${workspaceFolder}/programs/fibonacci.wasm",
+            "program": "${workspaceFolder}/test-programs/fibonacci.wasm",
             "args": "10"
         },
         {
             "type": "gabagool",
             "request": "launch",
             "name": "add(3, 2)",
-            "program": "${workspaceFolder}/programs/add.wasm",
+            "program": "${workspaceFolder}/test-programs/add.wasm",
             "args": "3,2"
         },
         {
             "type": "gabagool",
             "request": "launch",
             "name": "stair_climb(5)",
-            "program": "${workspaceFolder}/programs/stair_climb.wasm",
+            "program": "${workspaceFolder}/test-programs/stair_climb.wasm",
             "args": "5"
         }
     ]

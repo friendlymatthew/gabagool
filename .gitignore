@@ -3,10 +3,6 @@ gabagool-debug-adapter/bin/
 gabagool/tests/spec/
 gabagool/tests/components/
 game-of-life*.gabagool
-programs/*.wat
-!programs/demo.wat
-!programs/fibonacci.wat
-!programs/add.wat
-!programs/stair_climb.wat
+gabagool-debug-adapter/gabagool-debug.vsix
 examples/python/python.wasm
 examples/python/lib/
