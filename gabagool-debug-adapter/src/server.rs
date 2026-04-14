@@ -2,7 +2,8 @@ use crate::base64;
 use crate::source_map::WatSourceMap;
 use crate::transport::Transport;
 use gabagool::debugger::{Breakpoint, Debugger, StepResult};
-use gabagool::{Module, RawValue, Store, ValueType};
+use gabagool::ir::CompilerMode;
+use gabagool::{ImportDescription, Module, RawValue, Store, ValueType};
 use serde_json::{json, Value};
 use std::io::{Error, Result};
 use std::{fs, iter};
@@ -149,11 +150,11 @@ impl DAPServer {
         args: Vec<RawValue>,
     ) -> Result<(Debugger, u32)> {
         let wasm = fs::read(program)?;
-        let module = Module::new(&wasm).map_err(err)?;
+        let module = Module::new_with_mode(&wasm, CompilerMode::Debug).map_err(err)?;
         let num_imported_funcs = module
             .import_declarations()
             .iter()
-            .filter(|imp| matches!(imp.description, gabagool::ImportDescription::Func(_)))
+            .filter(|imp| matches!(imp.description, ImportDescription::Func(_)))
             .count() as u32;
         let mut store = Store::new();
         let instance = store.instantiate(&module, vec![]).map_err(err)?;
