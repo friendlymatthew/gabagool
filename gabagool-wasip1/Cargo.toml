@@ -1,5 +1,6 @@
 [package]
 name = "gabagool-wasip1"
+description = "WASI preview 1 support for gabagool"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

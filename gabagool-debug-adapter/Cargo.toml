@@ -1,5 +1,6 @@
 [package]
 name = "gabagool-debug-adapter"
+description = "Debug adapter protocol server for gabagool"
 version.workspace = true
 edition.workspace = true
 
