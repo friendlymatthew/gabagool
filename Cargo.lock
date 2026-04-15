@@ -287,7 +287,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "gabagool"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cc",
  "criterion",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "gabagool-debug-adapter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "gabagool",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "gabagool-wasip1"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gabagool",
  "tempfile",
