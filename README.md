@@ -32,6 +32,8 @@ This project aims to build a fully spec-compliant, performant interpreter whose 
 
 # Status
 
+`gabagool` speaks the WASI preview 1 spec. **38 of 43 functions are implemented.** The entire WASI context (the file descriptor table, open file positions, clock state) is serializable, so snapshots taken mid-syscall restore cleanly. It is generally safe to presume the WASI implementation is solid, [`gabagool` can run CPython compiled to WebAssembly.](https://github.com/friendlymatthew/gabagool/tree/main/examples/python#python)
+
 `gabagool` is tested against the [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core). **1,960 tests pass out of 2,049 (96%).** `gabagool` passes on arithmetic, control flow, memory, tables, globals, function references, imports/exports, and exceptions. Remaining tests involve supporting SIMD and garbage collection.
 
 ```sh
