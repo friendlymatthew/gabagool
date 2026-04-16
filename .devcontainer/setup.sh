@@ -8,5 +8,5 @@ cp target/debug/gabagool-debug-adapter gabagool-debug-adapter/bin/
 
 npm install -g @vscode/vsce
 cd gabagool-debug-adapter
-echo y | vsce package --allow-missing-repository -o gabagool-debug.vsix
+echo y | vsce package -o gabagool-debug.vsix
 cd ..

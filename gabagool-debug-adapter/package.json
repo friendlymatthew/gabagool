@@ -3,6 +3,10 @@
   "displayName": "Gabagool WASM Debugger",
   "version": "0.0.1",
   "publisher": "gabagool",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/friendlymatthew/gabagool.git"
+  },
   "engines": {
     "vscode": "^1.74.0"
   },

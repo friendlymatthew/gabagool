@@ -8,9 +8,9 @@ Currently, the debugger steps through `.wat` source files. Supporting DWARF debu
 
 # Try it in one click
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/friendlymatthew/gabagool)
+[Open this repo in a GitHub Codespace](https://codespaces.new/friendlymatthew/gabagool)
 
-Click the badge, wait for the container to build, then open any `.wat` file under `test-programs/` and press `F5`. The devcontainer builds the adapter and installs the VS Code extension for you.
+Wait for the container to build and press `F5`
 
 # Local install for VSCode
 

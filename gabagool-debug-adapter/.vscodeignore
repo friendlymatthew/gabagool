@@ -1,0 +1,5 @@
+README.md
+*.gif
+local-install.sh
+src/**
+Cargo.toml
