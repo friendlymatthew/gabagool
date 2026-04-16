@@ -39,8 +39,8 @@
             "type": "gabagool",
             "request": "launch",
             "name": "Debug WASM",
-            "program": "${workspaceFolder}/programs/fibonacci.wasm",
-            "args": [10]
+            "program": "${workspaceFolder}/test-programs/demo.wasm",
+            "args": "5"
           }
         ]
       }

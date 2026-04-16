@@ -14,8 +14,20 @@ This project aims to build a fully spec-compliant, performant interpreter whose 
 <br>
 <img src="demo.gif" width="80%" alt="Game of Life demo"><br>
 <em>Each fork snapshots the entire WebAssembly execution state, spawns a brand new process, and resumes exactly where it left off.</em>
+<br>
+</details>
+
+<details>
+<summary>See debugger demo</summary>
+<br>
+<img src="./gabagool-debug-adapter/dap_demo.gif" width="80%" alt="Time travel debugger demo"><br>
+<em>Every step is a full snapshot of gabagool's execution state, so you can jump to any point in history without rerunning the program</em>
 
 <br>
+<br>
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/friendlymatthew/gabagool)
+
 </details>
 
 # Status
