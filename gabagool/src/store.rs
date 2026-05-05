@@ -258,6 +258,8 @@ pub struct Store {
     /// maps func addr → (instance_i, compiled_func_i)
     func_addr_to_module: Vec<Option<(u16, u32)>>,
 
+    mmap_backing: bool,
+
     // execution state
     stack: ValueStack,
     call_stack: Vec<CallFrame>,
@@ -299,6 +301,15 @@ impl Store {
     }
 
     pub fn new() -> Self {
+        Self::with_backing(false)
+    }
+
+    #[cfg(unix)]
+    pub fn new_cow() -> Self {
+        Self::with_backing(true)
+    }
+
+    fn with_backing(mmap_backing: bool) -> Self {
         Self {
             functions: Vec::new(),
             tables: Vec::new(),
@@ -318,6 +329,7 @@ impl Store {
             instances: Vec::new(),
             func_addr_to_module: Vec::new(),
             component_instances: Vec::new(),
+            mmap_backing,
         }
     }
 
@@ -437,10 +449,24 @@ impl Store {
         let memory_address = self.memories.len();
         let n = memory_type.limit.min as usize * PAGE_SIZE;
 
-        self.memories.push(MemoryInstance {
-            memory_type,
-            data: GuestMemory::new(n),
-        });
+        let data = if self.mmap_backing {
+            #[cfg(unix)]
+            {
+                const MAX_PAGES: usize = 65536;
+                let max_pages = (memory_type.limit.max as usize).clamp(1, MAX_PAGES);
+                let capacity = max_pages * PAGE_SIZE;
+                GuestMemory::with_mmap(n, capacity)
+                    .expect("mmap allocation for linear memory failed")
+            }
+            #[cfg(not(unix))]
+            {
+                unimplemented!()
+            }
+        } else {
+            GuestMemory::new(n)
+        };
+
+        self.memories.push(MemoryInstance { memory_type, data });
 
         memory_address
     }
@@ -946,7 +972,7 @@ impl Store {
         let mut core_instances = Vec::new();
         let mut core_funcs = Vec::new();
         let mut core_memories = Vec::new();
-        let mut component_funcs: Vec<LiftedFunc> = Vec::new();
+        let mut component_funcs = Vec::new();
         let mut component_exports = HashMap::new();
 
         for init in &flattened.initializers {
@@ -1133,7 +1159,12 @@ impl Store {
         I: IntoIterator<Item = ComponentValue>,
     {
         let mut flat = Vec::new();
-        let param_types: Vec<_> = lifted.func_type.params.iter().map(|(_, ty)| ty).collect();
+        let param_types = lifted
+            .func_type
+            .params
+            .iter()
+            .map(|(_, ty)| ty)
+            .collect::<Vec<_>>();
 
         for (param_i, arg) in args.into_iter().enumerate() {
             let param_ty = param_types.get(param_i).copied();
@@ -1796,7 +1827,7 @@ impl Store {
             Error::Instantiation("not enough args on stack".into())
         );
         let args_start = self.stack.len() - num_args;
-        let mut locals: Vec<RawValue> = self.stack.slice_from(args_start).to_vec();
+        let mut locals = self.stack.slice_from(args_start).to_vec();
         self.stack.truncate(args_start);
 
         let cf = &self.instances[module_i as usize].code.compiled_funcs[compiled_i as usize];
@@ -3578,6 +3609,18 @@ fn const_pop_i64(stack: &mut Vec<RawValue>) -> Result<i64> {
 
 impl Store {
     pub fn to_bytes(&self) -> Vec<u8> {
+        self.encode(true)
+    }
+
+    pub fn to_blueprint(&self) -> Vec<u8> {
+        self.encode(false)
+    }
+
+    pub fn from_blueprint_with_memories(bytes: &[u8], memories: Vec<MemoryInstance>) -> Self {
+        Self::decode(bytes, Some(memories))
+    }
+
+    fn encode(&self, include_memory_data: bool) -> Vec<u8> {
         let mut buf = Vec::new();
 
         buf.extend_from_slice(SNAPSHOT_MAGIC);
@@ -3616,7 +3659,9 @@ impl Store {
         for mem in &self.memories {
             mem.memory_type.encode(&mut buf);
             (mem.data.len() as u64).encode(&mut buf);
-            buf.extend_from_slice(mem.data.as_slice());
+            if include_memory_data {
+                buf.extend_from_slice(mem.data.as_slice());
+            }
         }
 
         // globals
@@ -3676,6 +3721,10 @@ impl Store {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self::decode(bytes, None)
+    }
+
+    fn decode(bytes: &[u8], provided_memories: Option<Vec<MemoryInstance>>) -> Self {
         let buf = &mut &bytes[..];
 
         let magic: [u8; 4] = buf[..4].try_into().unwrap();
@@ -3731,19 +3780,35 @@ impl Store {
             tables.push(TableInstance { table_type, elem });
         }
 
-        // memories
         let num_memories = u32::decode(buf) as usize;
-        let mut memories = Vec::with_capacity(num_memories);
-        for _ in 0..num_memories {
-            let memory_type = MemoryType::decode(buf);
-            let data_len = u64::decode(buf) as usize;
-            let data = buf[..data_len].to_vec();
-            *buf = &buf[data_len..];
-            memories.push(MemoryInstance {
-                memory_type,
-                data: GuestMemory(data),
-            });
-        }
+        let provided_was_some = provided_memories.is_some();
+        let memories = if let Some(provided) = provided_memories {
+            assert_eq!(provided.len(), num_memories);
+
+            for _ in 0..num_memories {
+                let _ = MemoryType::decode(buf);
+                let _ = u64::decode(buf) as usize;
+            }
+
+            provided
+        } else {
+            let mut memories = Vec::with_capacity(num_memories);
+
+            for _ in 0..num_memories {
+                let memory_type = MemoryType::decode(buf);
+                let data_len = u64::decode(buf) as usize;
+
+                let data = buf[..data_len].to_vec();
+                *buf = &buf[data_len..];
+
+                memories.push(MemoryInstance {
+                    memory_type,
+                    data: GuestMemory::from_vec(data),
+                });
+            }
+
+            memories
+        };
 
         // globals
         let num_globals = u32::decode(buf) as usize;
@@ -3808,6 +3873,8 @@ impl Store {
             component_instances.push(InstantiatedComponent::decode(buf));
         }
 
+        let mmap_backing = provided_was_some;
+
         Self {
             functions,
             tables,
@@ -3827,6 +3894,76 @@ impl Store {
             pending_suspension: None,
             pending_lifted,
             component_instances,
+            mmap_backing,
         }
+    }
+}
+
+#[cfg(unix)]
+pub struct StoreSnapshot {
+    blueprint: Vec<u8>,
+    memories: Vec<MemoryInstance>,
+}
+
+#[cfg(unix)]
+impl Store {
+    pub fn snapshot(self) -> StoreSnapshot {
+        assert!(self.memories.iter().all(|m| m.data.is_mmap()));
+
+        let blueprint = self.to_blueprint();
+
+        StoreSnapshot {
+            blueprint,
+            memories: self.memories,
+        }
+    }
+}
+
+#[cfg(unix)]
+impl StoreSnapshot {
+    pub const fn memory_count(&self) -> usize {
+        self.memories.len()
+    }
+
+    pub fn fork(&self, n: usize) -> std::io::Result<Vec<Store>> {
+        use std::io;
+
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        let forked_per_memory = self
+            .memories
+            .iter()
+            .map(|m| m.data.fork_private(n))
+            .collect::<io::Result<Vec<_>>>()?;
+
+        let mut child_iters = forked_per_memory
+            .into_iter()
+            .map(IntoIterator::into_iter)
+            .collect::<Vec<_>>();
+
+        let mut stores = Vec::with_capacity(n);
+
+        for _ in 0..n {
+            let child_memories = self
+                .memories
+                .iter()
+                .zip(child_iters.iter_mut())
+                .map(|(parent_mem, iter)| MemoryInstance {
+                    memory_type: parent_mem.memory_type.clone(),
+                    data: iter
+                        .next()
+                        .expect("fork_private returned fewer children than requested"),
+                })
+                .collect::<Vec<_>>();
+
+            stores.push(Store::from_blueprint_with_memories(
+                &self.blueprint,
+                child_memories,
+            ));
+        }
+
+        Ok(stores)
     }
 }

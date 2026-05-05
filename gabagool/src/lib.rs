@@ -17,6 +17,9 @@ pub mod value_stack;
 #[cfg(feature = "jit")]
 mod jit;
 
+#[cfg(unix)]
+mod mmap_backing;
+
 pub use binary_grammar::*;
 pub use component::*;
 pub use error::*;
