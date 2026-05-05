@@ -194,8 +194,8 @@ fn component_snapshot_add() {
 
     assert!(matches!(state, ExecutionState::FuelExhausted));
 
-    let snapshot = store.snapshot();
-    let mut restored = Store::from_snapshot(&snapshot);
+    let snapshot = store.to_bytes();
+    let mut restored = Store::from_bytes(&snapshot);
     restored.set_fuel(u64::MAX);
 
     let result = restored

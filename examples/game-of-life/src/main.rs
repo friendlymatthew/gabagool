@@ -27,7 +27,7 @@ fn read_framebuf(store: &Store, ptr: usize, len: usize) -> &[u32] {
 }
 
 fn save_snapshot(store: &Store, path: &str) {
-    let bytes = store.snapshot();
+    let bytes = store.to_bytes();
     if let Err(e) = std::fs::write(path, &bytes) {
         eprintln!("failed to write snapshot: {e}");
     } else {
@@ -36,7 +36,7 @@ fn save_snapshot(store: &Store, path: &str) {
 }
 
 fn fork_snapshot(store: &Store, parent_x: i32, parent_y: i32) {
-    let bytes = store.snapshot();
+    let bytes = store.to_bytes();
 
     let id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -225,7 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (mut store, instance) = if let Some(path) = restore_path {
         let bytes = std::fs::read(path)?;
-        let store = Store::from_snapshot(&bytes);
+        let store = Store::from_bytes(&bytes);
         let instance = store.instance(0);
         (store, instance)
     } else {

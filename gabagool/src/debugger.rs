@@ -103,7 +103,7 @@ impl Debugger {
         self.store.set_fuel(0);
         self.store.invoke(self.instance, func_name, args)?;
 
-        let snapshot = self.store.snapshot();
+        let snapshot = self.store.to_bytes();
         self.history.push(Entry {
             timestamp: 0,
             value: snapshot,
@@ -230,7 +230,7 @@ impl Debugger {
                 {
                     self.history.push(Entry {
                         timestamp: self.instruction_count,
-                        value: self.store.snapshot(),
+                        value: self.store.to_bytes(),
                     })
                 }
 
@@ -258,7 +258,7 @@ impl Debugger {
             .find_nearest_before(self.instruction_count - 1)
             .expect("should always exist since we snapshot at instr count = 0!");
 
-        self.store = Store::from_snapshot(&nearest_snapshot.value);
+        self.store = Store::from_bytes(&nearest_snapshot.value);
 
         let steps_to_replay = self.instruction_count - 1 - nearest_snapshot.timestamp;
         self.store.set_fuel(steps_to_replay);

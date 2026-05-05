@@ -33,8 +33,8 @@ fn snapshot_roundtrip(wasm_path: &str, func: &str, args: Vec<RawValue>, fuel: u6
     assert!(matches!(state, gabagool::ExecutionState::FuelExhausted));
     assert!(store.is_paused());
 
-    let snapshot = store.snapshot();
-    let mut restored = Store::from_snapshot(&snapshot);
+    let snapshot = store.to_bytes();
+    let mut restored = Store::from_bytes(&snapshot);
 
     restored.set_fuel(u64::MAX);
     let result = restored.resume().unwrap().into_completed().unwrap();

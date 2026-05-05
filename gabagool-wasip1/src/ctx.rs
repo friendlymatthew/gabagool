@@ -1494,11 +1494,11 @@ mod tests {
                     dispatched += 1;
 
                     if dispatched == 2 {
-                        let store_snap = store.snapshot();
+                        let store_snap = store.to_bytes();
                         let mut wasi_snap = Vec::new();
                         wasi.encode(&mut wasi_snap);
 
-                        let mut restored = Store::from_snapshot(&store_snap);
+                        let mut restored = Store::from_bytes(&store_snap);
                         let mut wasi2 = WasiCtx::decode(&mut &wasi_snap[..]);
 
                         let results = wasi2.dispatch(&mut restored, &func_name, &args);
@@ -1559,11 +1559,11 @@ mod tests {
                     dispatched += 1;
 
                     if dispatched == 5 {
-                        let store_snap = store.snapshot();
+                        let store_snap = store.to_bytes();
                         let mut wasi_snap = Vec::new();
                         wasi.encode(&mut wasi_snap);
 
-                        let mut restored = Store::from_snapshot(&store_snap);
+                        let mut restored = Store::from_bytes(&store_snap);
                         let mut wasi2 = WasiCtx::decode(&mut &wasi_snap[..]);
 
                         let results = wasi2.dispatch(&mut restored, &func_name, &args);

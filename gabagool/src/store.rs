@@ -3577,7 +3577,7 @@ fn const_pop_i64(stack: &mut Vec<RawValue>) -> Result<i64> {
 }
 
 impl Store {
-    pub fn snapshot(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
         buf.extend_from_slice(SNAPSHOT_MAGIC);
@@ -3675,7 +3675,7 @@ impl Store {
         buf
     }
 
-    pub fn from_snapshot(bytes: &[u8]) -> Self {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
         let buf = &mut &bytes[..];
 
         let magic: [u8; 4] = buf[..4].try_into().unwrap();
