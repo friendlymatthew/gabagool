@@ -2,7 +2,7 @@ use crate::binary_grammar::{Function, FunctionType, GlobalType, MemoryType, RefT
 #[cfg(unix)]
 use crate::mmap_backing::MmapBacking;
 use std::io::{self, ErrorKind};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -113,7 +113,7 @@ pub struct AddressMap {
 pub enum FunctionInstance {
     Local {
         function_type: FunctionType,
-        address_map: Rc<AddressMap>,
+        address_map: Arc<AddressMap>,
         code: Function,
     },
     Host {

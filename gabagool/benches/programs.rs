@@ -9,7 +9,7 @@ fn programs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("programs")
+        .join("test-programs")
 }
 
 fn load_and_instantiate(wasm_bytes: &[u8]) -> (Store, gabagool::Instance) {
@@ -59,7 +59,7 @@ fn bench_matrix(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "matrix_bench", vec![])
+                .invoke(instance, "matrix_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -75,7 +75,7 @@ fn bench_sieve(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "count_primes", vec![])
+                .invoke(instance, "count_primes", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -91,7 +91,7 @@ fn bench_sort(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "sort_bench", vec![])
+                .invoke(instance, "sort_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -107,7 +107,7 @@ fn bench_ackermann(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "ackermann_bench", vec![])
+                .invoke(instance, "ackermann_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -123,7 +123,7 @@ fn bench_mandelbrot(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "mandelbrot_bench", vec![])
+                .invoke(instance, "mandelbrot_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -139,7 +139,7 @@ fn bench_nbody(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "nbody_bench", vec![])
+                .invoke(instance, "nbody_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -155,7 +155,7 @@ fn bench_sha256(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "sha256_bench", vec![])
+                .invoke(instance, "sha256_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -171,7 +171,7 @@ fn bench_switch_dispatch(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "switch_bench", vec![])
+                .invoke(instance, "switch_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -187,7 +187,7 @@ fn bench_indirect_call(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "indirect_call_bench", vec![])
+                .invoke(instance, "indirect_call_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -203,7 +203,7 @@ fn bench_call_chain(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "call_chain_bench", vec![])
+                .invoke(instance, "call_chain_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -219,7 +219,7 @@ fn bench_binary_search(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "binary_search_bench", vec![])
+                .invoke(instance, "binary_search_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -235,7 +235,7 @@ fn bench_linked_list(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "linked_list_bench", vec![])
+                .invoke(instance, "linked_list_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -251,7 +251,7 @@ fn bench_bulk_memory(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "bulk_memory_bench", vec![])
+                .invoke(instance, "bulk_memory_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();
@@ -267,7 +267,7 @@ fn bench_matrix_chain(c: &mut Criterion) {
         b.iter(|| {
             let (mut store, instance) = load_and_instantiate(&wasm);
             let result = store
-                .invoke(instance, "matrix_chain_bench", vec![])
+                .invoke(instance, "matrix_chain_bench", Vec::<RawValue>::new())
                 .unwrap()
                 .into_completed()
                 .unwrap();

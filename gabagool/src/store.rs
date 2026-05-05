@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Neg;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::compiler::ModuleCode;
@@ -416,7 +415,7 @@ impl Store {
     fn allocate_function(
         &mut self,
         f: Function,
-        address_map: &Rc<AddressMap>,
+        address_map: &Arc<AddressMap>,
         types: &[SubType],
     ) -> Result<usize> {
         let f_address = self.functions.len();
@@ -425,7 +424,7 @@ impl Store {
 
         self.functions.push(FunctionInstance::Local {
             function_type,
-            address_map: Rc::clone(address_map),
+            address_map: Arc::clone(address_map),
             code: f,
         });
 
@@ -521,7 +520,7 @@ impl Store {
         initial_global_values: Vec<RawValue>,
         initial_table_refs: Vec<Ref>,
         element_segment_refs: Vec<Vec<Ref>>,
-    ) -> Result<Rc<AddressMap>> {
+    ) -> Result<Arc<AddressMap>> {
         // step 1
         let types = module.types;
         let mut address_map = AddressMap::default();
@@ -636,7 +635,7 @@ impl Store {
             });
         }
 
-        let module_instance = Rc::new(address_map);
+        let module_instance = Arc::new(address_map);
         for func in module.functions {
             self.allocate_function(func, &module_instance, &types)?;
         }
@@ -3612,12 +3611,16 @@ impl Store {
         self.encode(true)
     }
 
-    pub fn to_blueprint(&self) -> Vec<u8> {
+    fn to_blueprint(&self) -> Vec<u8> {
         self.encode(false)
     }
 
-    pub fn from_blueprint_with_memories(bytes: &[u8], memories: Vec<MemoryInstance>) -> Self {
-        Self::decode(bytes, Some(memories))
+    fn from_blueprint(
+        bytes: &[u8],
+        memories: Vec<MemoryInstance>,
+        module_code: Vec<Arc<ModuleCode>>,
+    ) -> Self {
+        Self::decode(bytes, Some(memories), Some(module_code))
     }
 
     fn encode(&self, include_memory_data: bool) -> Vec<u8> {
@@ -3691,8 +3694,20 @@ impl Store {
             buf.extend_from_slice(&ds.data);
         }
 
-        // instances
-        self.instances.encode(&mut buf);
+        (self.instances.len() as u32).encode(&mut buf);
+        for inst in &self.instances {
+            if include_memory_data {
+                inst.code.as_ref().encode(&mut buf);
+            }
+            inst.function_addrs.encode(&mut buf);
+            inst.table_addrs.encode(&mut buf);
+            inst.mem_addrs.encode(&mut buf);
+            inst.global_addrs.encode(&mut buf);
+            inst.tag_addrs.encode(&mut buf);
+            inst.elem_addrs.encode(&mut buf);
+            inst.data_addrs.encode(&mut buf);
+            inst.exports.encode(&mut buf);
+        }
 
         // func_addr_to_module
         self.func_addr_to_module.encode(&mut buf);
@@ -3721,10 +3736,14 @@ impl Store {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self::decode(bytes, None)
+        Self::decode(bytes, None, None)
     }
 
-    fn decode(bytes: &[u8], provided_memories: Option<Vec<MemoryInstance>>) -> Self {
+    fn decode(
+        bytes: &[u8],
+        provided_memories: Option<Vec<MemoryInstance>>,
+        provided_module_code: Option<Vec<Arc<ModuleCode>>>,
+    ) -> Self {
         let buf = &mut &bytes[..];
 
         let magic: [u8; 4] = buf[..4].try_into().unwrap();
@@ -3739,7 +3758,7 @@ impl Store {
         // functions
         let num_funcs = u32::decode(buf) as usize;
         let mut functions = Vec::with_capacity(num_funcs);
-        let dummy_address_map = Rc::new(AddressMap::default());
+        let dummy_address_map = Arc::new(AddressMap::default());
         let dummy_function = Function {
             type_index: 0,
             locals: Vec::new(),
@@ -3753,7 +3772,7 @@ impl Store {
                     let function_type = FunctionType::decode(buf);
                     functions.push(FunctionInstance::Local {
                         function_type,
-                        address_map: Rc::clone(&dummy_address_map),
+                        address_map: Arc::clone(&dummy_address_map),
                         code: dummy_function.clone(),
                     });
                 }
@@ -3846,8 +3865,29 @@ impl Store {
             data_segments.push(DataInstance { data });
         }
 
-        // instances
-        let instances = Vec::decode(buf);
+        let num_instances = u32::decode(buf) as usize;
+        let instances = (0..num_instances)
+            .map(|i| {
+                let code = if let Some(arcs) = &provided_module_code {
+                    Arc::clone(&arcs[i])
+                } else {
+                    Arc::new(ModuleCode::decode(buf))
+                };
+                InstantiatedModule {
+                    code,
+                    function_addrs: Vec::<usize>::decode(buf),
+                    table_addrs: Vec::<usize>::decode(buf),
+                    mem_addrs: Vec::<usize>::decode(buf),
+                    global_addrs: Vec::<usize>::decode(buf),
+                    tag_addrs: Vec::<usize>::decode(buf),
+                    elem_addrs: Vec::<usize>::decode(buf),
+                    data_addrs: Vec::<usize>::decode(buf),
+                    exports: Vec::<ExportInstance>::decode(buf),
+                    #[cfg(feature = "jit")]
+                    jit_functions: Vec::new(),
+                }
+            })
+            .collect::<Vec<_>>();
 
         // func_addr_to_module
         let func_addr_to_module = Vec::decode(buf);
@@ -3903,18 +3943,38 @@ impl Store {
 pub struct StoreSnapshot {
     blueprint: Vec<u8>,
     memories: Vec<MemoryInstance>,
+    module_code: Vec<Arc<ModuleCode>>,
+    retained_functions: Vec<FunctionInstance>,
+}
+
+#[cfg(unix)]
+impl Drop for StoreSnapshot {
+    fn drop(&mut self) {
+        let functions = std::mem::take(&mut self.retained_functions);
+        if !functions.is_empty() {
+            std::thread::spawn(move || drop(functions));
+        }
+    }
 }
 
 #[cfg(unix)]
 impl Store {
-    pub fn snapshot(self) -> StoreSnapshot {
+    pub fn snapshot(mut self) -> StoreSnapshot {
         assert!(self.memories.iter().all(|m| m.data.is_mmap()));
+
+        let module_code = self
+            .instances
+            .iter()
+            .map(|inst| Arc::clone(&inst.code))
+            .collect::<Vec<_>>();
 
         let blueprint = self.to_blueprint();
 
         StoreSnapshot {
             blueprint,
-            memories: self.memories,
+            memories: std::mem::take(&mut self.memories),
+            module_code,
+            retained_functions: std::mem::take(&mut self.functions),
         }
     }
 }
@@ -3958,9 +4018,12 @@ impl StoreSnapshot {
                 })
                 .collect::<Vec<_>>();
 
-            stores.push(Store::from_blueprint_with_memories(
+            let child_module_code = self.module_code.iter().map(Arc::clone).collect::<Vec<_>>();
+
+            stores.push(Store::from_blueprint(
                 &self.blueprint,
                 child_memories,
+                child_module_code,
             ));
         }
 
