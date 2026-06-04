@@ -19,7 +19,7 @@ use crate::{
 
 use crate::binary_grammar::{
     CompositeType, DataSegment, ElementSegment, ExportDescription, Function, FunctionType, Global,
-    GlobalType, Limit, MemoryType, ParsedModule, RefType, SubType, TableType, ValueType,
+    GlobalType, Limit, MemoryType, RefType, SubType, TableType, ValueType,
 };
 use crate::error::Exception;
 use crate::execution_grammar::{
@@ -414,7 +414,7 @@ impl Store {
 
     fn allocate_function(
         &mut self,
-        f: Function,
+        f: &Function,
         address_map: &Arc<AddressMap>,
         types: &[SubType],
     ) -> Result<usize> {
@@ -425,7 +425,7 @@ impl Store {
         self.functions.push(FunctionInstance::Local {
             function_type,
             address_map: Arc::clone(address_map),
-            code: f,
+            code: f.clone(),
         });
 
         Ok(f_address)
@@ -444,7 +444,7 @@ impl Store {
         table_address
     }
 
-    fn allocate_memory(&mut self, memory_type: MemoryType) -> usize {
+    fn allocate_memory(&mut self, memory_type: &MemoryType) -> usize {
         let memory_address = self.memories.len();
         let n = memory_type.limit.min as usize * PAGE_SIZE;
 
@@ -465,16 +465,19 @@ impl Store {
             GuestMemory::new(n)
         };
 
-        self.memories.push(MemoryInstance { memory_type, data });
+        self.memories.push(MemoryInstance {
+            memory_type: memory_type.clone(),
+            data,
+        });
 
         memory_address
     }
 
-    fn allocate_global(&mut self, global: Global, initializer_value: RawValue) -> usize {
+    fn allocate_global(&mut self, global: &Global, initializer_value: RawValue) -> usize {
         let global_address = self.globals.len();
 
         self.globals.push(GlobalInstance {
-            global_type: global.global_type,
+            global_type: global.global_type.clone(),
             value: initializer_value,
         });
 
@@ -483,7 +486,7 @@ impl Store {
 
     fn allocate_element_segment(
         &mut self,
-        element_segment: ElementSegment,
+        element_segment: &ElementSegment,
         element_segment_ref: Vec<Ref>,
     ) -> usize {
         let element_segment_address = self.element_segments.len();
@@ -496,11 +499,11 @@ impl Store {
         element_segment_address
     }
 
-    fn allocate_data_instance(&mut self, data_segment: DataSegment) -> usize {
+    fn allocate_data_instance(&mut self, data_segment: &DataSegment) -> usize {
         let data_address = self.data_segments.len();
 
         self.data_segments.push(DataInstance {
-            data: data_segment.bytes,
+            data: data_segment.bytes.clone(),
         });
 
         data_address
@@ -515,14 +518,14 @@ impl Store {
 
     pub fn allocate_module(
         &mut self,
-        module: ParsedModule,
+        module: &Module,
         extern_addrs: Vec<ExternalValue>,
         initial_global_values: Vec<RawValue>,
         initial_table_refs: Vec<Ref>,
         element_segment_refs: Vec<Vec<Ref>>,
     ) -> Result<Arc<AddressMap>> {
         // step 1
-        let types = module.types;
+        let types = &module.code.types;
         let mut address_map = AddressMap::default();
 
         // step 2-6
@@ -541,7 +544,7 @@ impl Store {
 
         // step 25-26
         for tag in &module.tags {
-            let tag_type = Self::extract_function_type(&types, tag.type_index)?;
+            let tag_type = Self::extract_function_type(types, tag.type_index)?;
             let addr = self.allocate_tag(tag_type);
             address_map.tag_addrs.push(addr);
         }
@@ -550,7 +553,7 @@ impl Store {
         address_map.global_addrs.extend(
             module
                 .globals
-                .into_iter()
+                .iter()
                 .zip(initial_global_values)
                 .map(|(global, init_val)| self.allocate_global(global, init_val)),
         );
@@ -558,13 +561,13 @@ impl Store {
         // step 29-30
         address_map
             .mem_addrs
-            .extend(module.mems.into_iter().map(|m| self.allocate_memory(m)));
+            .extend(module.mems.iter().map(|m| self.allocate_memory(m)));
 
         // step 31-32
         address_map.table_addrs.extend(
             module
                 .tables
-                .into_iter()
+                .iter()
                 .zip(initial_table_refs)
                 .map(|(td, ref_t)| self.allocate_table(td.table_type, ref_t)),
         );
@@ -573,16 +576,12 @@ impl Store {
         address_map.data_addrs.extend(
             module
                 .data_segments
-                .into_iter()
+                .iter()
                 .map(|ds| self.allocate_data_instance(ds)),
         );
 
         // step 37-38
-        for (elem, refs) in module
-            .element_segments
-            .into_iter()
-            .zip(element_segment_refs)
-        {
+        for (elem, refs) in module.element_segments.iter().zip(element_segment_refs) {
             let addr = self.allocate_element_segment(elem, refs);
             address_map.elem_addrs.push(addr);
         }
@@ -636,8 +635,8 @@ impl Store {
         }
 
         let module_instance = Arc::new(address_map);
-        for func in module.functions {
-            self.allocate_function(func, &module_instance, &types)?;
+        for func in &module.functions {
+            self.allocate_function(func, &module_instance, types)?;
         }
 
         Ok(module_instance)
@@ -818,23 +817,8 @@ impl Store {
         let start_func_i = module.start;
         let num_local_funcs = module.functions.len();
 
-        // step 24: allocate_module needs ownership, so clone declaration data
-        let parsed_clone = crate::binary_grammar::ParsedModule {
-            types: module.code.types.clone(),
-            functions: module.functions.clone(),
-            tables: module.tables.clone(),
-            mems: module.mems.clone(),
-            element_segments: module.element_segments.clone(),
-            globals: module.globals.clone(),
-            data_segments: module.data_segments.clone(),
-            start: module.start,
-            import_declarations: module.import_declarations.clone(),
-            exports: module.exports.clone(),
-            tags: module.tags.clone(),
-            customs: Vec::new(),
-        };
         let module_instance = self.allocate_module(
-            parsed_clone,
+            module,
             external_addresses,
             initial_global_values,
             initial_table_refs,
