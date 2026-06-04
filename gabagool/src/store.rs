@@ -3868,11 +3868,10 @@ impl Store {
         let num_instances = u32::decode(buf) as usize;
         let instances = (0..num_instances)
             .map(|i| {
-                let code = if let Some(arcs) = &provided_module_code {
-                    Arc::clone(&arcs[i])
-                } else {
-                    Arc::new(ModuleCode::decode(buf))
-                };
+                let code = provided_module_code.as_ref().map_or_else(
+                    || Arc::new(ModuleCode::decode(buf)),
+                    |arcs| Arc::clone(&arcs[i]),
+                );
                 InstantiatedModule {
                     code,
                     function_addrs: Vec::<usize>::decode(buf),
