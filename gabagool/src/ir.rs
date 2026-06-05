@@ -44,7 +44,7 @@ pub struct CompiledFunction {
 }
 
 #[repr(u16)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Op {
     Unreachable,
     Nop,

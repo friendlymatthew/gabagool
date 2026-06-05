@@ -46,7 +46,12 @@ fn immediate_for_op(op: Op) -> OpImmediate {
 pub fn assemble(ops: &[Op]) -> Option<JitFunction> {
     // todo: get rid of me when i implement it all
     if !ops.iter().all(|op| stencil_for_op(op).is_some()) {
-        return None;
+        let unsupported_ops = ops.iter().filter(|op| stencil_for_op(op).is_none());
+
+        panic!(
+            "not all ops have stencils. unsupported ops: {:?}",
+            unsupported_ops
+        );
     }
 
     let op_stencil_bytes = ops
