@@ -1,4 +1,4 @@
-use crate::binary_grammar::{HeapType, ValueType};
+use crate::binary_grammar::{HeapType, InstructionLocation, ValueType};
 
 const _: () = assert!(std::mem::size_of::<Op>() <= 16);
 
@@ -41,6 +41,8 @@ pub struct CompiledFunction {
     pub(crate) max_stack_height: u32,
     /// maps each compiled op to the source instruction index that produced it
     pub source_positions: Vec<u32>,
+    /// maps each compiled op to its original wasm instruction location
+    pub instruction_locations: Vec<Option<InstructionLocation>>,
 }
 
 #[repr(u16)]

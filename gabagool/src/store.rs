@@ -3405,6 +3405,7 @@ impl Store {
 
         let cf = CompiledFunction {
             source_positions: Vec::new(),
+            instruction_locations: Vec::new(),
             ops,
             type_index: 0,
             num_args: 0,
@@ -3747,6 +3748,7 @@ impl Store {
             type_index: 0,
             locals: Vec::new(),
             body: Vec::new(),
+            instruction_locations: Vec::new(),
         };
 
         for _ in 0..num_funcs {

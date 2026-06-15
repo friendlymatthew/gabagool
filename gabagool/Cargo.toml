@@ -23,10 +23,13 @@ component-tests = []
 jit = ["cc", "object"]
 
 [dev-dependencies]
+addr2line = "0.25"
+gimli = "0.32"
 insta = "1"
 wat = "1"
 criterion = "0.8.2"
 wasmi = "1.0.9"
+wasmparser = "0.244"
 
 [[bench]]
 name = "programs"

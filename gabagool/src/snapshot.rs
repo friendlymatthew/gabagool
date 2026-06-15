@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::{mem, slice};
 
 use crate::binary_grammar::{
-    AddrType, ArrayType, CompositeType, FieldType, FunctionType, GlobalType, HeapType, Limit,
-    MemoryType, Mutability, RefType, ResultType, StorageType, StructType, SubType, TableType,
-    ValueType,
+    AddrType, ArrayType, CompositeType, FieldType, FunctionType, GlobalType, HeapType,
+    InstructionLocation, Limit, MemoryType, Mutability, RefType, ResultType, StorageType,
+    StructType, SubType, TableType, ValueType,
 };
 use crate::compiler::ModuleCode;
 use crate::component::binary_grammar::{
@@ -18,7 +18,7 @@ use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry
 use crate::store::{CallFrame, InstantiatedModule};
 
 pub const SNAPSHOT_MAGIC: &[u8; 4] = b"gaba";
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 pub trait Snapshot: Sized {
     fn encode(&self, buf: &mut Vec<u8>);
@@ -229,6 +229,18 @@ impl<T: Snapshot> Snapshot for Option<T> {
         match u8::decode(buf) {
             0 => None,
             _ => Some(T::decode(buf)),
+        }
+    }
+}
+
+impl Snapshot for InstructionLocation {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        self.code_offset.encode(buf);
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        Self {
+            code_offset: u64::decode(buf),
         }
     }
 }
@@ -664,6 +676,7 @@ impl Snapshot for CompiledFunction {
         self.local_types.encode(buf);
         self.max_stack_height.encode(buf);
         self.source_positions.encode(buf);
+        self.instruction_locations.encode(buf);
     }
     fn decode(buf: &mut &[u8]) -> Self {
         let ops = decode_bulk::<Op>(buf);
@@ -674,6 +687,7 @@ impl Snapshot for CompiledFunction {
             local_types: Vec::<ValueType>::decode(buf),
             max_stack_height: u32::decode(buf),
             source_positions: Vec::<u32>::decode(buf),
+            instruction_locations: Vec::<Option<InstructionLocation>>::decode(buf),
         }
     }
 }

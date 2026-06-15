@@ -17,9 +17,10 @@ use crate::binary_grammar::{
     DataMode, DataSection, DataSegment, ElementMode, ElementSection, ElementSegment, Export,
     ExportDescription, ExportSection, FieldType, Function, FunctionSection, FunctionType, Global,
     GlobalSection, GlobalType, HeapType, ImportDeclaration, ImportDescription, ImportSection,
-    Instruction, Limit, Local, MemArg, MemorySection, MemoryType, ModuleSection, Mutability,
-    ParsedModule, RefType, ResultType, StorageType, StructType, SubType, TableDef, TableSection,
-    TableType, Tag, TagSection, TypeSection, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
+    Instruction, InstructionLocation, Limit, Local, MemArg, MemorySection, MemoryType,
+    ModuleSection, Mutability, ParsedModule, RefType, ResultType, StorageType, StructType, SubType,
+    TableDef, TableSection, TableType, Tag, TagSection, TypeSection, ValueType, TERM_ELSE_BYTE,
+    TERM_END_BYTE,
 };
 use crate::leb128::{self, MAX_LEB128_LEN_32, MAX_LEB128_LEN_64};
 
@@ -29,6 +30,8 @@ pub struct Parser<'a> {
     buffer: &'a [u8],
     function_types: VecDeque<u32>,
     uses_data_count_instructions: bool,
+    code_section_start: Option<usize>,
+    current_instruction_locations: Option<Vec<InstructionLocation>>,
 }
 
 impl<'a> Parser<'a> {
@@ -38,6 +41,8 @@ impl<'a> Parser<'a> {
             cursor: 0,
             function_types: VecDeque::new(),
             uses_data_count_instructions: false,
+            code_section_start: None,
+            current_instruction_locations: None,
         }
     }
 
@@ -1227,12 +1232,14 @@ impl<'a> Parser<'a> {
         let mut instructions = vec![];
 
         loop {
+            let opcode_offset = self.cursor;
             let opcode = self.read_u8()?;
 
             if opcode == TERM_END_BYTE {
                 break;
             }
 
+            self.record_instruction_location(opcode_offset);
             let instruction = self.parse_instruction(opcode)?;
 
             instructions.push(instruction);
@@ -1247,6 +1254,7 @@ impl<'a> Parser<'a> {
         let mut else_flag = false;
 
         loop {
+            let opcode_offset = self.cursor;
             let opcode = self.read_u8()?;
 
             if opcode == TERM_ELSE_BYTE {
@@ -1258,6 +1266,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
+            self.record_instruction_location(opcode_offset);
             let instruction = self.parse_instruction(opcode)?;
 
             if else_flag {
@@ -1268,6 +1277,23 @@ impl<'a> Parser<'a> {
         }
 
         Ok(if_else)
+    }
+
+    fn record_instruction_location(&mut self, opcode_offset: usize) {
+        let Some(locations) = self.current_instruction_locations.as_mut() else {
+            return;
+        };
+
+        let Some(code_section_start) = self.code_section_start else {
+            return;
+        };
+
+        let Some(relative_offset) = opcode_offset.checked_sub(code_section_start) else {
+            return;
+        };
+
+        let code_offset = relative_offset.try_into().unwrap_or(u64::MAX);
+        locations.push(InstructionLocation { code_offset });
     }
 
     fn parse_instruction(&mut self, opcode: u8) -> Result<Instruction> {
@@ -2209,10 +2235,18 @@ impl<'a> Parser<'a> {
             Error::Parse("too many locals".into())
         );
 
+        self.current_instruction_locations = Some(Vec::new());
+        let body = self.parse_expression()?;
+        let instruction_locations = self
+            .current_instruction_locations
+            .take()
+            .unwrap_or_default();
+
         let func = Function {
             type_index,
             locals,
-            body: self.parse_expression()?,
+            body,
+            instruction_locations,
         };
 
         let consumed = self.cursor - start;
@@ -2287,6 +2321,11 @@ impl<'a> Parser<'a> {
             Error::Parse("section size exceeds remaining bytes".into())
         );
 
+        let previous_code_section_start = self.code_section_start;
+        if id == 10 {
+            self.code_section_start = Some(section_start);
+        }
+
         let section = match id {
             0 => ModuleSection::Custom(self.parse_custom_section(size)?),
             1 => ModuleSection::Type(self.parse_type_section()?),
@@ -2304,6 +2343,8 @@ impl<'a> Parser<'a> {
             13 => ModuleSection::Tag(self.parse_tag_section()?),
             foreign_id => parse_err!("Encountered foreign section id: {}", foreign_id),
         };
+
+        self.code_section_start = previous_code_section_start;
 
         if id != 0 {
             let seen = self.cursor - section_start;

@@ -1,5 +1,6 @@
 use crate::binary_grammar::{
-    BlockType, CatchClause, CompositeType, Function, Instruction, ParsedModule, SubType, ValueType,
+    BlockType, CatchClause, CompositeType, Function, Instruction, InstructionLocation,
+    ParsedModule, SubType, ValueType,
 };
 use crate::ir::{
     CatchKind, CompiledCatchClause, CompiledFunction, CompilerMode, JumpTableEntry, Op,
@@ -64,7 +65,10 @@ struct Compiler<'a> {
     tag_signatures: Vec<usize>,
     ops: Vec<CompilerOp>,
     source_positions: Vec<u32>,
+    instruction_locations: Vec<InstructionLocation>,
+    compiled_instruction_locations: Vec<Option<InstructionLocation>>,
     current_source_pos: u32,
+    current_instruction_location: Option<InstructionLocation>,
     next_source_pos: u32,
     block_stack: Vec<BlockContext>,
     stack_height: i32,
@@ -131,7 +135,10 @@ pub fn compile(module: &ParsedModule, mode: CompilerMode) -> ModuleCode {
                 tag_signatures: tag_signatures.clone(),
                 ops: Vec::new(),
                 source_positions: Vec::new(),
+                instruction_locations: Vec::new(),
+                compiled_instruction_locations: Vec::new(),
                 current_source_pos: 0,
+                current_instruction_location: None,
                 next_source_pos: 0,
                 block_stack: Vec::new(),
                 stack_height: 0,
@@ -177,7 +184,10 @@ pub fn compile_function_into_code(
         tag_signatures: Vec::new(),
         ops: Vec::new(),
         source_positions: Vec::new(),
+        instruction_locations: Vec::new(),
+        compiled_instruction_locations: Vec::new(),
         current_source_pos: 0,
+        current_instruction_location: None,
         next_source_pos: 0,
         block_stack: Vec::new(),
         stack_height: 0,
@@ -222,6 +232,14 @@ impl<'a> Compiler<'a> {
 
     fn compile_function(&mut self, func: &Function) -> CompiledFunction {
         let st = &self.types[func.type_index as usize];
+
+        self.source_positions.clear();
+        self.instruction_locations
+            .clone_from(&func.instruction_locations);
+        self.compiled_instruction_locations.clear();
+        self.current_source_pos = 0;
+        self.current_instruction_location = None;
+        self.next_source_pos = 0;
 
         let (num_args, num_results) = if let CompositeType::Func(ft) = &st.composite_type {
             (ft.0 .0.len(), ft.1 .0.len())
@@ -286,6 +304,11 @@ impl<'a> Compiler<'a> {
             } else {
                 Vec::new()
             },
+            instruction_locations: if self.mode == CompilerMode::Debug {
+                std::mem::take(&mut self.compiled_instruction_locations)
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -299,6 +322,7 @@ impl<'a> Compiler<'a> {
         self.ops.push(CompilerOp::Label(label));
         if self.mode == CompilerMode::Debug {
             self.source_positions.push(u32::MAX);
+            self.compiled_instruction_locations.push(None);
         }
     }
 
@@ -306,6 +330,8 @@ impl<'a> Compiler<'a> {
         self.ops.push(CompilerOp::Op(op));
         if self.mode == CompilerMode::Debug {
             self.source_positions.push(self.current_source_pos);
+            self.compiled_instruction_locations
+                .push(self.current_instruction_location);
         }
     }
 
@@ -407,12 +433,18 @@ impl<'a> Compiler<'a> {
         } else {
             Vec::new()
         };
+        let mut assembled_locations = if self.mode == CompilerMode::Debug {
+            Vec::with_capacity(pos as usize)
+        } else {
+            Vec::new()
+        };
         for (i, cop) in self.ops.iter().enumerate() {
             if let CompilerOp::Op(mut op) = *cop {
                 Self::resolve_targets(&mut op, &label_positions);
                 out.push(op);
                 if self.mode == CompilerMode::Debug {
                     assembled_positions.push(self.source_positions[i]);
+                    assembled_locations.push(self.compiled_instruction_locations[i]);
                 }
             }
         }
@@ -434,6 +466,7 @@ impl<'a> Compiler<'a> {
         self.ops.clear();
         if self.mode == CompilerMode::Debug {
             self.source_positions = assembled_positions;
+            self.compiled_instruction_locations = assembled_locations;
         }
 
         out
@@ -517,11 +550,13 @@ impl<'a> Compiler<'a> {
                 if keep {
                     self.ops[j] = self.ops[i];
                     self.source_positions[j] = self.source_positions[i];
+                    self.compiled_instruction_locations[j] = self.compiled_instruction_locations[i];
                     j += 1;
                 }
             }
             self.ops.truncate(j);
             self.source_positions.truncate(j);
+            self.compiled_instruction_locations.truncate(j);
         } else {
             self.ops.retain(|cop| match cop {
                 CompilerOp::Label(id) => live[id.0 as usize],
@@ -1112,7 +1147,10 @@ impl<'a> Compiler<'a> {
             tag_signatures: Vec::new(),
             ops: Vec::new(),
             source_positions: Vec::new(),
+            instruction_locations: Vec::new(),
+            compiled_instruction_locations: Vec::new(),
             current_source_pos: 0,
+            current_instruction_location: None,
             next_source_pos: 0,
             block_stack: Vec::new(),
             stack_height: 0,
@@ -1132,6 +1170,7 @@ impl<'a> Compiler<'a> {
     fn compile_instruction(&mut self, instr: &Instruction) {
         if self.mode == CompilerMode::Debug {
             self.current_source_pos = self.next_source_pos;
+            self.current_instruction_location = self.instruction_location_for_current_source();
             self.next_source_pos += 1;
         }
 
@@ -3225,6 +3264,11 @@ impl<'a> Compiler<'a> {
 
         self.max_stack_height = self.max_stack_height.max(self.stack_height);
     }
+
+    fn instruction_location_for_current_source(&self) -> Option<InstructionLocation> {
+        let i = usize::try_from(self.current_source_pos).ok()?;
+        self.instruction_locations.get(i).copied()
+    }
 }
 
 #[cfg(all(test, not(any(feature = "core-tests", feature = "component-tests"))))]
@@ -3250,6 +3294,7 @@ mod tests {
             type_index,
             locals: vec![],
             body,
+            instruction_locations: Vec::new(),
         }
     }
 

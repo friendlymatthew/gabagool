@@ -840,6 +840,11 @@ pub enum Instruction {
     I32x4RelaxedDotI8x16I7x16AddSigned,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstructionLocation {
+    pub code_offset: u64,
+}
+
 #[derive(Debug, Clone)]
 pub enum ExportDescription {
     Func(u32),
@@ -893,6 +898,7 @@ pub struct Function {
     pub type_index: u32,
     pub locals: Vec<Local>,
     pub body: Vec<Instruction>,
+    pub instruction_locations: Vec<InstructionLocation>,
 }
 
 #[derive(Debug, Clone)]

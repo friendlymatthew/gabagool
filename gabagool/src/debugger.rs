@@ -1,6 +1,7 @@
 use std::{collections::HashSet, num::NonZeroU64};
 
 use crate::{
+    binary_grammar::InstructionLocation,
     exponential_decay::{Entry, ExponentialDecayBuffer},
     ExecutionState, GlobalType, Instance, RawValue, Result, Store, Trap, ValueType,
 };
@@ -11,9 +12,12 @@ pub struct FrameInfo {
     pub pc: usize,
     pub locals: Vec<RawValue>,
     pub local_types: Vec<ValueType>,
-    /// Pre-order instruction index from the original wasm binary.
-    /// Use this to map back to .wat line numbers.
+    /// pre-order instruction index from the original wasm binary.
+    /// use this to map back to .wat line numbers.
     pub source_position: u32,
+    /// location of the original wasm instruction that produced this compiled
+    /// op.
+    pub instruction_location: Option<InstructionLocation>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -143,6 +147,7 @@ impl Debugger {
                     .get(frame.pc)
                     .copied()
                     .unwrap_or(frame.pc as u32),
+                instruction_location: cf.instruction_locations.get(frame.pc).copied().flatten(),
             }
         })
     }
@@ -605,22 +610,32 @@ mod tests {
         );
 
         let mut positions_at = Vec::new();
+        let mut locations_at = Vec::new();
         let frame = dbg.call_stack().last().unwrap();
         positions_at.push(frame.source_position);
+        locations_at.push(frame.instruction_location);
+        assert!(frame.instruction_location.is_some());
 
         for _ in 0..10 {
             dbg.step_forward().unwrap();
             let frame = dbg.call_stack().last().unwrap();
             positions_at.push(frame.source_position);
+            locations_at.push(frame.instruction_location);
+            assert!(frame.instruction_location.is_some());
         }
 
         for _ in 0..10 {
             dbg.step_back().unwrap();
-            let ic = dbg.instruction_count() as usize;
+            let ic = usize::try_from(dbg.instruction_count()).unwrap();
             let frame = dbg.call_stack().last().unwrap();
             assert_eq!(
                 frame.source_position, positions_at[ic],
                 "source position mismatch at instruction_count={}",
+                ic
+            );
+            assert_eq!(
+                frame.instruction_location, locations_at[ic],
+                "instruction location mismatch at instruction_count={}",
                 ic
             );
         }
