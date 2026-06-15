@@ -325,6 +325,20 @@ impl Debugger {
     }
 }
 
+impl Clone for Debugger {
+    fn clone(&self) -> Self {
+        Self {
+            store: Store::from_bytes(&self.store.to_bytes()),
+            instance: self.instance,
+            history: self.history.clone(),
+            instruction_count: self.instruction_count,
+            instructions_between_snapshots: self.instructions_between_snapshots,
+            breakpoints: self.breakpoints.clone(),
+            completed: self.completed.clone(),
+        }
+    }
+}
+
 #[cfg(all(test, not(feature = "jit")))]
 mod tests {
     use super::*;
@@ -392,6 +406,27 @@ mod tests {
 
         dbg.step_back().unwrap();
         assert_eq!(dbg.instruction_count(), 18);
+    }
+
+    #[test]
+    fn test_fork_steps_independently() {
+        let mut original = setup_debugger(
+            "programs/stair_climb.wasm",
+            "stair_climb",
+            vec![RawValue::from(3_i32)],
+        );
+
+        for _ in 0..20 {
+            original.step_forward().unwrap();
+        }
+
+        let mut fork = original.clone();
+
+        original.step_forward().unwrap();
+        fork.step_back().unwrap();
+
+        assert_eq!(original.instruction_count(), 21);
+        assert_eq!(fork.instruction_count(), 19);
     }
 
     #[test]

@@ -1,12 +1,12 @@
 use std::num::NonZeroU64;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry<T> {
     pub timestamp: u64,
     pub value: T,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExponentialDecayBuffer<T> {
     entries: Vec<Entry<T>>,
     capacity: usize,
