@@ -178,6 +178,20 @@ impl Debugger {
             .read_bytes(offset, length)
     }
 
+    pub fn write_memory(
+        &mut self,
+        module_i: u16,
+        mem_i: usize,
+        offset: usize,
+        bytes: &[u8],
+    ) -> Result<()> {
+        self.store.write_memory(module_i, mem_i, offset, bytes)
+    }
+
+    pub fn set_local(&mut self, frame_depth: usize, local_i: usize, value: RawValue) -> Result<()> {
+        self.store.set_local(frame_depth, local_i, value)
+    }
+
     pub fn memory_size(&self, module_i: u16, mem_i: usize) -> Option<usize> {
         let inst = &self.store.instances[module_i as usize];
         let mem_addr = *inst.mem_addrs.get(mem_i)?;
@@ -544,6 +558,29 @@ mod tests {
         }
         assert_eq!(dbg.instruction_count(), 100);
         assert_eq!(dbg.store.memories[0].data, mem_at_100);
+    }
+
+    #[test]
+    fn test_set_local_patches_active_frame() {
+        let mut dbg = setup_debugger(
+            "programs/stair_climb.wasm",
+            "stair_climb",
+            vec![RawValue::from(3_i32)],
+        );
+
+        dbg.set_local(0, 0, RawValue::from(9_i32)).unwrap();
+
+        let frame = dbg.call_stack().last().unwrap();
+        assert_eq!(frame.locals[0].as_i32(), 9);
+    }
+
+    #[test]
+    fn test_write_memory_patches_linear_memory() {
+        let mut dbg = setup_debugger("programs/sieve.wasm", "count_primes", vec![]);
+
+        dbg.write_memory(0, 0, 8, &[1, 2, 3, 4]).unwrap();
+
+        assert_eq!(dbg.read_memory(0, 0, 8, 4), &[1, 2, 3, 4]);
     }
 
     #[test]

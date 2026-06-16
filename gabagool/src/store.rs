@@ -397,6 +397,58 @@ impl Store {
         self.call_stack.last()
     }
 
+    pub fn set_local(&mut self, frame_depth: usize, local_i: usize, value: RawValue) -> Result<()> {
+        let Some(last_frame_i) = self.call_stack.len().checked_sub(1) else {
+            instantiation_err!("cannot patch local: call stack is empty");
+        };
+        let Some(frame_i) = last_frame_i.checked_sub(frame_depth) else {
+            instantiation_err!(
+                "cannot patch local: frame depth {frame_depth} outside call stack depth {}",
+                self.call_stack.len()
+            );
+        };
+        let frame = &mut self.call_stack[frame_i];
+        let Some(local) = frame.locals.get_mut(local_i) else {
+            instantiation_err!(
+                "cannot patch local: local index {local_i} outside frame local count {}",
+                frame.locals.len()
+            );
+        };
+
+        *local = value;
+
+        Ok(())
+    }
+
+    pub fn write_memory(
+        &mut self,
+        module_i: u16,
+        mem_i: usize,
+        offset: usize,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let Some(inst) = self.instances.get(module_i as usize) else {
+            instantiation_err!("cannot patch memory: module index {module_i} out of bounds");
+        };
+        let Some(&mem_addr) = inst.mem_addrs.get(mem_i) else {
+            instantiation_err!("cannot patch memory: memory index {mem_i} out of bounds");
+        };
+        let mem = &mut self.memories[mem_addr];
+        let Some(end) = offset.checked_add(bytes.len()) else {
+            instantiation_err!("cannot patch memory: offset + length overflow");
+        };
+        if end > mem.data.len() {
+            instantiation_err!(
+                "cannot patch memory: range {offset}..{end} outside memory length {}",
+                mem.data.len()
+            );
+        }
+
+        mem.data.write_bytes(offset, bytes);
+
+        Ok(())
+    }
+
     fn extract_function_type(types: &[SubType], type_index: u32) -> Result<FunctionType> {
         let sub_type = types.get(type_index as usize).ok_or_else(|| {
             Error::Instantiation(format!(
