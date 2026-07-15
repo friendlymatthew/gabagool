@@ -1,0 +1,8 @@
+[package]
+name = "linker-host-functions"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gabagool = { path = "../../gabagool" }
+wat = "1"
