@@ -1,12 +1,12 @@
-<p> 
+<p>
   <img src="logo.svg" width="160" alt="gabagool logo">
 </p>
 
 # gabagool
 
-A WebAssembly interpreter written from scratch. It also contains a time travel debugger.
+A WebAssembly interpreter written from scratch.
 
-This project aims to build a fully spec-compliant, performant interpreter whose entire execution state can be serialized, suspended, and restored.
+This project aims to build a **serious**, fully spec-compliant, performant WASM interpreter whose entire execution state can be serialized, suspended, and restored.
 <br>
 
 <details open>
@@ -17,24 +17,15 @@ This project aims to build a fully spec-compliant, performant interpreter whose 
 <br>
 </details>
 
-<details>
-<summary>See debugger demo</summary>
-<br>
-<img src="./gabagool-debug-adapter/dap_demo.gif" width="80%" alt="Time travel debugger demo"><br>
-<em>Every step is a full snapshot of gabagool's execution state, so you can jump to any point in history without rerunning the program</em>
-
-<br>
-<br>
-
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/friendlymatthew/gabagool)
-
-</details>
-
 # Status
 
-`gabagool` speaks the WASI preview 1 spec. **38 of 43 functions are implemented.** The entire WASI context (the file descriptor table, open file positions, clock state) is serializable, so snapshots taken mid-syscall restore cleanly. It is generally safe to presume the WASI implementation is solid, [`gabagool` can run CPython compiled to WebAssembly.](https://github.com/friendlymatthew/gabagool/tree/main/examples/python#python)
+As a pure interpreter, it is safe to assume `gabagool` is spec compliant. `gabagool` is tested against the [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core). **1,960 tests pass out of 2,049 (96%).** `gabagool` passes on arithmetic, control flow, memory, tables, globals, function references, imports/exports, and exceptions. Remaining tests involve supporting SIMD and garbage collection.
 
-`gabagool` is tested against the [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core). **1,960 tests pass out of 2,049 (96%).** `gabagool` passes on arithmetic, control flow, memory, tables, globals, function references, imports/exports, and exceptions. Remaining tests involve supporting SIMD and garbage collection.
+`gabagool` is not focused on performance optimization. No serious profiling/benchmarking has been done (yet!). That said, the goal is to make `gabagool` performant while preserving its snapshot friendly execution model. `gabagool` already lowers WASM instructions into a compact, serializable intermediate representation. The most interesting direction now is an experimental JIT compiler based on copy and patch compilation.
+
+**Current work** focuses on how gabagool interacts with its host environment. This includes a minimal, virtualized WASI Preview 1 implementation whose state can be snapshotted and restored alongside the interpreter.
+
+# Usage
 
 ```sh
 # run the core test suite
@@ -47,10 +38,8 @@ cd tests/components && bash fetch_components.sh
 cargo t --features component-tests
 
 # run an example wasm program
-cargo r -- ./programs/stair_climb.wasm stair_climb 20
+cargo r -- ./test-programs/stair_climb.wasm stair_climb 20
 ```
-
-`gabagool` is not optimized and no serious profiling/benchmarking has been done. That said, the goal is to make it as performant as a pure interpreter can be. The most interesting direction is a translation phase that lowers WASM instructions into a compact intermediate representation, designed for efficient dispatch and serialization.
 
 # Reading
 
@@ -71,7 +60,3 @@ https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI
 
 https://fredrikbk.com/publications/copy-and-patch.pdf<br>
 https://www.youtube.com/watch?v=HxSHIpEQRjs<br>
-
-## Time travel debugging
-
-https://awelonblue.wordpress.com/2013/01/24/exponential-decay-of-history-improved/<br>

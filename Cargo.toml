@@ -1,20 +1,33 @@
-[workspace]
-members = ["gabagool", "gabagool-debug-adapter", "gabagool-wasip1"]
-exclude = [
-    "programs-wasi",
-    "examples/game-of-life",
-    "examples/linker-host-functions",
-    "examples/python",
-]
-resolver = "2"
 
-[workspace.package]
+[package]
+name = "gabagool"
+description = "a snapshotable WASM interpreter"
 version = "0.1.1"
 edition = "2021"
 authors = ["friendlymatthew"]
 license = "Apache-2.0"
 
-[profile.release]
-debug = 1
-panic = "abort"
-codegen-units = 1
+[dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.183"
+
+[build-dependencies]
+wast = { version = "245.0.1", optional = true }
+cc = { version = "1.2.57", optional = true }
+object = { version = "0.38.1", optional = true }
+
+[features]
+core-tests = ["wast"]
+component-tests = []
+jit = ["cc", "object"]
+
+[dev-dependencies]
+insta = "1"
+wat = "1"
+criterion = "0.8.2"
+wasmi = "1.0.9"
+
+[[bench]]
+name = "programs"
+harness = false
