@@ -257,8 +257,6 @@ pub struct Store {
     /// maps func addr → (instance_i, compiled_func_i)
     pub(crate) func_addr_to_module: Vec<Option<(u16, u32)>>,
 
-    pub(crate) mmap_backing: bool,
-
     // execution state
     pub(crate) stack: ValueStack,
     pub(crate) call_stack: Vec<CallFrame>,
@@ -300,15 +298,6 @@ impl Store {
     }
 
     pub fn new() -> Self {
-        Self::with_backing(false)
-    }
-
-    #[cfg(unix)]
-    pub fn new_cow() -> Self {
-        Self::with_backing(true)
-    }
-
-    fn with_backing(mmap_backing: bool) -> Self {
         Self {
             functions: Vec::new(),
             tables: Vec::new(),
@@ -328,7 +317,6 @@ impl Store {
             instances: Vec::new(),
             func_addr_to_module: Vec::new(),
             component_instances: Vec::new(),
-            mmap_backing,
         }
     }
 
@@ -448,22 +436,7 @@ impl Store {
         let memory_address = self.memories.len();
         let n = memory_type.limit.min as usize * PAGE_SIZE;
 
-        let data = if self.mmap_backing {
-            #[cfg(unix)]
-            {
-                const MAX_PAGES: usize = 65536;
-                let max_pages = (memory_type.limit.max as usize).clamp(1, MAX_PAGES);
-                let capacity = max_pages * PAGE_SIZE;
-                GuestMemory::with_mmap(n, capacity)
-                    .expect("mmap allocation for linear memory failed")
-            }
-            #[cfg(not(unix))]
-            {
-                unimplemented!()
-            }
-        } else {
-            GuestMemory::new(n)
-        };
+        let data = GuestMemory::new(n);
 
         self.memories.push(MemoryInstance {
             memory_type: memory_type.clone(),

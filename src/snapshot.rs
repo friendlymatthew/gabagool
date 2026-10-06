@@ -1114,22 +1114,10 @@ impl Snapshot for InstantiatedComponent {
 
 impl Store {
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.encode(true)
+        self.encode()
     }
 
-    fn to_blueprint(&self) -> Vec<u8> {
-        self.encode(false)
-    }
-
-    fn from_blueprint(
-        bytes: &[u8],
-        memories: Vec<MemoryInstance>,
-        module_code: Vec<Arc<ModuleCode>>,
-    ) -> Self {
-        Self::decode(bytes, Some(memories), Some(module_code))
-    }
-
-    fn encode(&self, include_memory_data: bool) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
         buf.extend_from_slice(SNAPSHOT_MAGIC);
@@ -1168,9 +1156,7 @@ impl Store {
         for mem in &self.memories {
             mem.memory_type.encode(&mut buf);
             (mem.data.len() as u64).encode(&mut buf);
-            if include_memory_data {
-                buf.extend_from_slice(mem.data.as_slice());
-            }
+            buf.extend_from_slice(mem.data.as_slice());
         }
 
         // globals
@@ -1202,9 +1188,7 @@ impl Store {
 
         (self.instances.len() as u32).encode(&mut buf);
         for inst in &self.instances {
-            if include_memory_data {
-                inst.code.as_ref().encode(&mut buf);
-            }
+            inst.code.as_ref().encode(&mut buf);
             inst.function_addrs.encode(&mut buf);
             inst.table_addrs.encode(&mut buf);
             inst.mem_addrs.encode(&mut buf);
@@ -1242,14 +1226,10 @@ impl Store {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self::decode(bytes, None, None)
+        Self::decode(bytes)
     }
 
-    fn decode(
-        bytes: &[u8],
-        provided_memories: Option<Vec<MemoryInstance>>,
-        provided_module_code: Option<Vec<Arc<ModuleCode>>>,
-    ) -> Self {
+    fn decode(bytes: &[u8]) -> Self {
         let buf = &mut &bytes[..];
 
         let magic: [u8; 4] = buf[..4].try_into().unwrap();
@@ -1306,34 +1286,20 @@ impl Store {
         }
 
         let num_memories = u32::decode(buf) as usize;
-        let provided_was_some = provided_memories.is_some();
-        let memories = if let Some(provided) = provided_memories {
-            assert_eq!(provided.len(), num_memories);
+        let mut memories = Vec::with_capacity(num_memories);
 
-            for _ in 0..num_memories {
-                let _ = MemoryType::decode(buf);
-                let _ = u64::decode(buf) as usize;
-            }
+        for _ in 0..num_memories {
+            let memory_type = MemoryType::decode(buf);
+            let data_len = u64::decode(buf) as usize;
 
-            provided
-        } else {
-            let mut memories = Vec::with_capacity(num_memories);
+            let data = buf[..data_len].to_vec();
+            *buf = &buf[data_len..];
 
-            for _ in 0..num_memories {
-                let memory_type = MemoryType::decode(buf);
-                let data_len = u64::decode(buf) as usize;
-
-                let data = buf[..data_len].to_vec();
-                *buf = &buf[data_len..];
-
-                memories.push(MemoryInstance {
-                    memory_type,
-                    data: GuestMemory::from_vec(data),
-                });
-            }
-
-            memories
-        };
+            memories.push(MemoryInstance {
+                memory_type,
+                data: GuestMemory::from_vec(data),
+            });
+        }
 
         // globals
         let num_globals = u32::decode(buf) as usize;
@@ -1373,24 +1339,18 @@ impl Store {
 
         let num_instances = u32::decode(buf) as usize;
         let instances = (0..num_instances)
-            .map(|i| {
-                let code = provided_module_code.as_ref().map_or_else(
-                    || Arc::new(ModuleCode::decode(buf)),
-                    |arcs| Arc::clone(&arcs[i]),
-                );
-                InstantiatedModule {
-                    code,
-                    function_addrs: Vec::<usize>::decode(buf),
-                    table_addrs: Vec::<usize>::decode(buf),
-                    mem_addrs: Vec::<usize>::decode(buf),
-                    global_addrs: Vec::<usize>::decode(buf),
-                    tag_addrs: Vec::<usize>::decode(buf),
-                    elem_addrs: Vec::<usize>::decode(buf),
-                    data_addrs: Vec::<usize>::decode(buf),
-                    exports: Vec::<ExportInstance>::decode(buf),
-                    #[cfg(feature = "jit")]
-                    jit_functions: Vec::new(),
-                }
+            .map(|_| InstantiatedModule {
+                code: Arc::new(ModuleCode::decode(buf)),
+                function_addrs: Vec::<usize>::decode(buf),
+                table_addrs: Vec::<usize>::decode(buf),
+                mem_addrs: Vec::<usize>::decode(buf),
+                global_addrs: Vec::<usize>::decode(buf),
+                tag_addrs: Vec::<usize>::decode(buf),
+                elem_addrs: Vec::<usize>::decode(buf),
+                data_addrs: Vec::<usize>::decode(buf),
+                exports: Vec::<ExportInstance>::decode(buf),
+                #[cfg(feature = "jit")]
+                jit_functions: Vec::new(),
             })
             .collect::<Vec<_>>();
 
@@ -1418,8 +1378,6 @@ impl Store {
             component_instances.push(InstantiatedComponent::decode(buf));
         }
 
-        let mmap_backing = provided_was_some;
-
         Self {
             functions,
             tables,
@@ -1439,99 +1397,35 @@ impl Store {
             pending_suspension: None,
             pending_lifted,
             component_instances,
-            mmap_backing,
         }
     }
 }
 
-#[cfg(unix)]
 pub struct StoreSnapshot {
-    blueprint: Vec<u8>,
-    memories: Vec<MemoryInstance>,
-    module_code: Vec<Arc<ModuleCode>>,
-    retained_functions: Vec<FunctionInstance>,
+    bytes: Vec<u8>,
+    memory_count: usize,
 }
 
-#[cfg(unix)]
-impl Drop for StoreSnapshot {
-    fn drop(&mut self) {
-        let functions = std::mem::take(&mut self.retained_functions);
-        if !functions.is_empty() {
-            std::thread::spawn(move || drop(functions));
-        }
-    }
-}
-
-#[cfg(unix)]
 impl Store {
-    pub fn snapshot(mut self) -> StoreSnapshot {
-        assert!(self.memories.iter().all(|m| m.data.is_mmap()));
-
-        let module_code = self
-            .instances
-            .iter()
-            .map(|inst| Arc::clone(&inst.code))
-            .collect::<Vec<_>>();
-
-        let blueprint = self.to_blueprint();
+    pub fn snapshot(self) -> StoreSnapshot {
+        let memory_count = self.memories.len();
+        let bytes = self.to_bytes();
 
         StoreSnapshot {
-            blueprint,
-            memories: std::mem::take(&mut self.memories),
-            module_code,
-            retained_functions: std::mem::take(&mut self.functions),
+            bytes,
+            memory_count,
         }
     }
 }
 
-#[cfg(unix)]
 impl StoreSnapshot {
     pub const fn memory_count(&self) -> usize {
-        self.memories.len()
+        self.memory_count
     }
 
-    pub fn fork(&self, n: usize) -> std::io::Result<Vec<Store>> {
-        use std::io;
-
-        if n == 0 {
-            return Ok(Vec::new());
-        }
-
-        let forked_per_memory = self
-            .memories
-            .iter()
-            .map(|m| m.data.fork_private(n))
-            .collect::<io::Result<Vec<_>>>()?;
-
-        let mut child_iters = forked_per_memory
-            .into_iter()
-            .map(IntoIterator::into_iter)
-            .collect::<Vec<_>>();
-
-        let mut stores = Vec::with_capacity(n);
-
-        for _ in 0..n {
-            let child_memories = self
-                .memories
-                .iter()
-                .zip(child_iters.iter_mut())
-                .map(|(parent_mem, iter)| MemoryInstance {
-                    memory_type: parent_mem.memory_type.clone(),
-                    data: iter
-                        .next()
-                        .expect("fork_private returned fewer children than requested"),
-                })
-                .collect::<Vec<_>>();
-
-            let child_module_code = self.module_code.iter().map(Arc::clone).collect::<Vec<_>>();
-
-            stores.push(Store::from_blueprint(
-                &self.blueprint,
-                child_memories,
-                child_module_code,
-            ));
-        }
-
-        Ok(stores)
+    pub fn fork(&self, n: usize) -> Vec<Store> {
+        (0..n)
+            .map(|_| Store::from_bytes(&self.bytes))
+            .collect::<Vec<_>>()
     }
 }

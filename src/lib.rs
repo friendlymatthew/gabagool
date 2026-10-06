@@ -23,7 +23,6 @@ pub use runtime::{
     ExternalValue, FunctionInstance, GlobalInstance, GuestMemory, Instance, InstantiatedModule,
     MemoryInstance, RawValue, Ref, Store, TableInstance, TagInstance,
 };
-#[cfg(unix)]
 pub use snapshot::StoreSnapshot;
 
 pub mod value_stack {

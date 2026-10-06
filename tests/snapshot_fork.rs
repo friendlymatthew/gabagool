@@ -1,4 +1,4 @@
-#![cfg(all(unix, not(any(feature = "core-tests", feature = "component-tests"))))]
+#![cfg(not(any(feature = "core-tests", feature = "component-tests")))]
 
 use gabagool::{Module, RawValue, Store};
 
@@ -17,7 +17,7 @@ const TINY_MEM_WAT: &str = r#"
 fn build_tiny_mem_store() -> (Store, gabagool::Instance) {
     let wasm = wat::parse_str(TINY_MEM_WAT).unwrap();
     let module = Module::new(&wasm).unwrap();
-    let mut store = Store::new_cow();
+    let mut store = Store::new();
     let instance = store.instantiate(&module, vec![]).unwrap();
     (store, instance)
 }
@@ -51,7 +51,7 @@ fn fork_children_inherit_parent_memory_state() {
     write(&mut parent, instance, 64, 0x2222_2222);
 
     let snap = parent.snapshot();
-    let children = snap.fork(4).unwrap();
+    let children = snap.fork(4);
 
     for mut child in children {
         let inst = child.instance(0);
@@ -66,7 +66,7 @@ fn fork_children_writes_are_isolated() {
     write(&mut parent, instance, 0, 0xAAAA_AAAA_u32 as i32);
 
     let snap = parent.snapshot();
-    let mut children = snap.fork(3).unwrap();
+    let mut children = snap.fork(3);
 
     let inst0 = children[0].instance(0);
     let inst1 = children[1].instance(0);
@@ -87,8 +87,8 @@ fn snapshot_can_be_forked_multiple_times() {
 
     let snap = parent.snapshot();
 
-    let first_batch = snap.fork(2).unwrap();
-    let second_batch = snap.fork(3).unwrap();
+    let first_batch = snap.fork(2);
+    let second_batch = snap.fork(3);
 
     for mut child in first_batch.into_iter().chain(second_batch) {
         let inst = child.instance(0);
@@ -100,18 +100,8 @@ fn snapshot_can_be_forked_multiple_times() {
 fn fork_zero_returns_empty() {
     let (parent, _instance) = build_tiny_mem_store();
     let snap = parent.snapshot();
-    let children = snap.fork(0).unwrap();
+    let children = snap.fork(0);
     assert!(children.is_empty());
-}
-
-#[test]
-#[should_panic]
-fn snapshot_panics_on_owned_store() {
-    let wasm = wat::parse_str(TINY_MEM_WAT).unwrap();
-    let module = Module::new(&wasm).unwrap();
-    let mut store = Store::new();
-    let _ = store.instantiate(&module, vec![]).unwrap();
-    let _ = store.snapshot();
 }
 
 #[test]
@@ -120,7 +110,7 @@ fn forked_store_can_continue_executing() {
     write(&mut parent, instance, 0, 7);
 
     let snap = parent.snapshot();
-    let mut children = snap.fork(2).unwrap();
+    let mut children = snap.fork(2);
 
     // each child does some independent work
     let inst0 = children[0].instance(0);
