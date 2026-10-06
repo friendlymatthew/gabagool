@@ -1,4 +1,4 @@
-use crate::binary_grammar::{HeapType, ValueType};
+use crate::module::{HeapType, ValueType};
 
 const _: () = assert!(std::mem::size_of::<Op>() <= 16);
 

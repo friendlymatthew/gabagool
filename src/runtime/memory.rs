@@ -1,132 +1,211 @@
-use crate::binary_grammar::{Function, FunctionType, GlobalType, MemoryType, RefType, TableType};
-#[cfg(unix)]
-use crate::mmap_backing::MmapBacking;
+use crate::module::MemoryType;
+use std::ffi::CString;
 use std::io::{self, ErrorKind};
-use std::sync::Arc;
+use std::ptr;
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Ref {
-    Null = 0,
-    FunctionAddr(usize) = 1,
-    RefExtern(usize) = 2,
-    I31(i32) = 3,
-    ExnRef(usize) = 4,
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[derive(Debug)]
+struct MmapBacking {
+    fd: libc::c_int,
+    ptr: *mut u8,
+    len: usize,
+    capacity: usize,
 }
 
-#[derive(Debug, Copy, Clone, Default)]
-pub struct RawValue(u64);
+unsafe impl Send for MmapBacking {}
+unsafe impl Sync for MmapBacking {}
 
-impl RawValue {
-    pub const fn as_i32(self) -> i32 {
-        self.0 as i32
-    }
+impl MmapBacking {
+    pub fn new(initial: usize, capacity: usize) -> io::Result<Self> {
+        assert!(initial <= capacity);
 
-    pub const fn as_i64(self) -> i64 {
-        self.0 as i64
-    }
+        let fd = open_backing_fd()?;
 
-    pub const fn as_f32(self) -> f32 {
-        f32::from_bits(self.0 as u32)
-    }
-
-    pub const fn as_f64(self) -> f64 {
-        f64::from_bits(self.0)
-    }
-
-    pub const fn as_ref(self) -> Ref {
-        let tag = self.0 >> 61;
-        let payload = self.0 & 0x1FFFFFFFFFFFFFFF;
-
-        match tag {
-            0 => Ref::Null,
-            1 => Ref::FunctionAddr(payload as usize),
-            2 => Ref::RefExtern(payload as usize),
-            3 => Ref::I31(payload as i32),
-            4 => Ref::ExnRef(payload as usize),
-            _ => unreachable!(),
+        if unsafe { libc::ftruncate(fd, capacity as libc::off_t) } != 0 {
+            let err = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(err);
         }
-    }
 
-    pub const fn from_ref(r: Ref) -> Self {
-        let raw = match r {
-            Ref::Null => 0u64,
-            Ref::FunctionAddr(a) => (1u64 << 61) | a as u64,
-            Ref::RefExtern(a) => (2u64 << 61) | a as u64,
-            Ref::I31(v) => (3u64 << 61) | (v as u32 as u64),
-            Ref::ExnRef(a) => (4u64 << 61) | a as u64,
+        let raw = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                capacity,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                fd,
+                0,
+            )
         };
 
-        Self(raw)
+        if raw == libc::MAP_FAILED {
+            let err = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(err);
+        }
+
+        Ok(Self {
+            fd,
+            ptr: raw.cast::<u8>(),
+            len: initial,
+            capacity,
+        })
     }
 
-    pub const fn from_v128(v: i128) -> (Self, Self) {
-        let hi = (v >> 64) as u64;
-        let lo = v as u64;
-
-        (Self(hi), Self(lo))
+    pub const fn len(&self) -> usize {
+        self.len
     }
 
-    pub const fn as_v128(self, lo: Self) -> i128 {
-        (self.0 as i128) << 64 | lo.0 as i128
+    pub const fn _capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub const fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+
+    pub const fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+
+    pub fn resize(&mut self, new_len: usize, val: u8) {
+        assert!(new_len <= self.capacity,);
+
+        if new_len > self.len {
+            let added = new_len - self.len;
+            unsafe {
+                let added_ptr = self.ptr.add(self.len);
+                std::slice::from_raw_parts_mut(added_ptr, added).fill(val);
+            }
+        }
+
+        self.len = new_len;
+    }
+
+    pub fn fork_private(&self, n: usize) -> io::Result<Vec<Self>> {
+        let mut children = Vec::with_capacity(n);
+
+        for _ in 0..n {
+            let fd = unsafe { libc::dup(self.fd) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+
+            let raw = unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    self.capacity,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE,
+                    fd,
+                    0,
+                )
+            };
+
+            if raw == libc::MAP_FAILED {
+                let err = io::Error::last_os_error();
+                unsafe {
+                    libc::close(fd);
+                }
+                return Err(err);
+            }
+
+            children.push(Self {
+                fd,
+                ptr: raw.cast::<u8>(),
+                len: self.len,
+                capacity: self.capacity,
+            });
+        }
+
+        Ok(children)
     }
 }
 
-impl From<i32> for RawValue {
-    fn from(value: i32) -> Self {
-        Self(value as u64)
+impl Drop for MmapBacking {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.ptr.cast::<libc::c_void>(), self.capacity);
+            libc::close(self.fd);
+        }
     }
 }
 
-impl From<i64> for RawValue {
-    fn from(value: i64) -> Self {
-        Self(value as u64)
+impl Clone for MmapBacking {
+    fn clone(&self) -> Self {
+        let mut new =
+            Self::new(self.len, self.capacity).expect("clone of mmap-backed memory failed");
+
+        new.as_mut_slice().copy_from_slice(self.as_slice());
+
+        new
     }
 }
 
-impl From<f32> for RawValue {
-    fn from(value: f32) -> Self {
-        Self(f32::to_bits(value) as u64)
+impl PartialEq for MmapBacking {
+    fn eq(&self, other: &Self) -> bool {
+        self.len == other.len && self.as_slice() == other.as_slice()
     }
 }
 
-impl From<f64> for RawValue {
-    fn from(value: f64) -> Self {
-        Self(f64::to_bits(value))
+impl Eq for MmapBacking {}
+
+#[cfg(target_os = "linux")]
+fn open_backing_fd() -> io::Result<libc::c_int> {
+    let name = CString::new("gabagool-memory").unwrap();
+    let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
+
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
     }
+
+    Ok(fd)
 }
 
-/// A temporary struct that accumulates address mappings during instantiation
-#[derive(Debug, Clone, Default)]
-pub struct AddressMap {
-    pub function_addrs: Vec<usize>,
-    pub table_addrs: Vec<usize>,
-    pub mem_addrs: Vec<usize>,
-    pub global_addrs: Vec<usize>,
-    pub tag_addrs: Vec<usize>,
-    pub elem_addrs: Vec<usize>,
-    pub data_addrs: Vec<usize>,
-    pub exports: Vec<ExportInstance>,
+#[cfg(target_os = "macos")]
+fn open_backing_fd() -> io::Result<libc::c_int> {
+    // note: we use a tempfile rather than shm_open
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let pid = unsafe { libc::getpid() };
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = CString::new(format!("/tmp/gabagool.{pid}.{n}")).unwrap();
+
+    let fd = unsafe {
+        libc::open(
+            path.as_ptr(),
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let unlink_rc = unsafe { libc::unlink(path.as_ptr()) };
+
+    if unlink_rc != 0 {
+        let err = io::Error::last_os_error();
+        unsafe {
+            libc::close(fd);
+        }
+        return Err(err);
+    }
+
+    Ok(fd)
 }
 
-#[derive(Debug)]
-pub enum FunctionInstance {
-    Local {
-        function_type: FunctionType,
-        address_map: Arc<AddressMap>,
-        code: Function,
-    },
-    Host {
-        function_type: FunctionType,
-        module_name: String,
-        function_name: String,
-    },
-}
-
-#[derive(Debug)]
-pub struct TableInstance {
-    pub table_type: TableType,
-    pub elem: Vec<Ref>,
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn open_backing_fd() -> io::Result<libc::c_int> {
+    unimplemented!()
 }
 
 #[derive(Debug)]
@@ -455,41 +534,4 @@ mod mmap_tests {
         let err = parent.fork_private(2).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
-}
-
-#[derive(Debug)]
-pub struct GlobalInstance {
-    pub global_type: GlobalType,
-    pub value: RawValue,
-}
-
-#[derive(Debug)]
-pub struct ElementInstance {
-    pub ref_type: RefType,
-    pub elem: Vec<Ref>,
-}
-
-#[derive(Debug)]
-pub struct TagInstance {
-    pub tag_type: FunctionType,
-}
-
-#[derive(Debug)]
-pub struct DataInstance {
-    pub data: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ExternalValue {
-    Function { addr: usize },
-    Table { addr: usize },
-    Memory { addr: usize },
-    Global { addr: usize },
-    Tag { addr: usize },
-}
-
-#[derive(Debug, Clone)]
-pub struct ExportInstance {
-    pub name: String,
-    pub value: ExternalValue,
 }

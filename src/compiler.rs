@@ -1,7 +1,7 @@
-use crate::binary_grammar::{
+use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
+use crate::module::{
     BlockType, CatchClause, CompositeType, Function, Instruction, ParsedModule, SubType, ValueType,
 };
-use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
 use crate::ImportDescription;
 
 const UNREACHABLE_DEPTH: i32 = i32::MIN;
@@ -3167,7 +3167,7 @@ impl<'a> Compiler<'a> {
 #[cfg(all(test, not(any(feature = "core-tests", feature = "component-tests"))))]
 mod tests {
     use super::*;
-    use crate::binary_grammar::{
+    use crate::module::{
         BlockType, CompositeType, FunctionType, Instruction, MemArg, ResultType, SubType, ValueType,
     };
 

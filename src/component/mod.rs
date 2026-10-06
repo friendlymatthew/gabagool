@@ -1,7 +1,7 @@
-pub(crate) mod binary_grammar;
-pub(crate) mod execution_grammar;
 pub(crate) mod flatten;
+pub(crate) mod model;
+pub(crate) mod runtime;
 
-pub use binary_grammar::*;
-pub use execution_grammar::*;
 pub use flatten::*;
+pub use model::*;
+pub use runtime::*;

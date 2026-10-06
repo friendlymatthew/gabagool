@@ -1,27 +1,31 @@
 #![warn(clippy::nursery)]
 
-mod binary_grammar;
 pub mod compiler;
 pub mod component;
 mod error;
-mod execution_grammar;
 pub mod ir;
 pub mod leb128;
 mod linker;
+mod module;
 pub mod parser;
+mod runtime;
 pub mod snapshot;
-mod store;
-pub mod value_stack;
 
 #[cfg(feature = "jit")]
 mod jit;
 
-#[cfg(unix)]
-mod mmap_backing;
-
-pub use binary_grammar::*;
 pub use component::*;
 pub use error::*;
-pub use execution_grammar::*;
 pub use linker::*;
-pub use store::*;
+pub use module::*;
+pub use runtime::{
+    AddressMap, CallFrame, DataInstance, ElementInstance, ExecutionState, ExportInstance,
+    ExternalValue, FunctionInstance, GlobalInstance, GuestMemory, Instance, InstantiatedModule,
+    MemoryInstance, RawValue, Ref, Store, TableInstance, TagInstance,
+};
+#[cfg(unix)]
+pub use snapshot::StoreSnapshot;
+
+pub mod value_stack {
+    pub use crate::runtime::ValueStack;
+}

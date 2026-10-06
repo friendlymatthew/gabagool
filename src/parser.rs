@@ -12,7 +12,8 @@ use crate::{
     ParsedComponentInstance, PrimitiveValueKind, StringEncoding, TypeBound, VariantCase,
 };
 
-use crate::binary_grammar::{
+use crate::leb128::{self, MAX_LEB128_LEN_32, MAX_LEB128_LEN_64};
+use crate::module::{
     AddrType, ArrayType, BlockType, CatchClause, CodeSection, CompositeType, CustomSection,
     DataMode, DataSection, DataSegment, ElementMode, ElementSection, ElementSegment, Export,
     ExportDescription, ExportSection, FieldType, Function, FunctionSection, FunctionType, Global,
@@ -21,7 +22,6 @@ use crate::binary_grammar::{
     ParsedModule, RefType, ResultType, StorageType, StructType, SubType, TableDef, TableSection,
     TableType, Tag, TagSection, TypeSection, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
 };
-use crate::leb128::{self, MAX_LEB128_LEN_32, MAX_LEB128_LEN_64};
 
 #[derive(Debug)]
 pub struct Parser<'a> {

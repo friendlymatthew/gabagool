@@ -1,4 +1,4 @@
-use crate::binary_grammar::{ImportDeclaration, ImportDescription, ParsedModule, SubType};
+use crate::module::{ImportDeclaration, ImportDescription, ParsedModule, SubType};
 use crate::parser::Parser;
 use crate::{flatten, parse_err, Error, Result};
 

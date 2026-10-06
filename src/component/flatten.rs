@@ -1,7 +1,7 @@
-use crate::binary_grammar::ParsedModule;
+use crate::module::ParsedModule;
 use crate::Result;
 
-use super::binary_grammar::{
+use super::model::{
     Alias, ComponentSection, ComponentSort, ComponentTypeDef, CoreInstance, CoreSort,
     ParsedCanonOpts, ParsedComponent,
 };

@@ -1,8 +1,8 @@
 use std::ops::Range;
 use std::ptr;
 
-use crate::binary_grammar::AddrType;
-use crate::execution_grammar::RawValue;
+use crate::module::AddrType;
+use crate::runtime::RawValue;
 
 /// the value stack operates without any bounds check
 ///
