@@ -1,8 +1,10 @@
 target/
+*.wasm
+*.wat
+*.wast
 gabagool-debug-adapter/bin/
-gabagool/tests/spec/
-gabagool/tests/components/
-game-of-life*.gabagool
 gabagool-debug-adapter/gabagool-debug.vsix
-examples/python/python.wasm
+tests/spec/
+tests/components/
+game-of-life*.gabagool
 examples/python/lib/

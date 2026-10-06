@@ -1,0 +1,3 @@
+*.wasm linguist-detectable=false
+*.wat linguist-detectable=false
+*.wast linguist-detectable=false
