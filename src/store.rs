@@ -1014,7 +1014,7 @@ impl Store {
     }
 
     pub fn invoke_no_args(&mut self, instance: Instance, name: &str) -> Result<ExecutionState> {
-        self.invoke(instance, name, Vec::<RawValue>::new())
+        self.invoke(instance, name, std::iter::empty::<RawValue>())
     }
 
     pub fn invoke_component<I>(

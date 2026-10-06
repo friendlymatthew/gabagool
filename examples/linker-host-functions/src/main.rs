@@ -29,7 +29,7 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
 
     let instance = linker.instantiate(&mut store, &module)?;
     let result = linker
-        .invoke(&mut store, instance, "run", std::iter::empty::<RawValue>())?
+        .invoke_no_args(&mut store, instance, "run")?
         .into_completed()?;
 
     println!("wasm returned: {}", result[0].as_i32());

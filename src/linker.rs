@@ -106,6 +106,15 @@ impl Linker {
         self.dispatch(store, instance, state)
     }
 
+    pub fn invoke_no_args(
+        &self,
+        store: &mut Store,
+        instance: Instance,
+        name: &str,
+    ) -> Result<ExecutionState> {
+        self.invoke(store, instance, name, std::iter::empty::<RawValue>())
+    }
+
     pub fn dispatch(
         &self,
         store: &mut Store,
