@@ -25,15 +25,16 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn new(bytes: &[u8]) -> Result<Self> {
+    pub fn try_new(bytes: &[u8]) -> Result<Self> {
         let module = Parser::new(bytes).parse()?.try_as_module()?;
-        Self::from_parsed(module)
+
+        Ok(Self::from_parsed(module))
     }
 
-    pub fn from_parsed(parsed: ParsedModule) -> Result<Self> {
+    pub fn from_parsed(parsed: ParsedModule) -> Self {
         let code = compiler::compile(&parsed);
 
-        Ok(Self {
+        Self {
             code: Arc::new(code),
             functions: parsed.functions,
             tables: parsed.tables,
@@ -45,7 +46,7 @@ impl Module {
             import_declarations: parsed.import_declarations,
             exports: parsed.exports,
             tags: parsed.tags,
-        })
+        }
     }
 
     pub fn import_declarations(&self) -> &[ImportDeclaration] {

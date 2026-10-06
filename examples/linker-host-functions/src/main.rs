@@ -16,7 +16,7 @@ const WAT: &str = r#"
 
 fn main() -> std::result::Result<(), Box<dyn StdError>> {
     let wasm = wat::parse_str(WAT)?;
-    let module = Module::new(&wasm)?;
+    let module = Module::try_new(&wasm)?;
     let mut store = Store::new();
     let mut linker = Linker::new();
 

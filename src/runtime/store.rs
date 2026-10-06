@@ -914,7 +914,7 @@ impl Store {
         let mut compiled_modules = Vec::with_capacity(flattened.modules.len());
 
         for module in &flattened.modules {
-            compiled_modules.push(Module::from_parsed((**module).clone())?);
+            compiled_modules.push(Module::from_parsed((**module).clone()));
         }
 
         let mut core_instances = Vec::new();

@@ -16,7 +16,7 @@ const TINY_MEM_WAT: &str = r#"
 
 fn build_tiny_mem_store() -> (Store, gabagool::Instance) {
     let wasm = wat::parse_str(TINY_MEM_WAT).unwrap();
-    let module = Module::new(&wasm).unwrap();
+    let module = Module::try_new(&wasm).unwrap();
     let mut store = Store::new();
     let instance = store.instantiate(&module, vec![]).unwrap();
     (store, instance)

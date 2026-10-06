@@ -230,7 +230,7 @@ mod core_tests {
                                         "#[test]\n",
                                         "fn {test_name}() {{\n",
                                         "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/trap_module_{file}_{idx}.wasm\"));\n",
-                                        "    let module = Module::new(wasm_bytes).unwrap();\n",
+                                        "    let module = Module::try_new(wasm_bytes).unwrap();\n",
                                         "    let mut store = Store::new();\n",
                                         "    let imports = setup_spectest_imports(&mut store, &module);\n",
                                         "    let result = store.instantiate(&module, imports);\n",
@@ -337,7 +337,7 @@ mod core_tests {
                             setup.push_str(&format!(
                                 concat!(
                                     "    let prereq_wasm_{pidx}: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{pidx}.wasm\"));\n",
-                                    "    let prereq_module_{pidx} = Module::new(prereq_wasm_{pidx}).unwrap();\n",
+                                    "    let prereq_module_{pidx} = Module::try_new(prereq_wasm_{pidx}).unwrap();\n",
                                     "    let prereq_imports_{pidx} = setup_spectest_imports(&mut store, &prereq_module_{pidx});\n",
                                     "    let prereq_instance_{pidx} = store.instantiate(&prereq_module_{pidx}, prereq_imports_{pidx}).unwrap();\n",
                                     "    let prereq_exports_{pidx}: Vec<ExportInstance> = store.exports(prereq_instance_{pidx}).to_vec();\n",
@@ -368,7 +368,7 @@ mod core_tests {
                                 "#[test]\n",
                                 "fn {test_name}() {{\n",
                                 "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/unlinkable_{file}_{idx}.wasm\"));\n",
-                                "    let module = Module::new(wasm_bytes).unwrap();\n",
+                                "    let module = Module::try_new(wasm_bytes).unwrap();\n",
                                 "    let mut store = Store::new();\n",
                                 "{setup}",
                                 "    let result = resolve_result.and_then(|imports| store.instantiate(&module, imports));\n",
@@ -448,7 +448,7 @@ mod core_tests {
                         setup.push_str(&format!(
                             concat!(
                                 "    let prereq_wasm_{pidx}: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{pidx}.wasm\"));\n",
-                                "    let prereq_module_{pidx} = Module::new(prereq_wasm_{pidx}).unwrap();\n",
+                                "    let prereq_module_{pidx} = Module::try_new(prereq_wasm_{pidx}).unwrap();\n",
                                 "    let prereq_imports_{pidx} = setup_spectest_imports(&mut store, &prereq_module_{pidx});\n",
                                 "    let prereq_instance_{pidx} = store.instantiate(&prereq_module_{pidx}, prereq_imports_{pidx}).unwrap();\n",
                                 "    let prereq_exports_{pidx}: Vec<ExportInstance> = store.exports(prereq_instance_{pidx}).to_vec();\n",
@@ -482,7 +482,7 @@ mod core_tests {
                             "#[test]\n",
                             "fn {test_name}() {{\n",
                             "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
-                            "    let module = Module::new(wasm_bytes).unwrap();\n",
+                            "    let module = Module::try_new(wasm_bytes).unwrap();\n",
                             "    let mut store = Store::new();\n",
                             "{setup}",
                             "    let instance = store.instantiate(&module, imports).unwrap();\n",
@@ -505,7 +505,7 @@ mod core_tests {
                             "#[test]\n",
                             "fn {test_name}() {{\n",
                             "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
-                            "    let module = Module::new(wasm_bytes).unwrap();\n",
+                            "    let module = Module::try_new(wasm_bytes).unwrap();\n",
                             "    let mut store = Store::new();\n",
                             "{setup}",
                             "    let instance = store.instantiate(&module, imports).unwrap();\n",

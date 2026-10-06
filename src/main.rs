@@ -24,7 +24,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_file = PathBuf::from(&wasm_file);
     let wasm_bytes = fs::read(&wasm_file)?;
 
-    let module = Module::new(&wasm_bytes)?;
+    let module = Module::try_new(&wasm_bytes)?;
     let mut store = Store::new();
     let instance = store.instantiate(&module, vec![])?;
 

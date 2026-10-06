@@ -10,7 +10,7 @@ fn programs_dir() -> PathBuf {
 }
 
 fn load_and_instantiate(wasm_bytes: &[u8]) -> (Store, gabagool::Instance) {
-    let module = Module::new(wasm_bytes).unwrap();
+    let module = Module::try_new(wasm_bytes).unwrap();
     let mut store = Store::new();
     let instance = store.instantiate(&module, vec![]).unwrap();
     (store, instance)
@@ -33,7 +33,7 @@ fn bench_fibonacci(c: &mut Criterion) {
 
     // c.bench_function("fib(30) wasmi", |b| {
     //     let engine = wasmi::Engine::default();
-    //     let module = wasmi::Module::new(&engine, &wasm[..]).unwrap();
+    //     let module = wasmi::Module::try_new(&engine, &wasm[..]).unwrap();
     //     b.iter(|| {
     //         let mut store = wasmi::Store::new(&engine, ());
     //         let linker = wasmi::Linker::new(&engine);

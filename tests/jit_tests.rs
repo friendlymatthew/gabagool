@@ -4,7 +4,7 @@ use gabagool::{Module, RawValue, Store};
 
 fn jit_run(wat: &str, func: &str, args: Vec<RawValue>) -> Vec<RawValue> {
     let wasm = wat::parse_str(wat).unwrap();
-    let module = Module::new(&wasm).unwrap();
+    let module = Module::try_new(&wasm).unwrap();
     let mut store = Store::new();
     let instance = store.instantiate(&module, vec![]).unwrap();
     store

@@ -230,7 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (store, instance)
     } else {
         let wasm_bytes = include_bytes!("../wasm/game.wasm");
-        let module = Module::new(wasm_bytes)?;
+        let module = Module::try_new(wasm_bytes)?;
         let mut store = Store::new();
         let instance = store.instantiate(&module, vec![])?;
         store.invoke(instance, "init", vec![])?;
