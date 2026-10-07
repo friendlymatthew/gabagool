@@ -57,8 +57,8 @@ pub struct ModuleCode {
 
 struct Compiler<'a> {
     types: &'a [SubType],
-    func_signatures: Vec<(usize, usize)>,
-    tag_signatures: Vec<usize>,
+    func_signatures: &'a [(usize, usize)],
+    tag_signatures: &'a [usize],
     ops: Vec<CompilerOp>,
     block_stack: Vec<BlockContext>,
     stack_height: i32,
@@ -102,17 +102,20 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
             _ => 0,
         }
     };
-    let mut tag_signatures: Vec<usize> = module
+    let tag_signatures = module
         .import_declarations
         .iter()
         .filter_map(|imp| match &imp.description {
             ImportDescription::Tag(type_i) => Some(resolve_tag_sig(*type_i, &module.types)),
             _ => None,
         })
-        .collect();
-    for tag in &module.tags {
-        tag_signatures.push(resolve_tag_sig(tag.type_index, &module.types));
-    }
+        .chain(
+            module
+                .tags
+                .iter()
+                .map(|t| resolve_tag_sig(t.type_index, &module.types)),
+        )
+        .collect::<Vec<_>>();
 
     let functions = module
         .functions
@@ -120,10 +123,9 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
         .map(|f| {
             let mut compiler = Compiler {
                 types: &module.types,
-                func_signatures: func_signatures.clone(),
-                tag_signatures: tag_signatures.clone(),
+                func_signatures: &func_signatures,
+                tag_signatures: &tag_signatures,
                 ops: Vec::new(),
-
                 block_stack: Vec::new(),
                 stack_height: 0,
                 max_stack_height: 0,
@@ -135,12 +137,14 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
                 shuffle_masks: std::mem::take(&mut shuffle_masks),
                 catch_handlers: std::mem::take(&mut catch_handlers),
             };
+
             let cf = compiler.compile_function(f);
 
             v128_constants = compiler.v128_constants;
             jump_tables = compiler.jump_tables;
             shuffle_masks = compiler.shuffle_masks;
             catch_handlers = compiler.catch_handlers;
+
             cf
         })
         .collect();
@@ -162,8 +166,8 @@ pub fn compile_function_into_code(
 ) -> CompiledFunction {
     let mut compiler = Compiler {
         types,
-        func_signatures: Vec::new(),
-        tag_signatures: Vec::new(),
+        func_signatures: &[],
+        tag_signatures: &[],
         ops: Vec::new(),
         block_stack: Vec::new(),
         stack_height: 0,
@@ -176,11 +180,13 @@ pub fn compile_function_into_code(
         shuffle_masks: std::mem::take(&mut code.shuffle_masks),
         catch_handlers: std::mem::take(&mut code.catch_handlers),
     };
+
     let cf = compiler.compile_function(func);
     code.v128_constants = compiler.v128_constants;
     code.jump_tables = compiler.jump_tables;
     code.shuffle_masks = compiler.shuffle_masks;
     code.catch_handlers = compiler.catch_handlers;
+
     cf
 }
 
@@ -1054,8 +1060,8 @@ impl<'a> Compiler<'a> {
     fn compile_and_get_ops(types: &[SubType], func: &Function) -> Vec<Op> {
         let mut compiler = Compiler {
             types,
-            func_signatures: Vec::new(),
-            tag_signatures: Vec::new(),
+            func_signatures: &[],
+            tag_signatures: &[],
             ops: Vec::new(),
             block_stack: Vec::new(),
             stack_height: 0,
@@ -1247,6 +1253,7 @@ impl<'a> Compiler<'a> {
             Instruction::Call(func_i) => {
                 let (n_params, n_results) = self.func_signatures[*func_i as usize];
                 self.emit(Op::Call { func_i: *func_i });
+
                 self.stack_height -= n_params as i32;
                 self.stack_height += n_results as i32;
             }
@@ -1257,6 +1264,7 @@ impl<'a> Compiler<'a> {
                     type_i: *type_i,
                     table_i: *table_i,
                 });
+
                 self.stack_height -= n_params as i32;
                 self.stack_height += n_results as i32;
             }

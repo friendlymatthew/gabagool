@@ -857,6 +857,7 @@ impl Store {
             {
                 continue;
             }
+
             if let FunctionInstance::Local { code, .. } = &self.functions[addr] {
                 let code_mut = Arc::make_mut(&mut entity.code);
                 let cf = compiler::compile_function_into_code(&types_for_compile, code, code_mut);
