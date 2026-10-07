@@ -143,7 +143,8 @@ mod core_tests {
 
             let mut module_idx: i32 = -1;
             let mut modules = Vec::new();
-            // Track (register ...) directives: maps registered name -> module index
+            // Track (register ...) directives: maps registered name -> module
+            // index
             let mut registered: Vec<(String, i32)> = Vec::new();
             let mut malformed_idx: u32 = 0;
             let mut unlinkable_idx: u32 = 0;
@@ -406,7 +407,8 @@ mod core_tests {
                 }
             }
 
-            // Build a map: module_idx -> list of registered modules that precede it
+            // Build a map: module_idx -> list of registered modules that
+            // precede it
             let mut registered_before: std::collections::BTreeMap<i32, Vec<(String, i32)>> =
                 std::collections::BTreeMap::new();
             for &(midx, ref _steps) in &modules {

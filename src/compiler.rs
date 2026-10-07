@@ -185,14 +185,14 @@ pub fn compile_function_into_code(
 }
 
 impl<'a> Compiler<'a> {
-    fn resolve_type_sig(&self, type_i: u32) -> (usize, usize) {
+    const fn resolve_type_sig(&self, type_i: u32) -> (usize, usize) {
         match &self.types[type_i as usize].composite_type {
             CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
             _ => (0, 0),
         }
     }
 
-    fn resolve_block_type(&self, bt: &BlockType) -> (usize, usize) {
+    const fn resolve_block_type(&self, bt: &BlockType) -> (usize, usize) {
         match bt {
             BlockType::Empty => (0, 0),
             BlockType::SingleValue(_) => (0, 1),
@@ -390,7 +390,8 @@ impl<'a> Compiler<'a> {
             }
         }
 
-        // resolve catch handler targets (only handlers from the current function)
+        // resolve catch handler targets (only handlers from the current
+        // function)
         for handler in &mut self.catch_handlers[self.catch_handler_base..] {
             for clause in handler.iter_mut() {
                 clause.target = label_positions[clause.target as usize];
@@ -402,7 +403,7 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    fn resolve_targets(op: &mut Op, labels: &[u32]) {
+    const fn resolve_targets(op: &mut Op, labels: &[u32]) {
         match op {
             Op::Jump { target, .. }
             | Op::JumpIf { target, .. }
