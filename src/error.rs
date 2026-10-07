@@ -56,6 +56,16 @@ pub enum Error {
     Exception(Exception),
 }
 
+impl Error {
+    pub fn parse(message: impl Into<String>) -> Self {
+        Self::Parse(message.into())
+    }
+
+    pub fn instantiation(message: impl Into<String>) -> Self {
+        Self::Instantiation(message.into())
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -89,15 +99,21 @@ impl From<Utf8Error> for Error {
 
 #[macro_export]
 macro_rules! parse_err {
-    ($($arg:tt)*) => {
-        return Err($crate::error::Error::Parse(format!($($arg)*)))
+    ($fmt:literal $($arg:tt)*) => {
+        return Err($crate::error::Error::parse(format!($fmt $($arg)*)))
+    };
+    ($message:expr $(,)?) => {
+        return Err($crate::error::Error::parse($message))
     };
 }
 
 #[macro_export]
 macro_rules! instantiation_err {
-    ($($arg:tt)*) => {
-        return Err($crate::error::Error::Instantiation(format!($($arg)*)))
+    ($fmt:literal $($arg:tt)*) => {
+        return Err($crate::error::Error::instantiation(format!($fmt $($arg)*)))
+    };
+    ($message:expr $(,)?) => {
+        return Err($crate::error::Error::instantiation($message))
     };
 }
 

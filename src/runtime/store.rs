@@ -618,17 +618,17 @@ impl Store {
     fn validate_imports(&self, module: &Module, imports: &[ExternalValue]) -> Result<()> {
         for (extern_val, import_decl) in imports.iter().zip(module.import_declarations.iter()) {
             let err = |msg: &str| {
-                Error::Instantiation(format!(
+                format!(
                     "incompatible import type for {}.{}: {}",
                     import_decl.module, import_decl.name, msg
-                ))
+                )
             };
 
             match (extern_val, &import_decl.description) {
                 (ExternalValue::Function { addr }, ImportDescription::Func(type_i)) => {
                     let expected = match &module.types()[*type_i as usize].composite_type {
                         CompositeType::Func(ft) => ft,
-                        _ => return Err(err("type index is not a function type")),
+                        _ => instantiation_err!(err("type index is not a function type")),
                     };
 
                     let actual = match &self.functions[*addr] {
@@ -638,7 +638,10 @@ impl Store {
 
                     ensure!(
                         *expected == *actual,
-                        err(&format!("expected {:?}, got {:?}", expected, actual))
+                        Error::Instantiation(err(&format!(
+                            "expected {:?}, got {:?}",
+                            expected, actual
+                        )))
                     );
                 }
                 (ExternalValue::Table { addr }, ImportDescription::Table(expected_tt)) => {
@@ -648,7 +651,7 @@ impl Store {
                         actual_tt.element_reference_type == expected_tt.element_reference_type
                             && actual_tt.addr_type == expected_tt.addr_type
                             && limits_match(&actual_tt.limit, &expected_tt.limit),
-                        err("table type mismatch")
+                        Error::Instantiation(err("table type mismatch"))
                     );
                 }
                 (ExternalValue::Memory { addr }, ImportDescription::Mem(expected_mt)) => {
@@ -657,7 +660,7 @@ impl Store {
                     ensure!(
                         actual_mt.addr_type == expected_mt.addr_type
                             && limits_match(&actual_mt.limit, &expected_mt.limit),
-                        err("memory type mismatch")
+                        Error::Instantiation(err("memory type mismatch"))
                     );
                 }
                 (ExternalValue::Global { addr }, ImportDescription::Global(expected_gt)) => {
@@ -666,21 +669,24 @@ impl Store {
                     ensure!(
                         actual_gt.value_type == expected_gt.value_type
                             && actual_gt.mutability == expected_gt.mutability,
-                        err("global type mismatch")
+                        Error::Instantiation(err("global type mismatch"))
                     );
                 }
                 (ExternalValue::Tag { addr }, ImportDescription::Tag(type_i)) => {
                     let expected = match &module.types()[*type_i as usize].composite_type {
                         CompositeType::Func(ft) => ft,
-                        _ => return Err(err("type index is not a function type")),
+                        _ => instantiation_err!(err("type index is not a function type")),
                     };
 
                     if *addr < self.tags.len() {
                         let actual = &self.tags[*addr].tag_type;
-                        ensure!(*expected == *actual, err("tag type mismatch"));
+                        ensure!(
+                            *expected == *actual,
+                            Error::instantiation("tag type mismatch")
+                        );
                     }
                 }
-                _ => return Err(Error::Instantiation("import kind mismatch".into())),
+                _ => instantiation_err!("import kind mismatch"),
             }
         }
         Ok(())
@@ -746,25 +752,32 @@ impl Store {
             .extend((0..module.functions.len()).map(|i| func_base + i));
 
         // step 19: evaluate global init expressions sequentially so that each
-        // newly created global is visible to subsequent global.get in const exprs
-        let num_imported_globals = self.globals.len();
-        let mut initial_global_values = Vec::new();
+        // staged global is visible to subsequent global.get instructions
+        let mut initial_global_values = Vec::with_capacity(module.globals.len());
+
         for g in &module.globals {
-            let value = eval_const_expr_with_module(&g.initial_expression, self, &address_map)?;
-            let addr = self.globals.len();
-            self.globals.push(GlobalInstance {
-                global_type: g.global_type.clone(),
-                value,
-            });
-            address_map.global_addrs.push(addr);
+            let value = eval_const_expr_with_module(
+                &g.initial_expression,
+                self,
+                &address_map,
+                &initial_global_values,
+            )?;
+
             initial_global_values.push(value);
         }
+
         // step 20: evaluate table init expressions
         let initial_table_refs = module
             .tables
             .iter()
             .map(|td| {
-                let val = eval_const_expr_with_module(&td.init, self, &address_map)?;
+                let val = eval_const_expr_with_module(
+                    &td.init,
+                    self,
+                    &address_map,
+                    &initial_global_values,
+                )?;
+
                 Ok(val.as_ref())
             })
             .collect::<Result<Vec<_>>>()?;
@@ -777,15 +790,18 @@ impl Store {
                 es.expression
                     .iter()
                     .map(|expr| {
-                        let val = eval_const_expr_with_module(expr, self, &address_map)?;
+                        let val = eval_const_expr_with_module(
+                            expr,
+                            self,
+                            &address_map,
+                            &initial_global_values,
+                        )?;
+
                         Ok(val.as_ref())
                     })
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?;
-
-        // remove temp globals — allocate_module will add them properly
-        self.globals.truncate(num_imported_globals);
 
         let start_func_i = module.start;
         let num_local_funcs = module.functions.len();
@@ -3476,6 +3492,7 @@ fn eval_const_expr_with_module(
     expr: &[Instruction],
     store: &Store,
     address_map: &AddressMap,
+    pending_globals: &[RawValue],
 ) -> Result<RawValue> {
     let mut stack = Vec::with_capacity(expr.len());
     for instr in expr {
@@ -3497,16 +3514,28 @@ fn eval_const_expr_with_module(
                 stack.push(RawValue::from_ref(Ref::FunctionAddr(addr)));
             }
             Instruction::GlobalGet(i) => {
-                let store_i = *address_map.global_addrs.get(*i as usize).ok_or_else(|| {
-                    Error::Instantiation(format!("global index {} oob in const expr", i))
-                })?;
-                let global = store.globals.get(store_i).ok_or_else(|| {
-                    Error::Instantiation(format!(
-                        "global store index {} oob in const expr",
-                        store_i
-                    ))
-                })?;
-                stack.push(global.value);
+                let global_i = usize::try_from(*i)
+                    .map_err(|_| Error::Instantiation(format!("global index {i} is invalid")))?;
+
+                let value = if let Some(&store_i) = address_map.global_addrs.get(global_i) {
+                    store
+                        .globals
+                        .get(store_i)
+                        .ok_or_else(|| {
+                            Error::Instantiation(format!(
+                                "global store index {store_i} oob in const expr"
+                            ))
+                        })?
+                        .value
+                } else {
+                    let pending_i = global_i - address_map.global_addrs.len();
+
+                    *pending_globals.get(pending_i).ok_or_else(|| {
+                        Error::Instantiation(format!("global index {global_i} oob in const expr"))
+                    })?
+                };
+
+                stack.push(value);
             }
             Instruction::RefI31 => {
                 let v = const_pop_i32(&mut stack)?;
@@ -3556,4 +3585,51 @@ fn const_pop_i64(stack: &mut Vec<RawValue>) -> Result<i64> {
         .pop()
         .map(|v| v.as_i64())
         .ok_or_else(|| Error::Instantiation("stack underflow in const expr".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Instruction, Module, Store};
+    use crate::parser::Parser;
+
+    #[test]
+    fn global_initializer_can_read_a_previous_global() {
+        let wasm = wat::parse_str(
+            r#"
+                (module
+                    (global i32 (i32.const 40))
+                    (global i32 (i32.add (global.get 0) (i32.const 2)))
+                )
+            "#,
+        )
+        .unwrap();
+        let module = Module::try_new(&wasm).unwrap();
+        let mut store = Store::new();
+
+        store.instantiate(&module, vec![]).unwrap();
+
+        assert_eq!(store.globals.len(), 2);
+        assert_eq!(store.globals[1].value.as_i32(), 42);
+    }
+
+    #[test]
+    fn failed_global_initializer_does_not_mutate_the_store() {
+        let wasm = wat::parse_str(
+            r#"
+                (module
+                    (global i32 (i32.const 1))
+                    (global i32 (i32.const 2))
+                )
+            "#,
+        )
+        .unwrap();
+        let mut parsed = Parser::new(&wasm).parse().unwrap().try_as_module().unwrap();
+        parsed.globals[1].initial_expression = vec![Instruction::GlobalGet(99)];
+        let module = Module::from_parsed(parsed);
+        let mut store = Store::new();
+        let globals_before = store.globals.len();
+
+        assert!(store.instantiate(&module, vec![]).is_err());
+        assert_eq!(store.globals.len(), globals_before);
+    }
 }
