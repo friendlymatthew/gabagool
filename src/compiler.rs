@@ -159,37 +159,6 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
     }
 }
 
-pub fn compile_function_into_code(
-    types: &[SubType],
-    func: &Function,
-    code: &mut ModuleCode,
-) -> CompiledFunction {
-    let mut compiler = Compiler {
-        types,
-        func_signatures: &[],
-        tag_signatures: &[],
-        ops: Vec::new(),
-        block_stack: Vec::new(),
-        stack_height: 0,
-        max_stack_height: 0,
-        next_label: 0,
-        jump_table_base: 0,
-        catch_handler_base: 0,
-        v128_constants: std::mem::take(&mut code.v128_constants),
-        jump_tables: std::mem::take(&mut code.jump_tables),
-        shuffle_masks: std::mem::take(&mut code.shuffle_masks),
-        catch_handlers: std::mem::take(&mut code.catch_handlers),
-    };
-
-    let cf = compiler.compile_function(func);
-    code.v128_constants = compiler.v128_constants;
-    code.jump_tables = compiler.jump_tables;
-    code.shuffle_masks = compiler.shuffle_masks;
-    code.catch_handlers = compiler.catch_handlers;
-
-    cf
-}
-
 impl<'a> Compiler<'a> {
     const fn resolve_type_sig(&self, type_i: u32) -> (usize, usize) {
         match &self.types[type_i as usize].composite_type {

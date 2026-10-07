@@ -10,19 +10,19 @@ use crate::component::model::{
 use crate::component::runtime::{InstantiatedComponent, LiftedFunc};
 use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
 use crate::module::{
-    AddrType, ArrayType, CompositeType, FieldType, Function, FunctionType, GlobalType, HeapType,
-    Limit, MemoryType, Mutability, RefType, ResultType, StorageType, StructType, SubType,
-    TableType, ValueType,
+    AddrType, ArrayType, CompositeType, FieldType, FunctionType, GlobalType, HeapType, Limit,
+    MemoryType, Mutability, RefType, ResultType, StorageType, StructType, SubType, TableType,
+    ValueType,
 };
 use crate::runtime::{
-    AddressMap, DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance,
-    GlobalInstance, GuestMemory, InstantiatedModule, MemoryInstance, RawValue, Ref, Store,
-    TableInstance, TagInstance, ValueStack,
+    DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance, GlobalInstance,
+    GuestMemory, InstantiatedModule, MemoryInstance, RawValue, Ref, Store, TableInstance,
+    TagInstance, ValueStack,
 };
 use crate::CallFrame;
 
 pub const SNAPSHOT_MAGIC: &[u8; 4] = b"gaba";
-pub const SNAPSHOT_VERSION: u32 = 2;
+pub const SNAPSHOT_VERSION: u32 = 3;
 
 pub trait Snapshot: Sized {
     fn encode(&self, buf: &mut Vec<u8>);
@@ -1112,6 +1112,58 @@ impl Snapshot for InstantiatedComponent {
     }
 }
 
+impl Snapshot for FunctionInstance {
+    fn encode(&self, buf: &mut Vec<u8>) {
+        match self {
+            Self::Local {
+                function_type,
+                module_i,
+                compiled_func_i,
+            } => {
+                0u8.encode(buf);
+                function_type.encode(buf);
+                module_i.encode(buf);
+                compiled_func_i.encode(buf);
+            }
+            Self::Host {
+                function_type,
+                module_name,
+                function_name,
+            } => {
+                1u8.encode(buf);
+                function_type.encode(buf);
+                module_name.encode(buf);
+                function_name.encode(buf);
+            }
+        }
+    }
+
+    fn decode(buf: &mut &[u8]) -> Self {
+        let tag = u8::decode(buf);
+        match tag {
+            0 => {
+                let function_type = FunctionType::decode(buf);
+                Self::Local {
+                    function_type,
+                    module_i: u16::decode(buf),
+                    compiled_func_i: u32::decode(buf),
+                }
+            }
+            1 => {
+                let function_type = FunctionType::decode(buf);
+                let module_name = String::decode(buf);
+                let function_name = String::decode(buf);
+                Self::Host {
+                    function_type,
+                    module_name,
+                    function_name,
+                }
+            }
+            _ => panic!("invalid function instance tag: {tag}"),
+        }
+    }
+}
+
 impl Store {
     pub fn to_bytes(&self) -> Vec<u8> {
         self.encode()
@@ -1126,22 +1178,7 @@ impl Store {
         // encode the function type per entry
         (self.functions.len() as u32).encode(&mut buf);
         for fi in &self.functions {
-            match fi {
-                FunctionInstance::Local { function_type, .. } => {
-                    0u8.encode(&mut buf);
-                    function_type.encode(&mut buf);
-                }
-                FunctionInstance::Host {
-                    function_type,
-                    module_name,
-                    function_name,
-                } => {
-                    1u8.encode(&mut buf);
-                    function_type.encode(&mut buf);
-                    module_name.encode(&mut buf);
-                    function_name.encode(&mut buf);
-                }
-            }
+            fi.encode(&mut buf);
         }
 
         // tables
@@ -1199,9 +1236,6 @@ impl Store {
             inst.exports.encode(&mut buf);
         }
 
-        // func_addr_to_module
-        self.func_addr_to_module.encode(&mut buf);
-
         // value stack
         let (stack_data, stack_cursor) = self.stack.snapshot_data();
         (stack_data.len() as u32).encode(&mut buf);
@@ -1243,38 +1277,10 @@ impl Store {
 
         // functions
         let num_funcs = u32::decode(buf) as usize;
-        let mut functions = Vec::with_capacity(num_funcs);
-        let dummy_address_map = Arc::new(AddressMap::default());
-        let dummy_function = Function {
-            type_index: 0,
-            locals: Vec::new(),
-            body: Vec::new(),
-        };
-
-        for _ in 0..num_funcs {
-            let tag = u8::decode(buf);
-            match tag {
-                0 => {
-                    let function_type = FunctionType::decode(buf);
-                    functions.push(FunctionInstance::Local {
-                        function_type,
-                        address_map: Arc::clone(&dummy_address_map),
-                        code: dummy_function.clone(),
-                    });
-                }
-                1 => {
-                    let function_type = FunctionType::decode(buf);
-                    let module_name = String::decode(buf);
-                    let function_name = String::decode(buf);
-                    functions.push(FunctionInstance::Host {
-                        function_type,
-                        module_name,
-                        function_name,
-                    });
-                }
-                _ => panic!("invalid function instance tag: {tag}"),
-            }
-        }
+        let functions = (0..num_funcs)
+            .into_iter()
+            .map(|_| FunctionInstance::decode(buf))
+            .collect::<Vec<_>>();
 
         // tables
         let num_tables = u32::decode(buf) as usize;
@@ -1354,9 +1360,6 @@ impl Store {
             })
             .collect::<Vec<_>>();
 
-        // func_addr_to_module
-        let func_addr_to_module = Vec::decode(buf);
-
         // value stack
         let _stack_capacity = u32::decode(buf) as usize;
         let stack_data = decode_bulk(buf);
@@ -1387,7 +1390,6 @@ impl Store {
             element_segments,
             data_segments,
             instances,
-            func_addr_to_module,
             stack,
             call_stack,
             catch_stack: Vec::new(),

@@ -12,9 +12,9 @@ use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    compiler, ensure, instantiation_err, trap, AddrType, Component, ComponentInstance,
-    ComponentValue, DataMode, ElementMode, GuestMemory, ImportDescription, InstantiatedComponent,
-    Instruction, LiftedFunc, Module, Mutability, Trap,
+    ensure, instantiation_err, trap, AddrType, Component, ComponentInstance, ComponentValue,
+    DataMode, ElementMode, GuestMemory, ImportDescription, InstantiatedComponent, Instruction,
+    LiftedFunc, Module, Mutability, Trap,
 };
 
 use crate::error::Exception;
@@ -254,8 +254,6 @@ pub struct Store {
     pub data_segments: Vec<DataInstance>,
 
     pub(crate) instances: Vec<InstantiatedModule>,
-    /// maps func addr → (instance_i, compiled_func_i)
-    pub(crate) func_addr_to_module: Vec<Option<(u16, u32)>>,
 
     // execution state
     pub(crate) stack: ValueStack,
@@ -315,7 +313,6 @@ impl Store {
             pending_suspension: None,
             pending_lifted: None,
             instances: Vec::new(),
-            func_addr_to_module: Vec::new(),
             component_instances: Vec::new(),
         }
     }
@@ -403,8 +400,9 @@ impl Store {
     fn allocate_function(
         &mut self,
         f: &Function,
-        address_map: &Arc<AddressMap>,
         types: &[SubType],
+        instance_i: u16,
+        compiled_func_i: u32,
     ) -> Result<usize> {
         let f_address = self.functions.len();
 
@@ -412,8 +410,8 @@ impl Store {
 
         self.functions.push(FunctionInstance::Local {
             function_type,
-            address_map: Arc::clone(address_map),
-            code: f.clone(),
+            module_i: instance_i,
+            compiled_func_i,
         });
 
         Ok(f_address)
@@ -492,11 +490,12 @@ impl Store {
     pub fn allocate_module(
         &mut self,
         module: &Module,
+        instance_i: u16,
         extern_addrs: Vec<ExternalValue>,
         initial_global_values: Vec<RawValue>,
         initial_table_refs: Vec<Ref>,
         element_segment_refs: Vec<Vec<Ref>>,
-    ) -> Result<Arc<AddressMap>> {
+    ) -> Result<AddressMap> {
         // step 1
         let types = &module.code.types;
         let mut address_map = AddressMap::default();
@@ -607,9 +606,12 @@ impl Store {
             });
         }
 
-        let module_instance = Arc::new(address_map);
-        for func in &module.functions {
-            self.allocate_function(func, &module_instance, types)?;
+        let module_instance = address_map;
+        for (compiled_func_i, func) in module.functions.iter().enumerate() {
+            let compiled_func_i = u32::try_from(compiled_func_i)
+                .map_err(|_| Error::Instantiation("too many compiled functions".into()))?;
+
+            self.allocate_function(func, types, instance_i, compiled_func_i)?;
         }
 
         Ok(module_instance)
@@ -771,14 +773,8 @@ impl Store {
             .tables
             .iter()
             .map(|td| {
-                let val = eval_const_expr_with_module(
-                    &td.init,
-                    self,
-                    &address_map,
-                    &initial_global_values,
-                )?;
-
-                Ok(val.as_ref())
+                eval_const_expr_with_module(&td.init, self, &address_map, &initial_global_values)
+                    .map(|v| v.as_ref())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -804,10 +800,12 @@ impl Store {
             .collect::<Result<Vec<_>>>()?;
 
         let start_func_i = module.start;
-        let num_local_funcs = module.functions.len();
 
+        let instance_i = u16::try_from(self.instances.len())
+            .map_err(|_| Error::Instantiation("too many module instances".into()))?;
         let module_instance = self.allocate_module(
             module,
+            instance_i,
             external_addresses,
             initial_global_values,
             initial_table_refs,
@@ -815,8 +813,7 @@ impl Store {
         )?;
 
         // build the InstanceEntity with shared code + address mappings
-        let instance_i = self.instances.len() as u16;
-        let mut entity = InstantiatedModule {
+        let entity = InstantiatedModule {
             code: Arc::clone(&module.code),
             function_addrs: module_instance.function_addrs.clone(),
             table_addrs: module_instance.table_addrs.clone(),
@@ -831,59 +828,24 @@ impl Store {
             jit_functions: Vec::new(),
         };
 
-        // build a mapping from func_addr to (instance_i, compiled func index)
-        if self.func_addr_to_module.len() < self.functions.len() {
-            self.func_addr_to_module.resize(self.functions.len(), None);
-        }
-        let first_compiled_i = entity.code.compiled_funcs.len() - num_local_funcs;
-        for (i, &addr) in module_instance
-            .function_addrs
-            .iter()
-            .rev()
-            .take(num_local_funcs)
-            .rev()
-            .enumerate()
-        {
-            self.func_addr_to_module[addr] = Some((instance_i, (first_compiled_i + i) as u32));
-        }
-
-        // compile any imported local functions not yet in the compiled set
-        let types_for_compile = entity.code.types.clone();
-        for &addr in &module_instance.function_addrs {
-            if self
-                .func_addr_to_module
-                .get(addr)
-                .is_some_and(|v| v.is_some())
-            {
-                continue;
-            }
-
-            if let FunctionInstance::Local { code, .. } = &self.functions[addr] {
-                let code_mut = Arc::make_mut(&mut entity.code);
-                let cf = compiler::compile_function_into_code(&types_for_compile, code, code_mut);
-                let i = code_mut.compiled_funcs.len();
-                code_mut.compiled_funcs.push(cf);
-                if addr < self.func_addr_to_module.len() {
-                    self.func_addr_to_module[addr] = Some((instance_i, i as u32));
-                }
-            }
-        }
-
         #[cfg(feature = "jit")]
-        {
+        let entity = {
             use crate::jit::assembler::assemble;
 
+            let mut entity = entity;
             entity.jit_functions = entity
                 .code
                 .compiled_funcs
                 .iter()
                 .map(|cf| assemble(&cf.ops))
                 .collect();
-        }
+
+            entity
+        };
 
         self.instances.push(entity);
         self.ensure_stack_capacity();
-        let instance = Instance(instance_i as usize);
+        let instance = Instance(usize::from(instance_i));
 
         // step 27 - execute element segment initialization
         // step 28 - execute data segment initialization
@@ -1751,43 +1713,41 @@ impl Store {
         self.finish_run(num_results)
     }
 
-    fn compiled_func_index(&self, func_addr: usize) -> Option<(u16, u32)> {
-        self.func_addr_to_module.get(func_addr).copied().flatten()
-    }
-
     fn push_function_call(&mut self, func_addr: usize) -> Result<bool> {
         ensure!(
             self.call_stack.len() < MAX_CALL_DEPTH,
             Error::Trap(Trap::CallStackExhausted)
         );
 
-        let fi = &self.functions[func_addr];
-        let (num_args, num_results) = match fi {
+        let (num_args, num_results) = match &self.functions[func_addr] {
             FunctionInstance::Local { function_type, .. }
             | FunctionInstance::Host { function_type, .. } => {
                 (function_type.0 .0.len(), function_type.1 .0.len())
             }
         };
 
-        let Some((module_i, compiled_i)) = self.compiled_func_index(func_addr) else {
-            match &self.functions[func_addr] {
-                FunctionInstance::Host {
-                    module_name,
-                    function_name,
-                    ..
-                } => {
-                    ensure!(
-                        self.stack.len() >= num_args,
-                        Error::Instantiation("not enough args on stack".into())
-                    );
+        let (module_i, compiled_func_i) = match &self.functions[func_addr] {
+            FunctionInstance::Local {
+                module_i,
+                compiled_func_i,
+                ..
+            } => (*module_i, *compiled_func_i),
+            FunctionInstance::Host {
+                module_name,
+                function_name,
+                ..
+            } => {
+                ensure!(
+                    self.stack.len() >= num_args,
+                    Error::Instantiation("not enough args on stack".into())
+                );
 
-                    let args = self.stack.pop_n(num_args).to_vec();
-                    self.pending_suspension =
-                        Some((module_name.clone(), function_name.clone(), args));
+                let module_name = module_name.clone();
+                let function_name = function_name.clone();
+                let args = self.stack.pop_n(num_args).to_vec();
+                self.pending_suspension = Some((module_name, function_name, args));
 
-                    return Ok(true);
-                }
-                _ => instantiation_err!("expected host function at addr {}", func_addr),
+                return Ok(true);
             }
         };
 
@@ -1799,7 +1759,8 @@ impl Store {
         let mut locals = self.stack.slice_from(args_start).to_vec();
         self.stack.truncate(args_start);
 
-        let cf = &self.instances[module_i as usize].code.compiled_funcs[compiled_i as usize];
+        let cf = &self.instances[usize::from(module_i)].code.compiled_funcs
+            [usize::try_from(compiled_func_i).expect("u32 fits in usize")];
         for _ in &cf.local_types[num_args..] {
             locals.push(RawValue::default());
         }
@@ -1808,7 +1769,7 @@ impl Store {
 
         self.call_stack.push(CallFrame {
             module_i,
-            compiled_func_i: compiled_i,
+            compiled_func_i,
             pc: 0,
             locals,
             stack_base,
@@ -3592,6 +3553,7 @@ fn const_pop_i64(stack: &mut Vec<RawValue>) -> Result<i64> {
 mod tests {
     use super::{Instruction, Module, Store};
     use crate::parser::Parser;
+    use crate::ExternalValue;
 
     #[test]
     fn global_initializer_can_read_a_previous_global() {
@@ -3632,5 +3594,55 @@ mod tests {
 
         assert!(store.instantiate(&module, vec![]).is_err());
         assert_eq!(store.globals.len(), globals_before);
+    }
+
+    #[test]
+    fn imported_local_function_uses_its_defining_instance() {
+        let provider_wasm = wat::parse_str(
+            r#"
+                (module
+                    (global i32 (i32.const 42))
+                    (func $read-global (result i32)
+                        global.get 0)
+                    (func (export "read") (result i32)
+                        call $read-global)
+                )
+            "#,
+        )
+        .unwrap();
+        let consumer_wasm = wat::parse_str(
+            r#"
+                (module
+                    (import "provider" "read" (func $read (result i32)))
+                    (global i32 (i32.const 7))
+                    (func (export "run") (result i32)
+                        call $read)
+                )
+            "#,
+        )
+        .unwrap();
+        let provider = Module::try_new(&provider_wasm).unwrap();
+        let consumer = Module::try_new(&consumer_wasm).unwrap();
+        let mut store = Store::new();
+        let provider_instance = store.instantiate(&provider, vec![]).unwrap();
+        let provider_func_addr = store.get_func(provider_instance, "read").unwrap();
+        let consumer_instance = store
+            .instantiate(
+                &consumer,
+                vec![ExternalValue::Function {
+                    addr: provider_func_addr,
+                }],
+            )
+            .unwrap();
+
+        let snapshot = store.to_bytes();
+        let mut restored = Store::from_bytes(&snapshot);
+        let result = restored
+            .invoke_no_args(consumer_instance, "run")
+            .unwrap()
+            .into_completed()
+            .unwrap();
+
+        assert_eq!(result[0].as_i32(), 42);
     }
 }

@@ -1,5 +1,4 @@
-use crate::module::{Function, FunctionType, GlobalType, RefType, TableType};
-use std::sync::Arc;
+use crate::module::{FunctionType, GlobalType, RefType, TableType};
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -110,8 +109,8 @@ pub struct AddressMap {
 pub enum FunctionInstance {
     Local {
         function_type: FunctionType,
-        address_map: Arc<AddressMap>,
-        code: Function,
+        module_i: u16,
+        compiled_func_i: u32,
     },
     Host {
         function_type: FunctionType,
