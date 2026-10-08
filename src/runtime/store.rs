@@ -514,23 +514,25 @@ impl Store {
         let types = &module.code.types;
         let mut instantiated_module = InstantiatedModule::new(Arc::clone(&module.code));
 
-        extern_addrs.into_iter().for_each(|e| match e {
-            ExternalValue::Function { addr } => {
-                instantiated_module.function_addrs.push(addr);
+        for e in extern_addrs {
+            match e {
+                ExternalValue::Function { addr } => {
+                    instantiated_module.function_addrs.push(addr);
+                }
+                ExternalValue::Table { addr } => {
+                    instantiated_module.table_addrs.push(addr);
+                }
+                ExternalValue::Memory { addr } => {
+                    instantiated_module.mem_addrs.push(addr);
+                }
+                ExternalValue::Global { addr } => {
+                    instantiated_module.global_addrs.push(addr);
+                }
+                ExternalValue::Tag { addr } => {
+                    instantiated_module.tag_addrs.push(addr);
+                }
             }
-            ExternalValue::Table { addr } => {
-                instantiated_module.table_addrs.push(addr);
-            }
-            ExternalValue::Memory { addr } => {
-                instantiated_module.mem_addrs.push(addr);
-            }
-            ExternalValue::Global { addr } => {
-                instantiated_module.global_addrs.push(addr);
-            }
-            ExternalValue::Tag { addr } => {
-                instantiated_module.tag_addrs.push(addr);
-            }
-        });
+        }
 
         let imported_function_count = instantiated_module.function_addrs.len();
         let first_function_addr = self.functions.len();
