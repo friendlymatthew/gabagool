@@ -630,7 +630,6 @@ impl Store {
             instantiated_module.elem_addrs.push(element_addr);
         }
 
-        // step 33-34
         for export in &module.exports {
             let extern_value = match export.description {
                 ExportDescription::Func(x) => ExternalValue::Function {
@@ -756,7 +755,6 @@ impl Store {
         module: &Module,
         external_addresses: Vec<ExternalValue>,
     ) -> Result<Instance> {
-        // step 4
         ensure!(
             module.import_declarations.len() == external_addresses.len(),
             Error::Instantiation(format!(
@@ -766,10 +764,8 @@ impl Store {
             ))
         );
 
-        // step 5
         self.validate_imports(module, &external_addresses)?;
 
-        // step 6
         let data_instructions = module
             .data_segments
             .iter()
@@ -777,7 +773,6 @@ impl Store {
             .flat_map(|(i, ds)| run_data(i as u32, ds))
             .collect::<Vec<_>>();
 
-        // step 7
         let element_instructions = module
             .element_segments
             .iter()
