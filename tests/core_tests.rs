@@ -23,6 +23,8 @@ impl CaseReport {
 }
 
 struct CoreTestReport {
+    filter: Option<String>,
+    exact: bool,
     executed: usize,
     failed: usize,
     skipped: usize,
@@ -33,8 +35,25 @@ struct CoreTestReport {
 }
 
 impl CoreTestReport {
-    fn new(skipped: usize, skip_reasons: Vec<(&'static str, usize, usize)>) -> Self {
+    fn new(mut skipped: usize, mut skip_reasons: Vec<(&'static str, usize, usize)>) -> Self {
+        let mut filter = None;
+        let mut exact = false;
+        for argument in std::env::args().skip(1) {
+            if argument == "--exact" {
+                exact = true;
+            } else if !argument.starts_with('-') && filter.is_none() {
+                filter = Some(argument);
+            }
+        }
+
+        if filter.is_some() {
+            skipped = 0;
+            skip_reasons.clear();
+        }
+
         Self {
+            filter,
+            exact,
             executed: 0,
             failed: 0,
             skipped,
@@ -46,6 +65,17 @@ impl CoreTestReport {
     }
 
     fn run_case(&mut self, name: &'static str, run: impl FnOnce(&mut CaseReport)) {
+        if let Some(filter) = &self.filter {
+            let matches = if self.exact {
+                name == filter
+            } else {
+                name.contains(filter)
+            };
+            if !matches {
+                return;
+            }
+        }
+
         let mut case = CaseReport::default();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut case)));
         let case_failed = !case.failures.is_empty();
@@ -66,6 +96,16 @@ impl CoreTestReport {
             ("ok", "ok")
         };
         println!("test {name} ... {display_status}");
+
+        if self.filter.is_some() {
+            for failure in &case.failures {
+                println!("  assertion failure: {failure}");
+            }
+            if let Some(error) = &runner_error {
+                println!("  runner error: {error}");
+            }
+        }
+
         self.cases.push((name, status));
 
         self.executed += case.executed;
@@ -82,6 +122,28 @@ impl CoreTestReport {
     }
 
     fn finish(self) {
+        if self.filter.is_none() {
+            println!(
+                "core spec skip manifest: {}",
+                concat!(env!("OUT_DIR"), "/core_test_skips.txt")
+            );
+        }
+
+        if let Some(filter) = &self.filter {
+            let mode = if self.exact { "exact" } else { "substring" };
+            let runner_error_label = if self.runner_errors.len() == 1 {
+                "error"
+            } else {
+                "errors"
+            };
+            println!("core spec filter: {filter} ({mode})");
+            println!(
+                "core spec cases: {} run, {} runner {runner_error_label}",
+                self.cases.len(),
+                self.runner_errors.len()
+            );
+        }
+
         let passed = self
             .executed
             .checked_sub(self.failed)
@@ -109,21 +171,33 @@ impl CoreTestReport {
         let details_path = concat!(env!("OUT_DIR"), "/core_test_failures.txt");
         std::fs::write(details_path, details).unwrap();
 
-        let mut results = format!(
-            "passed_assertions\t{passed}\nexecuted_assertions\t{}\nfailed_assertions\t{}\nskipped_assertions\t{}\n",
-            self.executed, self.failed, self.skipped
-        );
-        for (name, status) in &self.cases {
-            results.push_str(&format!("case\t{status}\t{name}\n"));
+        if self.filter.is_none() {
+            let mut results = format!(
+                "passed_assertions\t{passed}\nexecuted_assertions\t{}\nfailed_assertions\t{}\nskipped_assertions\t{}\n",
+                self.executed, self.failed, self.skipped
+            );
+            for (name, status) in &self.cases {
+                results.push_str(&format!("case\t{status}\t{name}\n"));
+            }
+            let results_path = "target/core-test-results.tsv";
+            std::fs::create_dir_all("target").unwrap();
+            std::fs::write(results_path, results).unwrap();
+            println!("core spec CI results: {results_path}");
         }
-        let results_path = "target/core-test-results.tsv";
-        std::fs::create_dir_all("target").unwrap();
-        std::fs::write(results_path, results).unwrap();
-        println!("core spec CI results: {results_path}");
 
         if !self.failures.is_empty() || !self.runner_errors.is_empty() {
-            eprintln!(
-                "core spec details: {} assertion failures and {} runner errors written to {}",
+            let assertion_label = if self.failures.len() == 1 {
+                "failure"
+            } else {
+                "failures"
+            };
+            let runner_error_label = if self.runner_errors.len() == 1 {
+                "error"
+            } else {
+                "errors"
+            };
+            println!(
+                "core spec details: {} assertion {assertion_label} and {} runner {runner_error_label} written to {}",
                 self.failures.len(),
                 self.runner_errors.len(),
                 details_path

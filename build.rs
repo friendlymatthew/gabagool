@@ -219,48 +219,6 @@ mod core_tests {
                 self.skip_at(reason, step.location.clone(), step.is_assertion);
             }
         }
-
-        fn report(&self) {
-            let skipped = self.skipped_assertions.values().sum::<usize>();
-            println!(
-                "cargo::warning=core spec runner: {} runnable assertions, {} skipped assertions, {} skipped directives",
-                self.runnable_assertions,
-                skipped,
-                self.skipped_directives.len()
-            );
-
-            for reason in SkipReason::ALL {
-                let assertions = self
-                    .skipped_assertions
-                    .get(&reason)
-                    .copied()
-                    .unwrap_or_default();
-                let directives = self
-                    .skipped_directives
-                    .iter()
-                    .filter(|(_, skipped_reason, _)| *skipped_reason == reason)
-                    .count();
-                if assertions == 0
-                    && directives == 0
-                    && !matches!(
-                        reason,
-                        SkipReason::UnsupportedGcInstruction
-                            | SkipReason::UnsupportedSimdInstruction
-                            | SkipReason::Threads
-                            | SkipReason::Suspension
-                    )
-                {
-                    continue;
-                }
-
-                println!(
-                    "cargo::warning=core spec runner skipped {} assertions across {} directives: {}",
-                    assertions,
-                    directives,
-                    reason.description()
-                );
-            }
-        }
     }
 
     struct GeneratedStep {
@@ -943,7 +901,6 @@ mod core_tests {
                 "    std::panic::set_hook(Box::new(|_| {{}}));\n",
                 "    let mut report = CoreTestReport::new({skipped}, vec![{skip_reasons}]);\n",
                 "{test_calls}",
-                "    println!(\"core spec skip manifest: {{}}\", concat!(env!(\"OUT_DIR\"), \"/core_test_skips.txt\"));\n",
                 "    report.finish();\n",
                 "}}\n",
             ),
@@ -957,12 +914,6 @@ mod core_tests {
             all_tests,
         )
         .unwrap();
-
-        report.report();
-        println!(
-            "cargo::warning=core spec runner: skip manifest written to {}",
-            skip_manifest_path.display()
-        );
     }
 
     fn quote_wat_id(wat: &QuoteWat<'_>) -> Option<String> {
