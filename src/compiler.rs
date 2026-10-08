@@ -239,8 +239,6 @@ impl<'a> Compiler<'a> {
 
         CompiledFunction {
             ops: assembled,
-            type_index: func.type_index,
-            num_args: num_args as u32,
             local_types,
             max_stack_height: self.max_stack_height as u32,
         }

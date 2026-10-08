@@ -692,8 +692,6 @@ impl Snapshot for JumpTableEntry {
 impl Snapshot for CompiledFunction {
     fn encode(&self, buf: &mut Vec<u8>) {
         encode_bulk(&self.ops, buf);
-        self.type_index.encode(buf);
-        self.num_args.encode(buf);
         self.local_types.encode(buf);
         self.max_stack_height.encode(buf);
     }
@@ -702,8 +700,6 @@ impl Snapshot for CompiledFunction {
         let ops = decode_bulk::<Op>(buf);
         Self {
             ops,
-            type_index: u32::decode(buf),
-            num_args: u32::decode(buf),
             local_types: Vec::<ValueType>::decode(buf),
             max_stack_height: u32::decode(buf),
         }

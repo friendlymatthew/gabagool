@@ -3327,8 +3327,6 @@ impl Store {
 
         let cf = CompiledFunction {
             ops,
-            type_index: 0,
-            num_args: 0,
             local_types: Vec::new(),
             max_stack_height,
         };
