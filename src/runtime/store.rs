@@ -225,7 +225,7 @@ pub struct CatchFrame {
 }
 
 /// Runtime state of an instantiated [`crate::Module`]
-pub(crate) struct InstantiatedModule {
+pub struct InstantiatedModule {
     pub code: Arc<ModuleCode>,
     pub function_addrs: Vec<usize>,
     pub table_addrs: Vec<usize>,

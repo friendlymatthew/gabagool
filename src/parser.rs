@@ -995,7 +995,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_result_type(&mut self) -> Result<Vec<ValueType>> {
-        Ok(self.parse_vec(Self::parse_value_type)?)
+        self.parse_vec(Self::parse_value_type)
     }
 
     fn parse_mutability(&mut self) -> Result<Mutability> {
