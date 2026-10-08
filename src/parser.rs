@@ -677,10 +677,8 @@ impl<'a> Parser<'a> {
 
     fn parse_module(&mut self) -> Result<ParsedModule> {
         let mut module = ParsedModule::default();
-        let mut data_count: Option<u32> = None;
+        let mut data_count = None;
         let mut last_non_custom_id: u8 = 0;
-        let mut has_function_section = false;
-        let mut has_code_section = false;
         let mut function_count = 0_usize;
         let mut code_count = 0_usize;
 
@@ -722,7 +720,6 @@ impl<'a> Parser<'a> {
                     .extend(self.parse_import_section()?),
                 3 => {
                     let indices = self.parse_function_section()?;
-                    has_function_section = true;
                     function_count = indices.len();
                     self.function_types.extend(indices)
                 }
@@ -736,7 +733,6 @@ impl<'a> Parser<'a> {
                     .extend(self.parse_element_section()?),
                 10 => {
                     let codes = self.parse_code_section()?;
-                    has_code_section = true;
                     code_count = codes.len();
                     module.functions.extend(codes);
                 }
@@ -758,16 +754,14 @@ impl<'a> Parser<'a> {
             );
         }
 
-        if has_function_section || has_code_section {
-            ensure!(
-                has_function_section && has_code_section && function_count == code_count,
-                Error::Parse(format!(
-                    "function and code section have inconsistent lengths: {} functions vs {} code entries",
-                    if has_function_section { function_count } else { 0 },
-                    if has_code_section { code_count } else { 0 },
-                ))
-            );
-        }
+        ensure!(
+            function_count == code_count,
+            Error::Parse(format!(
+                "function and code section have inconsistent lengths: {} functions vs {} code entries",
+                function_count,
+                code_count,
+            ))
+        );
 
         if let Some(count) = data_count {
             let count =
