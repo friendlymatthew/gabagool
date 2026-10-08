@@ -636,13 +636,19 @@ mod core_tests {
                             continue;
                         }
 
+                        let test_name = format!("invalid_{}_{}", safe_name, invalid_idx);
+                        if test_name.starts_with("invalid_simd_") {
+                            report.skip(SkipReason::UnsupportedSimdInstruction);
+                            invalid_idx += 1;
+                            continue;
+                        }
+
                         let bytes = module.encode().unwrap_or_else(|error| {
                             panic!("failed to encode {}: {error}", path.display())
                         });
                         let wasm_path =
                             wasm_dir.join(format!("invalid_{}_{}.wasm", safe_name, invalid_idx));
                         fs::write(&wasm_path, bytes).unwrap();
-                        let test_name = format!("invalid_{}_{}", safe_name, invalid_idx);
                         all_tests.push_str(&format!(
                             concat!(
                                 "fn {test_name}(report: &mut CoreTestReport) {{\n",

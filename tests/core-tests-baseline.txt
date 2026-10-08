@@ -1,4 +1,4 @@
-passed_assertions	33315
+passed_assertions	33313
 passing_case	address0_0
 passing_case	address1_0
 passing_case	address64_0
@@ -959,8 +959,6 @@ passing_case	invalid_align_38
 passing_case	invalid_align_39
 passing_case	invalid_align_40
 passing_case	invalid_align_43
-passing_case	invalid_simd_align_0
-passing_case	invalid_simd_align_1
 passing_case	labels_0
 passing_case	left_to_right_0
 passing_case	linking1_0
