@@ -1215,18 +1215,7 @@ impl Store {
             buf.extend_from_slice(&ds.data);
         }
 
-        (self.instances.len() as u32).encode(&mut buf);
-        for inst in &self.instances {
-            inst.code.as_ref().encode(&mut buf);
-            inst.function_addrs.encode(&mut buf);
-            inst.table_addrs.encode(&mut buf);
-            inst.mem_addrs.encode(&mut buf);
-            inst.global_addrs.encode(&mut buf);
-            inst.tag_addrs.encode(&mut buf);
-            inst.elem_addrs.encode(&mut buf);
-            inst.data_addrs.encode(&mut buf);
-            inst.exports.encode(&mut buf);
-        }
+        self.instances.encode(&mut buf);
 
         // value stack
         let (stack_data, stack_cursor) = self.stack.snapshot_data();
@@ -1335,22 +1324,7 @@ impl Store {
             data_segments.push(DataInstance { data });
         }
 
-        let num_instances = u32::decode(buf) as usize;
-        let instances = (0..num_instances)
-            .map(|_| InstantiatedModule {
-                code: Arc::new(ModuleCode::decode(buf)),
-                function_addrs: Vec::<usize>::decode(buf),
-                table_addrs: Vec::<usize>::decode(buf),
-                mem_addrs: Vec::<usize>::decode(buf),
-                global_addrs: Vec::<usize>::decode(buf),
-                tag_addrs: Vec::<usize>::decode(buf),
-                elem_addrs: Vec::<usize>::decode(buf),
-                data_addrs: Vec::<usize>::decode(buf),
-                exports: Vec::<ExportInstance>::decode(buf),
-                #[cfg(feature = "jit")]
-                jit_functions: Vec::new(),
-            })
-            .collect::<Vec<_>>();
+        let instances = Vec::<InstantiatedModule>::decode(buf);
 
         // value stack
         let _stack_capacity = u32::decode(buf) as usize;
