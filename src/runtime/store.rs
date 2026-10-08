@@ -376,7 +376,7 @@ impl Store {
             .ok_or_else(|| Error::Instantiation(format!("function addr {} oob", addr)))?;
         match fi {
             FunctionInstance::Local { function_type, .. }
-            | FunctionInstance::Host { function_type, .. } => Ok(function_type.0 .0.clone()),
+            | FunctionInstance::Host { function_type, .. } => Ok(function_type.params.clone()),
         }
     }
 
@@ -1652,10 +1652,14 @@ impl Store {
             .ok_or_else(|| Error::Instantiation(format!("function addr {} oob", function_addr)))?;
 
         let (num_args, num_results) = match fi {
-            FunctionInstance::Local { function_type, .. }
-            | FunctionInstance::Host { function_type, .. } => {
-                (function_type.0 .0.len(), function_type.1 .0.len())
+            FunctionInstance::Local {
+                function_type: FunctionType { params, results },
+                ..
             }
+            | FunctionInstance::Host {
+                function_type: FunctionType { params, results },
+                ..
+            } => (params.len(), results.len()),
         };
 
         let args_len = args.size_hint().0;
@@ -1687,10 +1691,14 @@ impl Store {
         );
 
         let (num_args, num_results) = match &self.functions[func_addr] {
-            FunctionInstance::Local { function_type, .. }
-            | FunctionInstance::Host { function_type, .. } => {
-                (function_type.0 .0.len(), function_type.1 .0.len())
+            FunctionInstance::Local {
+                function_type: FunctionType { params, results },
+                ..
             }
+            | FunctionInstance::Host {
+                function_type: FunctionType { params, results },
+                ..
+            } => (params.len(), results.len()),
         };
 
         let (module_i, compiled_func_i) = match &self.functions[func_addr] {
@@ -1969,7 +1977,7 @@ impl Store {
                     );
 
                     let func_addr = *func_addr;
-                    let num_args = expected.0 .0.len();
+                    let num_args = expected.params.len();
                     let old_base = self.call_stack[depth].stack_base;
                     let len = self.stack.len();
 
@@ -2094,7 +2102,7 @@ impl Store {
                 }
                 Op::Throw { tag_i } => {
                     let tag_addr = self.instances[mi].tag_addrs[tag_i as usize];
-                    let n_values = self.tags[tag_addr].tag_type.0 .0.len();
+                    let n_values = self.tags[tag_addr].tag_type.params.len();
                     let values = self.stack.pop_n(n_values).to_vec();
                     self.handle_exception(tag_addr, values)?;
                 }
@@ -3279,7 +3287,7 @@ impl Store {
     fn func_num_params(&self, func_addr: usize) -> usize {
         match &self.functions[func_addr] {
             FunctionInstance::Local { function_type, .. }
-            | FunctionInstance::Host { function_type, .. } => function_type.0 .0.len(),
+            | FunctionInstance::Host { function_type, .. } => function_type.params.len(),
         }
     }
 

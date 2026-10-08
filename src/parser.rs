@@ -19,8 +19,8 @@ use crate::module::{
     ExportDescription, ExportSection, FieldType, Function, FunctionSection, FunctionType, Global,
     GlobalSection, GlobalType, HeapType, ImportDeclaration, ImportDescription, ImportSection,
     Instruction, Limit, Local, MemArg, MemorySection, MemoryType, ModuleSection, Mutability,
-    ParsedModule, RefType, ResultType, StorageType, StructType, SubType, TableDef, TableSection,
-    TableType, Tag, TagSection, TypeSection, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
+    ParsedModule, RefType, StorageType, StructType, SubType, TableDef, TableSection, TableType,
+    Tag, TagSection, TypeSection, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
 };
 
 #[derive(Debug)]
@@ -994,8 +994,8 @@ impl<'a> Parser<'a> {
         Ok(value_type)
     }
 
-    fn parse_result_type(&mut self) -> Result<ResultType> {
-        Ok(ResultType(self.parse_vec(Self::parse_value_type)?))
+    fn parse_result_type(&mut self) -> Result<Vec<ValueType>> {
+        Ok(self.parse_vec(Self::parse_value_type)?)
     }
 
     fn parse_mutability(&mut self) -> Result<Mutability> {
@@ -1036,11 +1036,10 @@ impl<'a> Parser<'a> {
     fn parse_composite_type(&mut self) -> Result<CompositeType> {
         let b = self.read_u8()?;
         match b {
-            0x60 => {
-                let arg_type = self.parse_result_type()?;
-                let return_type = self.parse_result_type()?;
-                Ok(CompositeType::Func(FunctionType(arg_type, return_type)))
-            }
+            0x60 => Ok(CompositeType::Func(FunctionType {
+                params: self.parse_result_type()?,
+                results: self.parse_result_type()?,
+            })),
             0x5E => {
                 let field_type = self.parse_field_type()?;
                 Ok(CompositeType::Array(ArrayType { field_type }))

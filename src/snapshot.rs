@@ -11,8 +11,7 @@ use crate::component::runtime::{InstantiatedComponent, LiftedFunc};
 use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
 use crate::module::{
     AddrType, ArrayType, CompositeType, FieldType, FunctionType, GlobalType, HeapType, Limit,
-    MemoryType, Mutability, RefType, ResultType, StorageType, StructType, SubType, TableType,
-    ValueType,
+    MemoryType, Mutability, RefType, StorageType, StructType, SubType, TableType, ValueType,
 };
 use crate::runtime::{
     DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance, GlobalInstance,
@@ -451,24 +450,17 @@ impl Snapshot for GlobalType {
     }
 }
 
-impl Snapshot for ResultType {
-    fn encode(&self, buf: &mut Vec<u8>) {
-        self.0.encode(buf);
-    }
-
-    fn decode(buf: &mut &[u8]) -> Self {
-        Self(Vec::<ValueType>::decode(buf))
-    }
-}
-
 impl Snapshot for FunctionType {
     fn encode(&self, buf: &mut Vec<u8>) {
-        self.0.encode(buf);
-        self.1.encode(buf);
+        self.params.encode(buf);
+        self.results.encode(buf);
     }
 
     fn decode(buf: &mut &[u8]) -> Self {
-        Self(ResultType::decode(buf), ResultType::decode(buf))
+        Self {
+            params: Vec::<ValueType>::decode(buf),
+            results: Vec::<ValueType>::decode(buf),
+        }
     }
 }
 

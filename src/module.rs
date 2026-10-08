@@ -161,10 +161,10 @@ pub enum ValueType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResultType(pub Vec<ValueType>);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunctionType(pub ResultType, pub ResultType);
+pub struct FunctionType {
+    pub params: Vec<ValueType>,
+    pub results: Vec<ValueType>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limit {

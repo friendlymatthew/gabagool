@@ -131,7 +131,7 @@ impl Linker {
                     let func = self.get_func(&module_name, &func_name)?;
                     self.validate_arg_count(func, &module_name, &func_name, args.len())?;
 
-                    let expected_results = func.function_type.1 .0.len();
+                    let expected_results = func.function_type.results.len();
                     let caller = Caller { store, instance };
                     let results = (func.callback)(caller, &args)?;
 
@@ -208,7 +208,7 @@ impl Linker {
         name: &str,
         actual: usize,
     ) -> Result<()> {
-        let expected = func.function_type.0 .0.len();
+        let expected = func.function_type.params.len();
         if actual != expected {
             return Err(Error::Instantiation(format!(
                 "host function {module}.{name} received {actual} args, expected {expected}"

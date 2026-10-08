@@ -2,7 +2,7 @@ use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry
 use crate::module::{
     BlockType, CatchClause, CompositeType, Function, Instruction, ParsedModule, SubType, ValueType,
 };
-use crate::ImportDescription;
+use crate::{FunctionType, ImportDescription};
 
 const UNREACHABLE_DEPTH: i32 = i32::MIN;
 
@@ -80,7 +80,7 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
 
     let resolve_sig = |type_i: u32, types: &[SubType]| -> (usize, usize) {
         match &types[type_i as usize].composite_type {
-            CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
+            CompositeType::Func(FunctionType { params, results }) => (params.len(), results.len()),
             _ => (0, 0),
         }
     };
@@ -98,7 +98,7 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
 
     let resolve_tag_sig = |type_i: u32, types: &[SubType]| -> usize {
         match &types[type_i as usize].composite_type {
-            CompositeType::Func(ft) => ft.0 .0.len(),
+            CompositeType::Func(FunctionType { params, .. }) => params.len(),
             _ => 0,
         }
     };
@@ -162,7 +162,7 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
 impl<'a> Compiler<'a> {
     const fn resolve_type_sig(&self, type_i: u32) -> (usize, usize) {
         match &self.types[type_i as usize].composite_type {
-            CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
+            CompositeType::Func(FunctionType { params, results }) => (params.len(), results.len()),
             _ => (0, 0),
         }
     }
@@ -174,7 +174,9 @@ impl<'a> Compiler<'a> {
             BlockType::TypeIndex(i) => {
                 let st = &self.types[*i as usize];
                 match &st.composite_type {
-                    CompositeType::Func(ft) => (ft.0 .0.len(), ft.1 .0.len()),
+                    CompositeType::Func(FunctionType { params, results }) => {
+                        (params.len(), results.len())
+                    }
                     _ => (0, 0),
                 }
             }
@@ -185,7 +187,7 @@ impl<'a> Compiler<'a> {
         let st = &self.types[func.type_index as usize];
 
         let (num_args, num_results) = if let CompositeType::Func(ft) = &st.composite_type {
-            (ft.0 .0.len(), ft.1 .0.len())
+            (ft.params.len(), ft.results.len())
         } else {
             (0, 0)
         };
@@ -221,8 +223,9 @@ impl<'a> Compiler<'a> {
         let extra_locals: usize = func.locals.iter().map(|l| l.count as usize).sum();
         let mut local_types: Vec<ValueType> = match &st.composite_type {
             CompositeType::Func(ft) => {
-                let mut v = Vec::with_capacity(ft.0 .0.len() + extra_locals);
-                v.extend_from_slice(&ft.0 .0);
+                let mut v = Vec::with_capacity(ft.params.len() + extra_locals);
+                v.extend_from_slice(&ft.params);
+
                 v
             }
             _ => Vec::with_capacity(extra_locals),
@@ -3146,17 +3149,17 @@ impl<'a> Compiler<'a> {
 mod tests {
     use super::*;
     use crate::module::{
-        BlockType, CompositeType, FunctionType, Instruction, MemArg, ResultType, SubType, ValueType,
+        BlockType, CompositeType, FunctionType, Instruction, MemArg, SubType, ValueType,
     };
 
     fn i32_func_type() -> SubType {
         SubType {
             is_final: true,
             supertypes: vec![],
-            composite_type: CompositeType::Func(FunctionType(
-                ResultType(vec![ValueType::I32, ValueType::I32]),
-                ResultType(vec![ValueType::I32]),
-            )),
+            composite_type: CompositeType::Func(FunctionType {
+                params: vec![ValueType::I32, ValueType::I32],
+                results: vec![ValueType::I32],
+            }),
         }
     }
 
