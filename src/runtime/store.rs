@@ -26,8 +26,8 @@ use crate::module::{
 use crate::runtime::memory::MemoryInstance;
 use crate::runtime::stack::ValueStack;
 use crate::runtime::types::{
-    AddressMap, DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance,
-    GlobalInstance, Ref, TableInstance, TagInstance,
+    DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance, GlobalInstance,
+    Ref, TableInstance, TagInstance,
 };
 use crate::RawValue;
 
@@ -237,6 +237,24 @@ pub struct InstantiatedModule {
     pub exports: Vec<ExportInstance>,
     #[cfg(feature = "jit")]
     pub jit_functions: Vec<Option<JitFunction>>,
+}
+
+impl InstantiatedModule {
+    pub const fn new(code: Arc<ModuleCode>) -> Self {
+        Self {
+            code,
+            function_addrs: Vec::new(),
+            table_addrs: Vec::new(),
+            mem_addrs: Vec::new(),
+            global_addrs: Vec::new(),
+            tag_addrs: Vec::new(),
+            elem_addrs: Vec::new(),
+            data_addrs: Vec::new(),
+            exports: Vec::new(),
+            #[cfg(feature = "jit")]
+            jit_functions: Vec::new(),
+        }
+    }
 }
 
 /// The runtime state for all instantiated WASM modules
@@ -492,129 +510,168 @@ impl Store {
         module: &Module,
         instance_i: u16,
         extern_addrs: Vec<ExternalValue>,
-        initial_global_values: Vec<RawValue>,
-        initial_table_refs: Vec<Ref>,
-        element_segment_refs: Vec<Vec<Ref>>,
-    ) -> Result<AddressMap> {
-        // step 1
+    ) -> Result<InstantiatedModule> {
         let types = &module.code.types;
-        let mut address_map = AddressMap::default();
+        let mut instantiated_module = InstantiatedModule::new(Arc::clone(&module.code));
 
-        // step 2-6
-        for addr in extern_addrs {
-            match addr {
-                ExternalValue::Function { addr } => address_map.function_addrs.push(addr),
-                ExternalValue::Table { addr } => address_map.table_addrs.push(addr),
-                ExternalValue::Memory { addr } => address_map.mem_addrs.push(addr),
-                ExternalValue::Global { addr } => address_map.global_addrs.push(addr),
-                ExternalValue::Tag { addr } => address_map.tag_addrs.push(addr),
+        extern_addrs.into_iter().for_each(|e| match e {
+            ExternalValue::Function { addr } => {
+                instantiated_module.function_addrs.push(addr);
             }
+            ExternalValue::Table { addr } => {
+                instantiated_module.table_addrs.push(addr);
+            }
+            ExternalValue::Memory { addr } => {
+                instantiated_module.mem_addrs.push(addr);
+            }
+            ExternalValue::Global { addr } => {
+                instantiated_module.global_addrs.push(addr);
+            }
+            ExternalValue::Tag { addr } => {
+                instantiated_module.tag_addrs.push(addr);
+            }
+        });
+
+        let imported_function_count = instantiated_module.function_addrs.len();
+        let first_function_addr = self.functions.len();
+
+        instantiated_module
+            .function_addrs
+            .extend((0..module.functions.len()).map(|function_i| first_function_addr + function_i));
+
+        let mut initial_global_values = Vec::with_capacity(module.globals.len());
+
+        for global in &module.globals {
+            let initial_value = self.eval_const_expr(
+                &global.initial_expression,
+                &instantiated_module,
+                &initial_global_values,
+            )?;
+
+            initial_global_values.push(initial_value);
         }
 
-        // step 7
-        let _function_addresses = (0..module.functions.len()).map(|i| self.functions.len() + i);
+        let initial_table_refs = module
+            .tables
+            .iter()
+            .map(|table| {
+                self.eval_const_expr(&table.init, &instantiated_module, &initial_global_values)
+                    .map(|value| value.as_ref())
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        // step 25-26
+        let element_segment_refs = module
+            .element_segments
+            .iter()
+            .map(|element_segment| {
+                element_segment
+                    .expression
+                    .iter()
+                    .map(|expression| {
+                        self.eval_const_expr(
+                            expression,
+                            &instantiated_module,
+                            &initial_global_values,
+                        )
+                        .map(|value| value.as_ref())
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        for (function_i, function) in module.functions.iter().enumerate() {
+            let compiled_func_i = u32::try_from(function_i)
+                .map_err(|_| Error::instantiation("too many compiled functions"))?;
+            let function_addr =
+                self.allocate_function(function, types, instance_i, compiled_func_i)?;
+
+            debug_assert_eq!(
+                function_addr,
+                instantiated_module.function_addrs[imported_function_count + function_i],
+            );
+        }
+
         for tag in &module.tags {
             let tag_type = Self::extract_function_type(types, tag.type_index)?;
-            let addr = self.allocate_tag(tag_type);
-            address_map.tag_addrs.push(addr);
+            let tag_addr = self.allocate_tag(tag_type);
+
+            instantiated_module.tag_addrs.push(tag_addr);
         }
 
-        // step 27-28
-        address_map.global_addrs.extend(
+        for (global, initial_value) in module.globals.iter().zip(initial_global_values) {
+            let global_addr = self.allocate_global(global, initial_value);
+
+            instantiated_module.global_addrs.push(global_addr);
+        }
+
+        instantiated_module.mem_addrs.extend(
             module
-                .globals
+                .mems
                 .iter()
-                .zip(initial_global_values)
-                .map(|(global, init_val)| self.allocate_global(global, init_val)),
+                .map(|memory| self.allocate_memory(memory)),
         );
 
-        // step 29-30
-        address_map
-            .mem_addrs
-            .extend(module.mems.iter().map(|m| self.allocate_memory(m)));
+        for (table, initial_ref) in module.tables.iter().zip(initial_table_refs) {
+            let table_addr = self.allocate_table(table.table_type, initial_ref);
 
-        // step 31-32
-        address_map.table_addrs.extend(
-            module
-                .tables
-                .iter()
-                .zip(initial_table_refs)
-                .map(|(td, ref_t)| self.allocate_table(td.table_type, ref_t)),
-        );
+            instantiated_module.table_addrs.push(table_addr);
+        }
 
-        // step 35-36
-        address_map.data_addrs.extend(
+        instantiated_module.data_addrs.extend(
             module
                 .data_segments
                 .iter()
-                .map(|ds| self.allocate_data_instance(ds)),
+                .map(|data_segment| self.allocate_data_instance(data_segment)),
         );
 
-        // step 37-38
-        for (elem, refs) in module.element_segments.iter().zip(element_segment_refs) {
-            let addr = self.allocate_element_segment(elem, refs);
-            address_map.elem_addrs.push(addr);
-        }
+        for (element_segment, refs) in module.element_segments.iter().zip(element_segment_refs) {
+            let element_addr = self.allocate_element_segment(element_segment, refs);
 
-        // step 40-42
-        let first_func_addr = self.functions.len();
-        let num_funcs = module.functions.len();
-        for i in 0..num_funcs {
-            address_map.function_addrs.push(first_func_addr + i);
+            instantiated_module.elem_addrs.push(element_addr);
         }
 
         // step 33-34
         for export in &module.exports {
             let extern_value = match export.description {
                 ExportDescription::Func(x) => ExternalValue::Function {
-                    addr: *address_map
+                    addr: *instantiated_module
                         .function_addrs
                         .get(x as usize)
                         .ok_or_else(|| Error::Instantiation("oob".into()))?,
                 },
                 ExportDescription::Table(x) => ExternalValue::Table {
-                    addr: *address_map
+                    addr: *instantiated_module
                         .table_addrs
                         .get(x as usize)
                         .ok_or_else(|| Error::Instantiation("oob".into()))?,
                 },
                 ExportDescription::Mem(x) => ExternalValue::Memory {
-                    addr: *address_map
+                    addr: *instantiated_module
                         .mem_addrs
                         .get(x as usize)
                         .ok_or_else(|| Error::Instantiation("oob".into()))?,
                 },
                 ExportDescription::Global(x) => ExternalValue::Global {
-                    addr: *address_map
+                    addr: *instantiated_module
                         .global_addrs
                         .get(x as usize)
                         .ok_or_else(|| Error::Instantiation("oob".into()))?,
                 },
                 ExportDescription::Tag(x) => ExternalValue::Tag {
-                    addr: *address_map
+                    addr: *instantiated_module
                         .tag_addrs
                         .get(x as usize)
                         .ok_or_else(|| Error::Instantiation("oob".into()))?,
                 },
             };
 
-            address_map.exports.push(ExportInstance {
+            instantiated_module.exports.push(ExportInstance {
                 name: export.name.clone(),
                 value: extern_value,
             });
         }
 
-        let module_instance = address_map;
-        for (compiled_func_i, func) in module.functions.iter().enumerate() {
-            let compiled_func_i = u32::try_from(compiled_func_i)
-                .map_err(|_| Error::Instantiation("too many compiled functions".into()))?;
-
-            self.allocate_function(func, types, instance_i, compiled_func_i)?;
-        }
-
-        Ok(module_instance)
+        Ok(instantiated_module)
     }
 
     fn validate_imports(&self, module: &Module, imports: &[ExternalValue]) -> Result<()> {
@@ -728,147 +785,60 @@ impl Store {
             .flat_map(|(i, es)| run_elem(i as u32, es))
             .collect::<Vec<_>>();
 
-        // step 8
-        let mut address_map = AddressMap {
-            global_addrs: external_addresses
-                .iter()
-                .filter_map(|addr| match addr {
-                    ExternalValue::Global { addr } => Some(*addr),
-                    _ => None,
-                })
-                .collect(),
-            ..Default::default()
-        };
-
-        address_map.function_addrs = external_addresses
-            .iter()
-            .filter_map(|addr| match addr {
-                ExternalValue::Function { addr } => Some(*addr),
-                _ => None,
-            })
-            .collect();
-
-        let func_base = self.functions.len();
-        address_map
-            .function_addrs
-            .extend((0..module.functions.len()).map(|i| func_base + i));
-
-        // step 19: evaluate global init expressions sequentially so that each
-        // staged global is visible to subsequent global.get instructions
-        let mut initial_global_values = Vec::with_capacity(module.globals.len());
-
-        for g in &module.globals {
-            let value = eval_const_expr_with_module(
-                &g.initial_expression,
-                self,
-                &address_map,
-                &initial_global_values,
-            )?;
-
-            initial_global_values.push(value);
-        }
-
-        // step 20: evaluate table init expressions
-        let initial_table_refs = module
-            .tables
-            .iter()
-            .map(|td| {
-                eval_const_expr_with_module(&td.init, self, &address_map, &initial_global_values)
-                    .map(|v| v.as_ref())
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        // step 21 - evaluate element segment exprs
-        let element_segment_refs = module
-            .element_segments
-            .iter()
-            .map(|es| {
-                es.expression
-                    .iter()
-                    .map(|expr| {
-                        let val = eval_const_expr_with_module(
-                            expr,
-                            self,
-                            &address_map,
-                            &initial_global_values,
-                        )?;
-
-                        Ok(val.as_ref())
-                    })
-                    .collect::<Result<Vec<_>>>()
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let start_func_i = module.start;
-
         let instance_i = u16::try_from(self.instances.len())
             .map_err(|_| Error::Instantiation("too many module instances".into()))?;
-        let module_instance = self.allocate_module(
-            module,
-            instance_i,
-            external_addresses,
-            initial_global_values,
-            initial_table_refs,
-            element_segment_refs,
-        )?;
 
-        // build the InstanceEntity with shared code + address mappings
-        let entity = InstantiatedModule {
-            code: Arc::clone(&module.code),
-            function_addrs: module_instance.function_addrs.clone(),
-            table_addrs: module_instance.table_addrs.clone(),
-            mem_addrs: module_instance.mem_addrs.clone(),
-            global_addrs: module_instance.global_addrs.clone(),
-            tag_addrs: module_instance.tag_addrs.clone(),
-            elem_addrs: module_instance.elem_addrs.clone(),
-            data_addrs: module_instance.data_addrs.clone(),
-            exports: module_instance.exports.clone(),
-
-            #[cfg(feature = "jit")]
-            jit_functions: Vec::new(),
-        };
+        let module_instance = self.allocate_module(module, instance_i, external_addresses)?;
 
         #[cfg(feature = "jit")]
-        let entity = {
+        let module_instance = {
             use crate::jit::assembler::assemble;
 
-            let mut entity = entity;
-            entity.jit_functions = entity
+            let mut module_instance = module_instance;
+            module_instance.jit_functions = module_instance
                 .code
                 .compiled_funcs
                 .iter()
                 .map(|cf| assemble(&cf.ops))
                 .collect();
 
-            entity
+            module_instance
         };
 
-        self.instances.push(entity);
+        let start_func_addr = module
+            .start
+            .map(|start_i| {
+                let start_i = usize::try_from(start_i)
+                    .map_err(|_| Error::Instantiation("start function index is invalid".into()))?;
+
+                module_instance
+                    .function_addrs
+                    .get(start_i)
+                    .copied()
+                    .ok_or_else(|| {
+                        Error::Instantiation(format!("start function index {start_i} oob"))
+                    })
+            })
+            .transpose()?;
+
+        self.instances.push(module_instance);
+
         self.ensure_stack_capacity();
+
         let instance = Instance(usize::from(instance_i));
 
-        // step 27 - execute element segment initialization
-        // step 28 - execute data segment initialization
         let init_instructions = [element_instructions, data_instructions].concat();
         if !init_instructions.is_empty() {
             self.run_init_instructions(&init_instructions, instance_i)?;
         }
 
-        // step 29: invoke start function if present
-        if let Some(start_i) = start_func_i {
-            let func_addr = *module_instance
-                .function_addrs
-                .get(start_i as usize)
-                .ok_or_else(|| {
-                    Error::Instantiation(format!("start function index {} oob", start_i))
-                })?;
-            if self.push_function_call(func_addr)? {
+        if let Some(start_a) = start_func_addr {
+            if self.push_function_call(start_a)? {
                 instantiation_err!("start function cannot be a host import");
             }
             self.run()?;
         }
 
-        // step 31
         Ok(instance)
     }
 
@@ -3373,6 +3343,104 @@ impl Store {
         self.run()?;
         Ok(())
     }
+
+    fn eval_const_expr(
+        &self,
+        expr: &[Instruction],
+        instantiated_module: &InstantiatedModule,
+        pending_globals: &[RawValue],
+    ) -> Result<RawValue> {
+        let mut stack = Vec::with_capacity(expr.len());
+        for instr in expr {
+            match instr {
+                Instruction::I32Const(v) => stack.push(RawValue::from(*v)),
+                Instruction::I64Const(v) => stack.push(RawValue::from(*v)),
+                Instruction::F32Const(v) => stack.push(RawValue::from(*v)),
+                Instruction::F64Const(v) => stack.push(RawValue::from(*v)),
+                Instruction::V128Const(v) => {
+                    let (hi, lo) = RawValue::from_v128(*v);
+                    stack.extend(<[RawValue; 2]>::from((hi, lo)));
+                }
+                Instruction::RefNull(_) => stack.push(RawValue::from_ref(Ref::Null)),
+                Instruction::RefFunc(i) => {
+                    let function_i = usize::try_from(*i).map_err(|_| {
+                        Error::Instantiation(format!("function index {i} is invalid"))
+                    })?;
+                    let &addr = instantiated_module
+                        .function_addrs
+                        .get(function_i)
+                        .ok_or_else(|| Error::Instantiation(format!("ref.func index {} oob", i)))?;
+
+                    stack.push(RawValue::from_ref(Ref::FunctionAddr(addr)));
+                }
+                Instruction::GlobalGet(i) => {
+                    let global_i = usize::try_from(*i).map_err(|_| {
+                        Error::Instantiation(format!("global index {i} is invalid"))
+                    })?;
+
+                    let value = if let Some(&global_addr) =
+                        instantiated_module.global_addrs.get(global_i)
+                    {
+                        self.globals
+                            .get(global_addr)
+                            .ok_or_else(|| {
+                                Error::Instantiation(format!(
+                                    "global store index {global_addr} oob in const expr"
+                                ))
+                            })?
+                            .value
+                    } else {
+                        let pending_i = global_i
+                            .checked_sub(instantiated_module.global_addrs.len())
+                            .ok_or_else(|| {
+                                Error::Instantiation(format!("global index {global_i} is invalid"))
+                            })?;
+
+                        *pending_globals.get(pending_i).ok_or_else(|| {
+                            Error::Instantiation(format!(
+                                "global index {global_i} oob in const expr"
+                            ))
+                        })?
+                    };
+
+                    stack.push(value);
+                }
+                Instruction::RefI31 => {
+                    let v = const_pop_i32(&mut stack)?;
+                    stack.push(RawValue::from_ref(Ref::I31(v & 0x7FFF_FFFF)));
+                }
+                Instruction::I32Add => {
+                    let (b, a) = (const_pop_i32(&mut stack)?, const_pop_i32(&mut stack)?);
+                    stack.push(RawValue::from(a.wrapping_add(b)));
+                }
+                Instruction::I32Sub => {
+                    let (b, a) = (const_pop_i32(&mut stack)?, const_pop_i32(&mut stack)?);
+                    stack.push(RawValue::from(a.wrapping_sub(b)));
+                }
+                Instruction::I32Mul => {
+                    let (b, a) = (const_pop_i32(&mut stack)?, const_pop_i32(&mut stack)?);
+                    stack.push(RawValue::from(a.wrapping_mul(b)));
+                }
+                Instruction::I64Add => {
+                    let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
+                    stack.push(RawValue::from(a.wrapping_add(b)));
+                }
+                Instruction::I64Sub => {
+                    let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
+                    stack.push(RawValue::from(a.wrapping_sub(b)));
+                }
+                Instruction::I64Mul => {
+                    let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
+                    stack.push(RawValue::from(a.wrapping_mul(b)));
+                }
+                other => instantiation_err!("unexpected instruction in const expr: {:?}", other),
+            }
+        }
+
+        stack
+            .pop()
+            .ok_or_else(|| Error::Instantiation("const expr produced no value".into()))
+    }
 }
 
 const fn limits_match(actual: &Limit, expected: &Limit) -> bool {
@@ -3448,91 +3516,6 @@ fn run_elem(index: u32, element_segment: &ElementSegment) -> Vec<Instruction> {
             instrs
         }
     }
-}
-
-fn eval_const_expr_with_module(
-    expr: &[Instruction],
-    store: &Store,
-    address_map: &AddressMap,
-    pending_globals: &[RawValue],
-) -> Result<RawValue> {
-    let mut stack = Vec::with_capacity(expr.len());
-    for instr in expr {
-        match instr {
-            Instruction::I32Const(v) => stack.push(RawValue::from(*v)),
-            Instruction::I64Const(v) => stack.push(RawValue::from(*v)),
-            Instruction::F32Const(v) => stack.push(RawValue::from(*v)),
-            Instruction::F64Const(v) => stack.push(RawValue::from(*v)),
-            Instruction::V128Const(v) => {
-                let (hi, lo) = RawValue::from_v128(*v);
-                stack.extend(<[RawValue; 2]>::from((hi, lo)));
-            }
-            Instruction::RefNull(_) => stack.push(RawValue::from_ref(Ref::Null)),
-            Instruction::RefFunc(i) => {
-                let addr = *address_map
-                    .function_addrs
-                    .get(*i as usize)
-                    .ok_or_else(|| Error::Instantiation(format!("ref.func index {} oob", i)))?;
-                stack.push(RawValue::from_ref(Ref::FunctionAddr(addr)));
-            }
-            Instruction::GlobalGet(i) => {
-                let global_i = usize::try_from(*i)
-                    .map_err(|_| Error::Instantiation(format!("global index {i} is invalid")))?;
-
-                let value = if let Some(&store_i) = address_map.global_addrs.get(global_i) {
-                    store
-                        .globals
-                        .get(store_i)
-                        .ok_or_else(|| {
-                            Error::Instantiation(format!(
-                                "global store index {store_i} oob in const expr"
-                            ))
-                        })?
-                        .value
-                } else {
-                    let pending_i = global_i - address_map.global_addrs.len();
-
-                    *pending_globals.get(pending_i).ok_or_else(|| {
-                        Error::Instantiation(format!("global index {global_i} oob in const expr"))
-                    })?
-                };
-
-                stack.push(value);
-            }
-            Instruction::RefI31 => {
-                let v = const_pop_i32(&mut stack)?;
-                stack.push(RawValue::from_ref(Ref::I31(v & 0x7FFF_FFFF)));
-            }
-            Instruction::I32Add => {
-                let (b, a) = (const_pop_i32(&mut stack)?, const_pop_i32(&mut stack)?);
-                stack.push(RawValue::from(a.wrapping_add(b)));
-            }
-            Instruction::I32Sub => {
-                let (b, a) = (const_pop_i32(&mut stack)?, const_pop_i32(&mut stack)?);
-                stack.push(RawValue::from(a.wrapping_sub(b)));
-            }
-            Instruction::I32Mul => {
-                let (b, a) = (const_pop_i32(&mut stack)?, const_pop_i32(&mut stack)?);
-                stack.push(RawValue::from(a.wrapping_mul(b)));
-            }
-            Instruction::I64Add => {
-                let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
-                stack.push(RawValue::from(a.wrapping_add(b)));
-            }
-            Instruction::I64Sub => {
-                let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
-                stack.push(RawValue::from(a.wrapping_sub(b)));
-            }
-            Instruction::I64Mul => {
-                let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
-                stack.push(RawValue::from(a.wrapping_mul(b)));
-            }
-            other => instantiation_err!("unexpected instruction in const expr: {:?}", other),
-        }
-    }
-    stack
-        .pop()
-        .ok_or_else(|| Error::Instantiation("const expr produced no value".into()))
 }
 
 fn const_pop_i32(stack: &mut Vec<RawValue>) -> Result<i32> {

@@ -8,7 +8,7 @@ pub mod leb128;
 mod linker;
 mod module;
 pub mod parser;
-mod runtime;
+pub mod runtime;
 pub mod snapshot;
 
 #[cfg(feature = "jit")]
@@ -19,9 +19,9 @@ pub use error::*;
 pub use linker::*;
 pub use module::*;
 pub use runtime::{
-    AddressMap, CallFrame, DataInstance, ElementInstance, ExecutionState, ExportInstance,
-    ExternalValue, FunctionInstance, GlobalInstance, GuestMemory, Instance, InstantiatedModule,
-    MemoryInstance, RawValue, Ref, Store, TableInstance, TagInstance,
+    CallFrame, DataInstance, ElementInstance, ExecutionState, ExportInstance, ExternalValue,
+    FunctionInstance, GlobalInstance, GuestMemory, Instance, InstantiatedModule, MemoryInstance,
+    RawValue, Ref, Store, TableInstance, TagInstance,
 };
 pub use snapshot::StoreSnapshot;
 

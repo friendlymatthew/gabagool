@@ -92,19 +92,6 @@ impl From<f64> for RawValue {
     }
 }
 
-/// A temporary struct that accumulates address mappings during instantiation
-#[derive(Debug, Clone, Default)]
-pub struct AddressMap {
-    pub function_addrs: Vec<usize>,
-    pub table_addrs: Vec<usize>,
-    pub mem_addrs: Vec<usize>,
-    pub global_addrs: Vec<usize>,
-    pub tag_addrs: Vec<usize>,
-    pub elem_addrs: Vec<usize>,
-    pub data_addrs: Vec<usize>,
-    pub exports: Vec<ExportInstance>,
-}
-
 #[derive(Debug)]
 pub enum FunctionInstance {
     Local {
@@ -134,6 +121,7 @@ pub struct GlobalInstance {
 #[derive(Debug)]
 pub struct ElementInstance {
     pub ref_type: RefType,
+    // code golf: does this really need to be a Vec?
     pub elem: Vec<Ref>,
 }
 
