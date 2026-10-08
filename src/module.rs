@@ -102,24 +102,6 @@ pub struct ParsedModule {
     pub customs: Vec<CustomSection>,
 }
 
-#[derive(Debug, Clone)]
-pub enum ModuleSection {
-    Custom(CustomSection),
-    Type(TypeSection),
-    Import(ImportSection),
-    Function(FunctionSection),
-    Table(TableSection),
-    Memory(MemorySection),
-    Global(GlobalSection),
-    Export(ExportSection),
-    Start(u32),
-    Element(ElementSection),
-    Code(CodeSection),
-    Data(DataSection),
-    DataCount(u32),
-    Tag(TagSection),
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum HeapType {
     Func,     // 0x70
@@ -241,11 +223,6 @@ pub struct CustomSection {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypeSection {
-    pub types: Vec<SubType>,
-}
-
-#[derive(Debug, Clone)]
 pub enum ImportDescription {
     Func(u32),
     Table(TableType),
@@ -262,29 +239,9 @@ pub struct ImportDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportSection {
-    pub import_declarations: Vec<ImportDeclaration>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FunctionSection {
-    pub indices: Vec<u32>,
-}
-
-#[derive(Debug, Clone)]
 pub struct TableDef {
     pub table_type: TableType,
     pub init: Vec<Instruction>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TableSection {
-    pub tables: Vec<TableDef>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MemorySection {
-    pub memories: Vec<MemoryType>,
 }
 
 #[derive(Debug, Clone)]
@@ -293,19 +250,9 @@ pub struct Global {
     pub initial_expression: Vec<Instruction>,
 }
 
-#[derive(Debug, Clone)]
-pub struct GlobalSection {
-    pub globals: Vec<Global>,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Tag {
     pub type_index: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct TagSection {
-    pub tags: Vec<Tag>,
 }
 
 #[derive(Debug, Clone)]
@@ -849,11 +796,6 @@ pub struct Export {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExportSection {
-    pub exports: Vec<Export>,
-}
-
-#[derive(Debug, Clone)]
 pub enum ElementMode {
     Passive,
     Active {
@@ -871,11 +813,6 @@ pub struct ElementSegment {
 }
 
 #[derive(Debug, Clone)]
-pub struct ElementSection {
-    pub elements: Vec<ElementSegment>,
-}
-
-#[derive(Debug, Clone)]
 pub struct Local {
     pub count: u32,
     pub value_type: ValueType,
@@ -886,11 +823,6 @@ pub struct Function {
     pub type_index: u32,
     pub locals: Vec<Local>,
     pub body: Vec<Instruction>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CodeSection {
-    pub codes: Vec<Function>,
 }
 
 #[derive(Debug, Clone)]
@@ -906,9 +838,4 @@ pub enum DataMode {
 pub struct DataSegment {
     pub bytes: Vec<u8>,
     pub mode: DataMode,
-}
-
-#[derive(Debug, Clone)]
-pub struct DataSection {
-    pub data_segments: Vec<DataSegment>,
 }

@@ -30,7 +30,7 @@ As a pure interpreter, it is safe to assume `gabagool` is spec compliant. `gabag
 ```sh
 # run the core test suite
 uv run download-core-tests.py
-cargo t --features core-tests
+cargo t --features core-tests --test core_tests
 
 # run the component test suite
 # you need wasm-tools installed!

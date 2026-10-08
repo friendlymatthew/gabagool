@@ -14,13 +14,11 @@ use crate::{
 
 use crate::leb128::{self, MAX_LEB128_LEN_32, MAX_LEB128_LEN_64};
 use crate::module::{
-    AddrType, ArrayType, BlockType, CatchClause, CodeSection, CompositeType, CustomSection,
-    DataMode, DataSection, DataSegment, ElementMode, ElementSection, ElementSegment, Export,
-    ExportDescription, ExportSection, FieldType, Function, FunctionSection, FunctionType, Global,
-    GlobalSection, GlobalType, HeapType, ImportDeclaration, ImportDescription, ImportSection,
-    Instruction, Limit, Local, MemArg, MemorySection, MemoryType, ModuleSection, Mutability,
-    ParsedModule, RefType, StorageType, StructType, SubType, TableDef, TableSection, TableType,
-    Tag, TagSection, TypeSection, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
+    AddrType, ArrayType, BlockType, CatchClause, CompositeType, CustomSection, DataMode,
+    DataSegment, ElementMode, ElementSegment, Export, ExportDescription, FieldType, Function,
+    FunctionType, Global, GlobalType, HeapType, ImportDeclaration, ImportDescription, Instruction,
+    Limit, Local, MemArg, MemoryType, Mutability, ParsedModule, RefType, StorageType, StructType,
+    SubType, TableDef, TableType, Tag, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
 };
 
 #[derive(Debug)]
@@ -683,8 +681,8 @@ impl<'a> Parser<'a> {
         let mut last_non_custom_id: u8 = 0;
         let mut has_function_section = false;
         let mut has_code_section = false;
-        let mut function_count = 0;
-        let mut code_count = 0;
+        let mut function_count = 0_usize;
+        let mut code_count = 0_usize;
 
         while self.cursor < self.buffer.len() {
             let id = self.read_u8()?;
@@ -701,44 +699,63 @@ impl<'a> Parser<'a> {
                 last_non_custom_id = order;
             }
 
-            match self.parse_module_section(id)? {
-                ModuleSection::Custom(custom) => module.customs.push(custom),
-                ModuleSection::Type(TypeSection { mut types }) => module.types.append(&mut types),
-                ModuleSection::Import(ImportSection {
-                    mut import_declarations,
-                }) => module.import_declarations.append(&mut import_declarations),
-                ModuleSection::Function(FunctionSection { indices }) => {
+            let section_size = self.read_u32()?;
+            let section_size = usize::try_from(section_size)
+                .map_err(|_| Error::Parse("section size is invalid".into()))?;
+            let section_start = self.cursor;
+            let section_end = section_start
+                .checked_add(section_size)
+                .ok_or_else(|| Error::Parse("section size overflow".into()))?;
+
+            ensure!(
+                section_end <= self.buffer.len(),
+                Error::Parse("section size exceeds remaining bytes".into())
+            );
+
+            match id {
+                0 => module
+                    .customs
+                    .push(self.parse_custom_section(section_size)?),
+                1 => module.types.extend(self.parse_type_section()?),
+                2 => module
+                    .import_declarations
+                    .extend(self.parse_import_section()?),
+                3 => {
+                    let indices = self.parse_function_section()?;
                     has_function_section = true;
-                    function_count = indices.len() as u32;
+                    function_count = indices.len();
                     self.function_types.extend(indices)
                 }
-                ModuleSection::Table(TableSection { mut tables }) => {
-                    module.tables.append(&mut tables)
-                }
-                ModuleSection::Memory(MemorySection { mut memories }) => {
-                    module.mems.append(&mut memories)
-                }
-                ModuleSection::Global(GlobalSection { mut globals }) => {
-                    module.globals.append(&mut globals)
-                }
-                ModuleSection::Export(ExportSection { mut exports }) => {
-                    module.exports.append(&mut exports)
-                }
-                ModuleSection::Start(i) => module.start = Some(i),
-                ModuleSection::Element(ElementSection { mut elements }) => {
-                    module.element_segments.append(&mut elements)
-                }
-                ModuleSection::Code(CodeSection { mut codes }) => {
+                4 => module.tables.extend(self.parse_table_section()?),
+                5 => module.mems.extend(self.parse_memory_section()?),
+                6 => module.globals.extend(self.parse_global_section()?),
+                7 => module.exports.extend(self.parse_export_section()?),
+                8 => module.start = Some(self.read_u32()?),
+                9 => module
+                    .element_segments
+                    .extend(self.parse_element_section()?),
+                10 => {
+                    let codes = self.parse_code_section()?;
                     has_code_section = true;
-                    code_count = codes.len() as u32;
-                    module.functions.append(&mut codes);
+                    code_count = codes.len();
+                    module.functions.extend(codes);
                 }
-                ModuleSection::Data(DataSection { mut data_segments }) => {
-                    module.data_segments.append(&mut data_segments)
+                11 => module.data_segments.extend(self.parse_data_section()?),
+                12 => data_count = Some(self.read_u32()?),
+                13 => module.tags.extend(self.parse_tag_section()?),
+                foreign_id => {
+                    parse_err!("Encountered foreign section id: {}", foreign_id)
                 }
-                ModuleSection::DataCount(n) => data_count = Some(n),
-                ModuleSection::Tag(TagSection { mut tags }) => module.tags.append(&mut tags),
             }
+
+            let seen = self.cursor - section_start;
+            ensure!(
+                seen == section_size,
+                Error::Parse(format!(
+                    "section {} size mismatch, expected {}, got {}",
+                    id, section_size, seen
+                ))
+            );
         }
 
         if has_function_section || has_code_section {
@@ -753,8 +770,11 @@ impl<'a> Parser<'a> {
         }
 
         if let Some(count) = data_count {
+            let count =
+                usize::try_from(count).map_err(|_| Error::Parse("data count is invalid".into()))?;
+
             ensure!(
-                count as usize == module.data_segments.len(),
+                count == module.data_segments.len(),
                 Error::Parse(format!(
                     "Data count {} does not match number of data segments {}",
                     count,
@@ -1911,26 +1931,25 @@ impl<'a> Parser<'a> {
 
     // 5.5: Modules
 
-    fn parse_custom_section(&mut self, size: u32) -> Result<CustomSection> {
+    fn parse_custom_section(&mut self, size: usize) -> Result<CustomSection> {
         let current_pos = self.cursor;
 
         let name = self.parse_name()?;
         ensure!(
-            self.cursor - current_pos <= size as usize,
+            self.cursor - current_pos <= size,
             Error::Parse("custom section name exceeds section size".into())
         );
-        let slice_len = size as usize - (self.cursor - current_pos);
+        let slice_len = size - (self.cursor - current_pos);
 
         let bytes = self.read_slice(slice_len)?.to_vec();
 
         Ok(CustomSection { name, bytes })
     }
 
-    fn parse_type_section(&mut self) -> Result<TypeSection> {
+    fn parse_type_section(&mut self) -> Result<Vec<SubType>> {
         let rec_types = self.parse_vec(Self::parse_rec_type)?;
-        Ok(TypeSection {
-            types: rec_types.into_iter().flatten().collect(),
-        })
+
+        Ok(rec_types.into_iter().flatten().collect::<Vec<_>>())
     }
 
     fn parse_import(&mut self) -> Result<ImportDeclaration> {
@@ -1955,18 +1974,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_import_section(&mut self) -> Result<ImportSection> {
-        let imports = self.parse_vec(Self::parse_import)?;
-
-        Ok(ImportSection {
-            import_declarations: imports,
-        })
+    fn parse_import_section(&mut self) -> Result<Vec<ImportDeclaration>> {
+        self.parse_vec(Self::parse_import)
     }
 
-    fn parse_function_section(&mut self) -> Result<FunctionSection> {
-        Ok(FunctionSection {
-            indices: self.parse_vec(Self::read_u32)?,
-        })
+    fn parse_function_section(&mut self) -> Result<Vec<u32>> {
+        self.parse_vec(Self::read_u32)
     }
 
     fn parse_table_def(&mut self) -> Result<TableDef> {
@@ -1995,22 +2008,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_table_section(&mut self) -> Result<TableSection> {
-        Ok(TableSection {
-            tables: self.parse_vec(Self::parse_table_def)?,
-        })
+    fn parse_table_section(&mut self) -> Result<Vec<TableDef>> {
+        self.parse_vec(Self::parse_table_def)
     }
 
-    fn parse_memory_section(&mut self) -> Result<MemorySection> {
-        Ok(MemorySection {
-            memories: self.parse_vec(Self::parse_memory_type)?,
-        })
+    fn parse_memory_section(&mut self) -> Result<Vec<MemoryType>> {
+        self.parse_vec(Self::parse_memory_type)
     }
 
-    fn parse_global_section(&mut self) -> Result<GlobalSection> {
-        Ok(GlobalSection {
-            globals: self.parse_vec(Self::parse_global)?,
-        })
+    fn parse_global_section(&mut self) -> Result<Vec<Global>> {
+        self.parse_vec(Self::parse_global)
     }
 
     fn parse_tag(&mut self) -> Result<Tag> {
@@ -2023,10 +2030,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_tag_section(&mut self) -> Result<TagSection> {
-        Ok(TagSection {
-            tags: self.parse_vec(Self::parse_tag)?,
-        })
+    fn parse_tag_section(&mut self) -> Result<Vec<Tag>> {
+        self.parse_vec(Self::parse_tag)
     }
 
     fn parse_export(&mut self) -> Result<Export> {
@@ -2046,10 +2051,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_export_section(&mut self) -> Result<ExportSection> {
-        Ok(ExportSection {
-            exports: self.parse_vec(Self::parse_export)?,
-        })
+    fn parse_export_section(&mut self) -> Result<Vec<Export>> {
+        self.parse_vec(Self::parse_export)
     }
 
     fn parse_element_segement(&mut self) -> Result<ElementSegment> {
@@ -2174,10 +2177,8 @@ impl<'a> Parser<'a> {
         Ok(segment)
     }
 
-    fn parse_element_section(&mut self) -> Result<ElementSection> {
-        Ok(ElementSection {
-            elements: self.parse_vec(Self::parse_element_segement)?,
-        })
+    fn parse_element_section(&mut self) -> Result<Vec<ElementSegment>> {
+        self.parse_vec(Self::parse_element_segement)
     }
 
     fn parse_local(&mut self) -> Result<Local> {
@@ -2228,10 +2229,8 @@ impl<'a> Parser<'a> {
         Ok(func)
     }
 
-    fn parse_code_section(&mut self) -> Result<CodeSection> {
-        Ok(CodeSection {
-            codes: self.parse_vec(Self::parse_code)?,
-        })
+    fn parse_code_section(&mut self) -> Result<Vec<Function>> {
+        self.parse_vec(Self::parse_code)
     }
 
     fn parse_data_segment(&mut self) -> Result<DataSegment> {
@@ -2271,51 +2270,8 @@ impl<'a> Parser<'a> {
         Ok(segment)
     }
 
-    fn parse_data_section(&mut self) -> Result<DataSection> {
-        Ok(DataSection {
-            data_segments: self.parse_vec(Self::parse_data_segment)?,
-        })
-    }
-
-    fn parse_module_section(&mut self, id: u8) -> Result<ModuleSection> {
-        let size = self.read_u32()?;
-        let section_start = self.cursor;
-
-        ensure!(
-            section_start + size as usize <= self.buffer.len(),
-            Error::Parse("section size exceeds remaining bytes".into())
-        );
-
-        let section = match id {
-            0 => ModuleSection::Custom(self.parse_custom_section(size)?),
-            1 => ModuleSection::Type(self.parse_type_section()?),
-            2 => ModuleSection::Import(self.parse_import_section()?),
-            3 => ModuleSection::Function(self.parse_function_section()?),
-            4 => ModuleSection::Table(self.parse_table_section()?),
-            5 => ModuleSection::Memory(self.parse_memory_section()?),
-            6 => ModuleSection::Global(self.parse_global_section()?),
-            7 => ModuleSection::Export(self.parse_export_section()?),
-            8 => ModuleSection::Start(self.read_u32()?),
-            9 => ModuleSection::Element(self.parse_element_section()?),
-            10 => ModuleSection::Code(self.parse_code_section()?),
-            11 => ModuleSection::Data(self.parse_data_section()?),
-            12 => ModuleSection::DataCount(self.read_u32()?),
-            13 => ModuleSection::Tag(self.parse_tag_section()?),
-            foreign_id => parse_err!("Encountered foreign section id: {}", foreign_id),
-        };
-
-        if id != 0 {
-            let seen = self.cursor - section_start;
-            ensure!(
-                seen == size as usize,
-                Error::Parse(format!(
-                    "section {} size mismatch, expected {}, got {}",
-                    id, size, seen
-                ))
-            );
-        }
-
-        Ok(section)
+    fn parse_data_section(&mut self) -> Result<Vec<DataSegment>> {
+        self.parse_vec(Self::parse_data_segment)
     }
 }
 

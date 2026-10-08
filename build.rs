@@ -92,13 +92,200 @@ mod component_tests {
 
 #[cfg(feature = "core-tests")]
 mod core_tests {
+    use std::collections::BTreeMap;
     use std::env;
     use std::fs;
     use std::path::Path;
 
     use wast::core::{NanPattern, WastArgCore, WastRetCore};
+    use wast::lexer::Lexer;
     use wast::parser::ParseBuffer;
-    use wast::{Wast, WastArg, WastDirective, WastExecute, WastRet};
+    use wast::{QuoteWat, Wast, WastArg, WastDirective, WastExecute, WastRet, Wat};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum SkipReason {
+        DependentOnUnsupportedScriptState,
+        GlobalGet,
+        NamedModuleInvocation,
+        NonCurrentRegisterTarget,
+        NoCurrentModule,
+        RegisteredModuleInstantiation,
+        Suspension,
+        Threads,
+        UnsupportedExpectedAlternative,
+        UnsupportedGcInstruction,
+        UnsupportedModuleInstances,
+        UnsupportedSimdInstruction,
+        UnsupportedSimdValue,
+        UnsupportedTextFormat,
+    }
+
+    impl SkipReason {
+        const ALL: [Self; 14] = [
+            Self::DependentOnUnsupportedScriptState,
+            Self::GlobalGet,
+            Self::NamedModuleInvocation,
+            Self::NonCurrentRegisterTarget,
+            Self::NoCurrentModule,
+            Self::RegisteredModuleInstantiation,
+            Self::Suspension,
+            Self::Threads,
+            Self::UnsupportedExpectedAlternative,
+            Self::UnsupportedGcInstruction,
+            Self::UnsupportedModuleInstances,
+            Self::UnsupportedSimdInstruction,
+            Self::UnsupportedSimdValue,
+            Self::UnsupportedTextFormat,
+        ];
+
+        const fn description(self) -> &'static str {
+            match self {
+                Self::DependentOnUnsupportedScriptState => {
+                    "depends on earlier unsupported script state"
+                }
+                Self::GlobalGet => "global get assertions are not supported by the runner",
+                Self::NamedModuleInvocation => {
+                    "invocation of a non-current named module is not supported by the runner"
+                }
+                Self::NonCurrentRegisterTarget => {
+                    "registering a non-current module is not supported by the runner"
+                }
+                Self::NoCurrentModule => "directive has no current module",
+                Self::RegisteredModuleInstantiation => {
+                    "module trap assertions with registered imports are not supported by the runner"
+                }
+                Self::Suspension => "suspension is not supported",
+                Self::Threads => "threads are not supported",
+                Self::UnsupportedExpectedAlternative => {
+                    "alternative expected values are not supported by the runner"
+                }
+                Self::UnsupportedGcInstruction => "GC instructions are not supported",
+                Self::UnsupportedModuleInstances => {
+                    "module definitions and instances are not supported by the runner"
+                }
+                Self::UnsupportedSimdInstruction => "SIMD instruction is not supported",
+                Self::UnsupportedSimdValue => "SIMD arguments and results are not supported",
+                Self::UnsupportedTextFormat => {
+                    "text-format malformed and invalid modules are not supported"
+                }
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct GenerationReport {
+        runnable_assertions: usize,
+        skipped_assertions: BTreeMap<SkipReason, usize>,
+        skipped_directives: Vec<(String, SkipReason, bool)>,
+        current_location: Option<String>,
+        current_is_assertion: bool,
+    }
+
+    impl GenerationReport {
+        const fn schedule_assertion(&mut self) {
+            self.runnable_assertions += 1;
+        }
+
+        fn set_location(&mut self, location: String, is_assertion: bool) {
+            self.current_location = Some(location);
+            self.current_is_assertion = is_assertion;
+        }
+
+        fn skip(&mut self, reason: SkipReason) {
+            let location = self
+                .current_location
+                .clone()
+                .expect("skipped directives must have a source location");
+            self.skip_at(reason, location, self.current_is_assertion);
+        }
+
+        fn skip_at(&mut self, reason: SkipReason, location: String, is_assertion: bool) {
+            if is_assertion {
+                *self.skipped_assertions.entry(reason).or_default() += 1;
+            }
+
+            self.skipped_directives
+                .push((location, reason, is_assertion));
+        }
+
+        fn ignore_scheduled(&mut self, reason: SkipReason, steps: &[GeneratedStep]) {
+            let count = steps.iter().filter(|step| step.is_assertion).count();
+            self.runnable_assertions = self
+                .runnable_assertions
+                .checked_sub(count)
+                .expect("ignored assertions must already be scheduled");
+
+            for step in steps {
+                self.skip_at(reason, step.location.clone(), step.is_assertion);
+            }
+        }
+
+        fn report(&self) {
+            let skipped = self.skipped_assertions.values().sum::<usize>();
+            println!(
+                "cargo::warning=core spec runner: {} runnable assertions, {} skipped assertions, {} skipped directives",
+                self.runnable_assertions,
+                skipped,
+                self.skipped_directives.len()
+            );
+
+            for reason in SkipReason::ALL {
+                let assertions = self
+                    .skipped_assertions
+                    .get(&reason)
+                    .copied()
+                    .unwrap_or_default();
+                let directives = self
+                    .skipped_directives
+                    .iter()
+                    .filter(|(_, skipped_reason, _)| *skipped_reason == reason)
+                    .count();
+                if assertions == 0
+                    && directives == 0
+                    && !matches!(
+                        reason,
+                        SkipReason::UnsupportedGcInstruction
+                            | SkipReason::UnsupportedSimdInstruction
+                            | SkipReason::Threads
+                            | SkipReason::Suspension
+                    )
+                {
+                    continue;
+                }
+
+                println!(
+                    "cargo::warning=core spec runner skipped {} assertions across {} directives: {}",
+                    assertions,
+                    directives,
+                    reason.description()
+                );
+            }
+        }
+    }
+
+    struct GeneratedStep {
+        code: String,
+        is_assertion: bool,
+        location: String,
+    }
+
+    impl GeneratedStep {
+        fn assertion(code: String, location: String) -> Self {
+            Self {
+                code,
+                is_assertion: true,
+                location,
+            }
+        }
+
+        fn directive(code: String, location: String) -> Self {
+            Self {
+                code,
+                is_assertion: false,
+                location,
+            }
+        }
+    }
 
     pub fn generate() {
         println!("cargo::rerun-if-changed=tests/spec");
@@ -108,117 +295,209 @@ mod core_tests {
         fs::create_dir_all(&wasm_dir).unwrap();
 
         let spec_dir = Path::new("tests/spec");
-        if !spec_dir.exists() {
-            fs::write(Path::new(&out_dir).join("core_tests_generated.rs"), "").unwrap();
-            return;
-        }
+        assert!(
+            spec_dir.exists(),
+            "core spec fixtures are missing; run `uv run download-core-tests.py`"
+        );
 
         let mut all_tests = String::new();
+        let mut test_calls = String::new();
+        let mut report = GenerationReport::default();
 
-        let entries = fs::read_dir(spec_dir)
+        let mut entries = fs::read_dir(spec_dir)
             .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "wast"));
+            .map(|entry| {
+                entry.unwrap_or_else(|error| panic!("failed to read a core spec entry: {error}"))
+            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "wast"))
+            .collect::<Vec<_>>();
+
+        assert!(!entries.is_empty(), "no core spec fixtures were found");
+
+        entries.sort_by_key(|entry| entry.path());
 
         for entry in entries {
             let path = entry.path();
             let file_stem = path.file_stem().unwrap().to_str().unwrap();
             let safe_name = file_stem.replace('-', "_");
+            let unsupported_file_reason = unsupported_feature(&format!("{safe_name}_"));
 
-            let Ok(contents) = fs::read_to_string(&path) else {
-                println!("cargo::warning=skipping {}: failed to read", path.display());
-                continue;
-            };
-            let Ok(buf) = ParseBuffer::new(&contents) else {
-                println!("cargo::warning=skipping {}: failed to lex", path.display());
-                continue;
-            };
-            let Ok(wast) = wast::parser::parse::<Wast>(&buf) else {
-                println!(
-                    "cargo::warning=skipping {}: failed to parse",
-                    path.display()
-                );
-                continue;
-            };
+            let contents = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            let mut lexer = Lexer::new(&contents);
+            lexer.allow_confusing_unicode(true);
+            let buf = ParseBuffer::new_with_lexer(lexer)
+                .unwrap_or_else(|error| panic!("failed to lex {}: {error}", path.display()));
+            let wast = wast::parser::parse::<Wast>(&buf)
+                .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()));
 
             let mut module_idx: i32 = -1;
             let mut modules = Vec::new();
-            // Track (register ...) directives: maps registered name -> module
-            // index
             let mut registered: Vec<(String, i32)> = Vec::new();
+            let mut current_module_name = None;
+            let mut unsupported_script_state = None;
             let mut malformed_idx: u32 = 0;
+            let mut invalid_idx: u32 = 0;
             let mut unlinkable_idx: u32 = 0;
             let mut trap_module_idx: u32 = 0;
 
             for directive in wast.directives {
+                let (line, column) = directive.span().linecol_in(&contents);
+                let directive_location = format!(
+                    "{}:{}:{}",
+                    path.display(),
+                    line.saturating_add(1),
+                    column.saturating_add(1)
+                );
+                let is_assertion = is_assertion_directive(&directive);
+                report.set_location(directive_location.clone(), is_assertion);
+
+                if let Some(reason) = unsupported_file_reason {
+                    report.skip(reason);
+                    continue;
+                }
+
+                if let Some(reason) = unsupported_script_state {
+                    report.skip(reason);
+                    continue;
+                }
+
                 match directive {
                     WastDirective::Module(mut wat) => {
                         module_idx += 1;
-                        if let Ok(bytes) = wat.encode() {
-                            let wasm_path =
-                                wasm_dir.join(format!("{}_{}.wasm", safe_name, module_idx));
-                            fs::write(&wasm_path, bytes).unwrap();
-                        }
-                        modules.push((module_idx, Vec::new()));
+                        current_module_name = quote_wat_id(&wat);
+
+                        let bytes = wat.encode().unwrap_or_else(|error| {
+                            panic!("failed to encode {}: {error}", path.display())
+                        });
+                        let wasm_path = wasm_dir.join(format!("{}_{}.wasm", safe_name, module_idx));
+                        fs::write(&wasm_path, bytes).unwrap();
+
+                        modules.push((
+                            module_idx,
+                            vec![GeneratedStep::directive(
+                                String::new(),
+                                directive_location.clone(),
+                            )],
+                        ));
                     }
 
-                    WastDirective::Register { name, .. } => {
-                        if module_idx >= 0 {
-                            registered.push((name.to_string(), module_idx));
+                    WastDirective::ModuleDefinition(_) | WastDirective::ModuleInstance { .. } => {
+                        let reason = SkipReason::UnsupportedModuleInstances;
+                        report.skip(reason);
+                        unsupported_script_state =
+                            Some(SkipReason::DependentOnUnsupportedScriptState);
+                    }
+
+                    WastDirective::Register { name, module, .. } => {
+                        if module_idx < 0 {
+                            report.skip(SkipReason::NoCurrentModule);
+                            continue;
                         }
+
+                        if module
+                            .is_some_and(|id| current_module_name.as_deref() != Some(id.name()))
+                        {
+                            let reason = SkipReason::NonCurrentRegisterTarget;
+                            report.skip(reason);
+                            unsupported_script_state =
+                                Some(SkipReason::DependentOnUnsupportedScriptState);
+                            continue;
+                        }
+
+                        registered.push((name.to_string(), module_idx));
                     }
 
                     WastDirective::AssertReturn { exec, results, .. } => {
                         if module_idx < 0 {
-                            continue;
-                        }
-                        let WastExecute::Invoke(ref invoke) = exec else {
-                            continue;
-                        };
-                        if invoke.module.is_some() {
+                            report.skip(SkipReason::NoCurrentModule);
                             continue;
                         }
 
-                        let Some(args_code) = render_args(&invoke.args) else {
-                            continue;
+                        let invoke = match &exec {
+                            WastExecute::Invoke(invoke) => invoke,
+                            WastExecute::Get { .. } => {
+                                report.skip(SkipReason::GlobalGet);
+                                continue;
+                            }
+                            WastExecute::Wat(_) => {
+                                panic!("assert_return with a module execution is unclassified")
+                            }
                         };
-                        let Some(expected_code) = render_expected(&results) else {
+
+                        if !targets_current_module(invoke.module.as_ref(), &current_module_name) {
+                            let reason = SkipReason::NamedModuleInvocation;
+                            report.skip(reason);
+                            unsupported_script_state =
+                                Some(SkipReason::DependentOnUnsupportedScriptState);
                             continue;
+                        }
+
+                        let args_code = match render_args(&invoke.args) {
+                            Ok(code) => code,
+                            Err(reason) => {
+                                report.skip(reason);
+                                continue;
+                            }
+                        };
+                        let expected_code = match render_expected(&results) {
+                            Ok(code) => code,
+                            Err(reason) => {
+                                report.skip(reason);
+                                continue;
+                            }
                         };
 
                         let steps = &mut modules.last_mut().unwrap().1;
                         let step_idx = steps.len();
-                        steps.push(format!(
-                            "    spec_step_assert_return(&mut store, instance, \"{}\", &[{}], &[{}], {}, &mut failures);",
+                        steps.push(GeneratedStep::assertion(format!(
+                            "        spec_step_assert_return(&mut store, _instance, {:?}, &[{}], &[{}], {}, _case);",
                             invoke.name, args_code, expected_code, step_idx
-                        ));
+                        ), directive_location.clone()));
+                        report.schedule_assertion();
                     }
 
                     WastDirective::AssertTrap { exec, .. } => match exec {
                         WastExecute::Invoke(ref invoke) => {
                             if module_idx < 0 {
-                                continue;
-                            }
-                            if invoke.module.is_some() {
+                                report.skip(SkipReason::NoCurrentModule);
                                 continue;
                             }
 
-                            let Some(args_code) = render_args(&invoke.args) else {
+                            if !targets_current_module(invoke.module.as_ref(), &current_module_name)
+                            {
+                                let reason = SkipReason::NamedModuleInvocation;
+                                report.skip(reason);
+                                unsupported_script_state =
+                                    Some(SkipReason::DependentOnUnsupportedScriptState);
                                 continue;
+                            }
+
+                            let args_code = match render_args(&invoke.args) {
+                                Ok(code) => code,
+                                Err(reason) => {
+                                    report.skip(reason);
+                                    continue;
+                                }
                             };
 
                             let steps = &mut modules.last_mut().unwrap().1;
                             let step_idx = steps.len();
-                            steps.push(format!(
-                                    "    spec_step_assert_trap(&mut store, instance, \"{}\", &[{}], {}, &mut failures);",
+                            steps.push(GeneratedStep::assertion(format!(
+                                    "        spec_step_assert_trap(&mut store, _instance, {:?}, &[{}], {}, _case);",
                                     invoke.name, args_code, step_idx
-                                ));
+                                ), directive_location.clone()));
+                            report.schedule_assertion();
                         }
                         WastExecute::Wat(mut wat) => {
-                            let Ok(bytes) = wat.encode() else {
-                                trap_module_idx += 1;
+                            if !registered.is_empty() {
+                                report.skip(SkipReason::RegisteredModuleInstantiation);
                                 continue;
-                            };
+                            }
+
+                            let bytes = wat.encode().unwrap_or_else(|error| {
+                                panic!("failed to encode {}: {error}", path.display())
+                            });
                             let wasm_path = wasm_dir.join(format!(
                                 "trap_module_{}_{}.wasm",
                                 safe_name, trap_module_idx
@@ -228,96 +507,165 @@ mod core_tests {
                                 format!("trap_module_{}_{}", safe_name, trap_module_idx);
                             all_tests.push_str(&format!(
                                     concat!(
-                                        "#[test]\n",
-                                        "fn {test_name}() {{\n",
-                                        "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/trap_module_{file}_{idx}.wasm\"));\n",
-                                        "    let module = Module::try_new(wasm_bytes).unwrap();\n",
-                                        "    let mut store = Store::new();\n",
-                                        "    let imports = setup_spectest_imports(&mut store, &module);\n",
-                                        "    let result = store.instantiate(&module, imports);\n",
-                                        "    assert!(result.is_err(), \"expected module instantiation to trap, but it succeeded\");\n",
+                                        "fn {test_name}(report: &mut CoreTestReport) {{\n",
+                                        "    report.run_case(\"{test_name}\", |case| {{\n",
+                                        "        let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/trap_module_{file}_{idx}.wasm\"));\n",
+                                        "        let module = Module::try_new(wasm_bytes).unwrap();\n",
+                                        "        let mut store = Store::new();\n",
+                                        "        let imports = try_resolve_imports_with_registered(&mut store, &module, &[]).unwrap();\n",
+                                        "        let result = store.instantiate(&module, imports);\n",
+                                        "        case.check(matches!(result, Err(gabagool::Error::Trap(_))), \"expected module instantiation to trap, but it did not\");\n",
+                                        "    }});\n",
                                         "}}\n",
                                     ),
                                     test_name = test_name,
                                     file = safe_name,
                                     idx = trap_module_idx,
                                 ));
+                            test_calls.push_str(&format!("    {test_name}(&mut report);\n"));
                             trap_module_idx += 1;
+                            report.schedule_assertion();
                         }
-                        _ => {}
+                        WastExecute::Get { .. } => {
+                            report.skip(SkipReason::GlobalGet);
+                        }
                     },
 
                     WastDirective::AssertExhaustion {
                         call: ref invoke, ..
                     } => {
                         if module_idx < 0 {
-                            continue;
-                        }
-                        if invoke.module.is_some() {
+                            report.skip(SkipReason::NoCurrentModule);
                             continue;
                         }
 
-                        let Some(args_code) = render_args(&invoke.args) else {
+                        if !targets_current_module(invoke.module.as_ref(), &current_module_name) {
+                            let reason = SkipReason::NamedModuleInvocation;
+                            report.skip(reason);
+                            unsupported_script_state =
+                                Some(SkipReason::DependentOnUnsupportedScriptState);
                             continue;
+                        }
+
+                        let args_code = match render_args(&invoke.args) {
+                            Ok(code) => code,
+                            Err(reason) => {
+                                report.skip(reason);
+                                continue;
+                            }
                         };
 
                         let steps = &mut modules.last_mut().unwrap().1;
                         let step_idx = steps.len();
-                        steps.push(format!(
-                            "    spec_step_assert_trap(&mut store, instance, \"{}\", &[{}], {}, &mut failures);",
+                        steps.push(GeneratedStep::assertion(format!(
+                            "        spec_step_assert_exhaustion(&mut store, _instance, {:?}, &[{}], {}, _case);",
                             invoke.name, args_code, step_idx
-                        ));
+                        ), directive_location.clone()));
+                        report.schedule_assertion();
                     }
 
                     WastDirective::Invoke(ref invoke) => {
                         if module_idx < 0 {
-                            continue;
-                        }
-                        if invoke.module.is_some() {
+                            report.skip(SkipReason::NoCurrentModule);
                             continue;
                         }
 
-                        let Some(args_code) = render_args(&invoke.args) else {
+                        if !targets_current_module(invoke.module.as_ref(), &current_module_name) {
+                            let reason = SkipReason::NamedModuleInvocation;
+                            report.skip(reason);
+                            unsupported_script_state =
+                                Some(SkipReason::DependentOnUnsupportedScriptState);
                             continue;
+                        }
+
+                        let args_code = match render_args(&invoke.args) {
+                            Ok(code) => code,
+                            Err(reason) => {
+                                report.skip(reason);
+                                continue;
+                            }
                         };
 
                         let steps = &mut modules.last_mut().unwrap().1;
-                        steps.push(format!(
-                            "    spec_step_invoke(&mut store, instance, \"{}\", &[{}]);",
-                            invoke.name, args_code
+                        steps.push(GeneratedStep::directive(
+                            format!(
+                                "        spec_step_invoke(&mut store, _instance, {:?}, &[{}]);",
+                                invoke.name, args_code
+                            ),
+                            directive_location.clone(),
                         ));
                     }
 
                     WastDirective::AssertMalformed { mut module, .. } => {
-                        let Ok(bytes) = module.encode() else {
+                        if matches!(&module, QuoteWat::QuoteModule(..)) {
+                            report.skip(SkipReason::UnsupportedTextFormat);
                             malformed_idx += 1;
                             continue;
-                        };
+                        }
+
+                        let bytes = module.encode().unwrap_or_else(|error| {
+                            panic!("failed to encode {}: {error}", path.display())
+                        });
                         let wasm_path = wasm_dir
                             .join(format!("malformed_{}_{}.wasm", safe_name, malformed_idx));
                         fs::write(&wasm_path, bytes).unwrap();
                         let test_name = format!("malformed_{}_{}", safe_name, malformed_idx);
                         all_tests.push_str(&format!(
                             concat!(
-                                "#[test]\n",
-                                "fn {test_name}() {{\n",
-                                "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/malformed_{file}_{idx}.wasm\"));\n",
-                                "    let result = Parser::new(wasm_bytes).parse();\n",
-                                "    assert!(result.is_err(), \"expected malformed module to fail parsing, but it succeeded\");\n",
+                                "fn {test_name}(report: &mut CoreTestReport) {{\n",
+                                "    report.run_case(\"{test_name}\", |case| {{\n",
+                                "        let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/malformed_{file}_{idx}.wasm\"));\n",
+                                "        let result = Parser::new(wasm_bytes).parse();\n",
+                                "        case.check(result.is_err(), \"expected malformed module to fail parsing, but it succeeded\");\n",
+                                "    }});\n",
                                 "}}\n",
                             ),
                             test_name = test_name,
                             file = safe_name,
                             idx = malformed_idx,
                         ));
+                        test_calls.push_str(&format!("    {test_name}(&mut report);\n"));
                         malformed_idx += 1;
+                        report.schedule_assertion();
+                    }
+
+                    WastDirective::AssertInvalid { mut module, .. } => {
+                        if matches!(&module, QuoteWat::QuoteModule(..)) {
+                            report.skip(SkipReason::UnsupportedTextFormat);
+                            invalid_idx += 1;
+                            continue;
+                        }
+
+                        let bytes = module.encode().unwrap_or_else(|error| {
+                            panic!("failed to encode {}: {error}", path.display())
+                        });
+                        let wasm_path =
+                            wasm_dir.join(format!("invalid_{}_{}.wasm", safe_name, invalid_idx));
+                        fs::write(&wasm_path, bytes).unwrap();
+                        let test_name = format!("invalid_{}_{}", safe_name, invalid_idx);
+                        all_tests.push_str(&format!(
+                            concat!(
+                                "fn {test_name}(report: &mut CoreTestReport) {{\n",
+                                "    report.run_case(\"{test_name}\", |case| {{\n",
+                                "        let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/invalid_{file}_{idx}.wasm\"));\n",
+                                "        let result = Module::try_new(wasm_bytes);\n",
+                                "        case.check(result.is_err(), \"expected invalid module to fail validation, but it succeeded\");\n",
+                                "    }});\n",
+                                "}}\n",
+                            ),
+                            test_name = test_name,
+                            file = safe_name,
+                            idx = invalid_idx,
+                        ));
+                        test_calls.push_str(&format!("    {test_name}(&mut report);\n"));
+                        invalid_idx += 1;
+                        report.schedule_assertion();
                     }
 
                     WastDirective::AssertUnlinkable { mut module, .. } => {
-                        let Ok(bytes) = module.encode() else {
-                            unlinkable_idx += 1;
-                            continue;
-                        };
+                        let bytes = module.encode().unwrap_or_else(|error| {
+                            panic!("failed to encode {}: {error}", path.display())
+                        });
                         let wasm_path = wasm_dir
                             .join(format!("unlinkable_{}_{}.wasm", safe_name, unlinkable_idx));
                         fs::write(&wasm_path, bytes).unwrap();
@@ -339,7 +687,7 @@ mod core_tests {
                                 concat!(
                                     "    let prereq_wasm_{pidx}: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{pidx}.wasm\"));\n",
                                     "    let prereq_module_{pidx} = Module::try_new(prereq_wasm_{pidx}).unwrap();\n",
-                                    "    let prereq_imports_{pidx} = setup_spectest_imports(&mut store, &prereq_module_{pidx});\n",
+                                    "    let prereq_imports_{pidx} = try_resolve_imports_with_registered(&mut store, &prereq_module_{pidx}, &[]).unwrap();\n",
                                     "    let prereq_instance_{pidx} = store.instantiate(&prereq_module_{pidx}, prereq_imports_{pidx}).unwrap();\n",
                                     "    let prereq_exports_{pidx}: Vec<ExportInstance> = store.exports(prereq_instance_{pidx}).to_vec();\n",
                                 ),
@@ -354,26 +702,27 @@ mod core_tests {
                             );
                             for (name, dep_idx) in &prereq_registered {
                                 setup.push_str(&format!(
-                                    "(\"{}\", &prereq_exports_{}), ",
+                                    "({:?}, &prereq_exports_{}), ",
                                     name, dep_idx
                                 ));
                             }
                             setup.push_str("];\n");
-                            setup.push_str("    let resolve_result = try_resolve_imports_with_registered(&module, &registered_exports);\n");
+                            setup.push_str("    let resolve_result = try_resolve_imports_with_registered(&mut store, &module, &registered_exports);\n");
                         } else {
-                            setup.push_str("    let resolve_result = try_resolve_spectest_imports(&mut store, &module);\n");
+                            setup.push_str("    let resolve_result = try_resolve_imports_with_registered(&mut store, &module, &[]);\n");
                         }
 
                         all_tests.push_str(&format!(
                             concat!(
-                                "#[test]\n",
-                                "fn {test_name}() {{\n",
-                                "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/unlinkable_{file}_{idx}.wasm\"));\n",
-                                "    let module = Module::try_new(wasm_bytes).unwrap();\n",
-                                "    let mut store = Store::new();\n",
+                                "fn {test_name}(report: &mut CoreTestReport) {{\n",
+                                "    report.run_case(\"{test_name}\", |case| {{\n",
+                                "        let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/unlinkable_{file}_{idx}.wasm\"));\n",
+                                "        let module = Module::try_new(wasm_bytes).unwrap();\n",
+                                "        let mut store = Store::new();\n",
                                 "{setup}",
-                                "    let result = resolve_result.and_then(|imports| store.instantiate(&module, imports));\n",
-                                "    assert!(result.is_err(), \"expected unlinkable module to fail instantiation, but it succeeded\");\n",
+                                "        let result = resolve_result.and_then(|imports| store.instantiate(&module, imports));\n",
+                                "        case.check(matches!(result, Err(gabagool::Error::Instantiation(_))), \"expected an unlinkable-module error, but did not get one\");\n",
+                                "    }});\n",
                                 "}}\n",
                             ),
                             test_name = test_name,
@@ -381,34 +730,62 @@ mod core_tests {
                             idx = unlinkable_idx,
                             setup = setup,
                         ));
+                        test_calls.push_str(&format!("    {test_name}(&mut report);\n"));
                         unlinkable_idx += 1;
+                        report.schedule_assertion();
                     }
 
-                    WastDirective::AssertException { exec, .. } => {
-                        if let WastExecute::Invoke(ref invoke) = exec {
-                            if module_idx < 0 || invoke.module.is_some() {
+                    WastDirective::AssertException { exec, .. } => match exec {
+                        WastExecute::Invoke(ref invoke) => {
+                            if module_idx < 0 {
+                                report.skip(SkipReason::NoCurrentModule);
                                 continue;
                             }
 
-                            let Some(args_code) = render_args(&invoke.args) else {
+                            if !targets_current_module(invoke.module.as_ref(), &current_module_name)
+                            {
+                                let reason = SkipReason::NamedModuleInvocation;
+                                report.skip(reason);
+                                unsupported_script_state =
+                                    Some(SkipReason::DependentOnUnsupportedScriptState);
                                 continue;
+                            }
+
+                            let args_code = match render_args(&invoke.args) {
+                                Ok(code) => code,
+                                Err(reason) => {
+                                    report.skip(reason);
+                                    continue;
+                                }
                             };
 
                             let steps = &mut modules.last_mut().unwrap().1;
                             let step_idx = steps.len();
-                            steps.push(format!(
-                                "    spec_step_assert_exception(&mut store, instance, \"{}\", &[{}], {}, &mut failures);",
+                            steps.push(GeneratedStep::assertion(format!(
+                                "        spec_step_assert_exception(&mut store, _instance, {:?}, &[{}], {}, _case);",
                                 invoke.name, args_code, step_idx
-                            ));
+                            ), directive_location.clone()));
+                            report.schedule_assertion();
                         }
+                        WastExecute::Get { .. } => {
+                            report.skip(SkipReason::GlobalGet);
+                        }
+                        WastExecute::Wat(_) => {
+                            panic!("assert_exception with a module execution is unclassified")
+                        }
+                    },
+
+                    WastDirective::AssertSuspension { .. } => {
+                        report.skip(SkipReason::Suspension);
                     }
 
-                    _ => {}
+                    WastDirective::Thread(_) | WastDirective::Wait { .. } => {
+                        report.skip(SkipReason::Threads);
+                    }
                 }
             }
 
-            // Build a map: module_idx -> list of registered modules that
-            // precede it
+            // build a map from each module to the registrations that precede it
             let mut registered_before: std::collections::BTreeMap<i32, Vec<(String, i32)>> =
                 std::collections::BTreeMap::new();
             for &(midx, ref _steps) in &modules {
@@ -423,19 +800,25 @@ mod core_tests {
             }
 
             for (midx, steps) in &modules {
-                if steps.is_empty() {
+                let test_name = format!("{}_{}", safe_name, midx);
+                if let Some(reason) = unsupported_feature(&test_name) {
+                    report.ignore_scheduled(reason, steps);
                     continue;
                 }
-                let test_name = format!("{}_{}", safe_name, midx);
-                let steps_code = steps.join("\n");
 
-                // Generate prerequisite setup code for registered modules
+                let steps_code = steps
+                    .iter()
+                    .map(|step| step.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // generate prerequisite setup code for registered modules
                 let deps = registered_before.get(midx);
                 let has_deps = deps.is_some_and(|d| !d.is_empty());
 
                 let setup_code = if has_deps {
                     let deps = deps.unwrap();
-                    // Collect unique prerequisite module indices (in order)
+                    // collect unique prerequisite module indices in order
                     let mut prereq_indices: Vec<i32> = Vec::new();
                     for (_, dep_idx) in deps {
                         if !prereq_indices.contains(dep_idx) {
@@ -445,13 +828,13 @@ mod core_tests {
                     prereq_indices.sort();
 
                     let mut setup = String::new();
-                    // Instantiate each prerequisite module
+                    // instantiate each prerequisite module
                     for pidx in &prereq_indices {
                         setup.push_str(&format!(
                             concat!(
                                 "    let prereq_wasm_{pidx}: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{pidx}.wasm\"));\n",
                                 "    let prereq_module_{pidx} = Module::try_new(prereq_wasm_{pidx}).unwrap();\n",
-                                "    let prereq_imports_{pidx} = setup_spectest_imports(&mut store, &prereq_module_{pidx});\n",
+                                "    let prereq_imports_{pidx} = try_resolve_imports_with_registered(&mut store, &prereq_module_{pidx}, &[]).unwrap();\n",
                                 "    let prereq_instance_{pidx} = store.instantiate(&prereq_module_{pidx}, prereq_imports_{pidx}).unwrap();\n",
                                 "    let prereq_exports_{pidx}: Vec<ExportInstance> = store.exports(prereq_instance_{pidx}).to_vec();\n",
                             ),
@@ -460,75 +843,210 @@ mod core_tests {
                         ));
                     }
 
-                    // Build the registered_exports vec
+                    // build the registered exports
                     setup.push_str(
                         "    let registered_exports: Vec<(&str, &[ExportInstance])> = vec![",
                     );
                     for (name, dep_idx) in deps {
-                        setup.push_str(&format!("(\"{}\", &prereq_exports_{}), ", name, dep_idx));
+                        setup.push_str(&format!("({:?}, &prereq_exports_{}), ", name, dep_idx));
                     }
                     setup.push_str("];\n");
 
-                    // Resolve imports using registered modules
-                    setup.push_str("    let imports = resolve_imports_with_registered(&mut store, &module, &registered_exports);\n");
+                    // resolve imports using registered modules
+                    setup.push_str("    let imports = try_resolve_imports_with_registered(&mut store, &module, &registered_exports).unwrap();\n");
                     setup
                 } else {
-                    "    let imports = setup_spectest_imports(&mut store, &module);\n".to_string()
+                    "    let imports = try_resolve_imports_with_registered(&mut store, &module, &[]).unwrap();\n".to_string()
                 };
 
-                let uses_failures = steps.iter().any(|s| s.contains("failures"));
-
-                if uses_failures {
-                    all_tests.push_str(&format!(
-                        concat!(
-                            "#[test]\n",
-                            "fn {test_name}() {{\n",
-                            "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
-                            "    let module = Module::try_new(wasm_bytes).unwrap();\n",
-                            "    let mut store = Store::new();\n",
-                            "{setup}",
-                            "    let instance = store.instantiate(&module, imports).unwrap();\n",
-                            "    let mut failures = Vec::new();\n",
-                            "{steps}\n",
-                            "    if !failures.is_empty() {{\n",
-                            "        panic!(\"{{}} assertion(s) failed in {test_name}:\\n{{}}\", failures.len(), failures.join(\"\\n\"));\n",
-                            "    }}\n",
-                            "}}\n",
-                        ),
-                        test_name = test_name,
-                        file = safe_name,
-                        midx = midx,
-                        setup = setup_code,
-                        steps = steps_code,
-                    ));
-                } else {
-                    all_tests.push_str(&format!(
-                        concat!(
-                            "#[test]\n",
-                            "fn {test_name}() {{\n",
-                            "    let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
-                            "    let module = Module::try_new(wasm_bytes).unwrap();\n",
-                            "    let mut store = Store::new();\n",
-                            "{setup}",
-                            "    let instance = store.instantiate(&module, imports).unwrap();\n",
-                            "{steps}\n",
-                            "}}\n",
-                        ),
-                        test_name = test_name,
-                        file = safe_name,
-                        midx = midx,
-                        setup = setup_code,
-                        steps = steps_code,
-                    ));
-                }
+                all_tests.push_str(&format!(
+                    concat!(
+                        "fn {test_name}(report: &mut CoreTestReport) {{\n",
+                        "    report.run_case(\"{test_name}\", |_case| {{\n",
+                        "        let wasm_bytes: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/wasm/{file}_{midx}.wasm\"));\n",
+                        "        let module = Module::try_new(wasm_bytes).unwrap();\n",
+                        "        let mut store = Store::new();\n",
+                        "{setup}",
+                        "        let _instance = store.instantiate(&module, imports).unwrap();\n",
+                        "{steps}\n",
+                        "    }});\n",
+                        "}}\n",
+                    ),
+                    test_name = test_name,
+                    file = safe_name,
+                    midx = midx,
+                    setup = setup_code,
+                    steps = steps_code,
+                ));
+                test_calls.push_str(&format!("    {test_name}(&mut report);\n"));
             }
         }
+
+        let skipped = report.skipped_assertions.values().sum::<usize>();
+        let skip_reasons = SkipReason::ALL
+            .iter()
+            .filter_map(|reason| {
+                let assertions = report
+                    .skipped_assertions
+                    .get(reason)
+                    .copied()
+                    .unwrap_or_default();
+                let directives = report
+                    .skipped_directives
+                    .iter()
+                    .filter(|(_, skipped_reason, _)| skipped_reason == reason)
+                    .count();
+                if assertions == 0
+                    && directives == 0
+                    && !matches!(
+                        reason,
+                        SkipReason::UnsupportedGcInstruction
+                            | SkipReason::UnsupportedSimdInstruction
+                            | SkipReason::Threads
+                            | SkipReason::Suspension
+                    )
+                {
+                    return None;
+                }
+
+                Some(format!(
+                    "({:?}, {assertions}, {directives})",
+                    reason.description()
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let skip_manifest = report
+            .skipped_directives
+            .iter()
+            .map(|(location, reason, is_assertion)| {
+                let kind = if *is_assertion {
+                    "assertion"
+                } else {
+                    "directive"
+                };
+                format!("{location}: {kind}: {}", reason.description())
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let skip_manifest_path = Path::new(&out_dir).join("core_test_skips.txt");
+        fs::write(&skip_manifest_path, skip_manifest).unwrap();
+        all_tests.push_str(&format!(
+            concat!(
+                "fn main() {{\n",
+                "    std::panic::set_hook(Box::new(|_| {{}}));\n",
+                "    let mut report = CoreTestReport::new({skipped}, vec![{skip_reasons}]);\n",
+                "{test_calls}",
+                "    println!(\"core spec skip manifest: {{}}\", concat!(env!(\"OUT_DIR\"), \"/core_test_skips.txt\"));\n",
+                "    report.finish();\n",
+                "}}\n",
+            ),
+            skipped = skipped,
+            skip_reasons = skip_reasons,
+            test_calls = test_calls,
+        ));
 
         fs::write(
             Path::new(&out_dir).join("core_tests_generated.rs"),
             all_tests,
         )
         .unwrap();
+
+        report.report();
+        println!(
+            "cargo::warning=core spec runner: skip manifest written to {}",
+            skip_manifest_path.display()
+        );
+    }
+
+    fn quote_wat_id(wat: &QuoteWat<'_>) -> Option<String> {
+        match wat {
+            QuoteWat::Wat(Wat::Module(module)) => module.id.as_ref().map(|id| id.name().to_owned()),
+            QuoteWat::Wat(Wat::Component(_))
+            | QuoteWat::QuoteModule(..)
+            | QuoteWat::QuoteComponent(..) => None,
+        }
+    }
+
+    fn targets_current_module(
+        target: Option<&wast::token::Id<'_>>,
+        current: &Option<String>,
+    ) -> bool {
+        target.is_none_or(|id| current.as_deref() == Some(id.name()))
+    }
+
+    fn unsupported_feature(test_name: &str) -> Option<SkipReason> {
+        const GC_PREFIXES: &[&str] = &[
+            "array_",
+            "br_on_cast_",
+            "br_on_cast_fail_",
+            "extern_",
+            "i31_",
+            "ref_cast_",
+            "ref_eq_",
+            "ref_test_",
+            "struct_",
+        ];
+        const SIMD_PREFIXES: &[&str] = &[
+            "simd_address_",
+            "simd_bit_shift_",
+            "simd_bitwise_",
+            "simd_f32x4_cmp_",
+            "simd_f64x2_cmp_",
+            "simd_i16x8_cmp_",
+            "simd_i32x4_cmp_",
+            "simd_i8x16_cmp_",
+            "simd_load_",
+            "simd_load_extend_",
+            "simd_load_splat_",
+            "simd_load_zero_",
+            "simd_splat_",
+            "simd_store_",
+        ];
+
+        if GC_PREFIXES
+            .iter()
+            .any(|prefix| test_name.starts_with(prefix))
+            || matches!(
+                test_name,
+                "type_subtyping_14"
+                    | "type_subtyping_15"
+                    | "type_subtyping_17"
+                    | "type_subtyping_18"
+                    | "type_subtyping_19"
+                    | "type_subtyping_20"
+                    | "type_subtyping_21"
+                    | "type_subtyping_22"
+                    | "type_subtyping_23"
+                    | "type_subtyping_24"
+                    | "type_subtyping_25"
+            )
+        {
+            return Some(SkipReason::UnsupportedGcInstruction);
+        }
+
+        if SIMD_PREFIXES
+            .iter()
+            .any(|prefix| test_name.starts_with(prefix))
+        {
+            return Some(SkipReason::UnsupportedSimdInstruction);
+        }
+
+        None
+    }
+
+    const fn is_assertion_directive(directive: &WastDirective<'_>) -> bool {
+        matches!(
+            directive,
+            WastDirective::AssertMalformed { .. }
+                | WastDirective::AssertInvalid { .. }
+                | WastDirective::AssertUnlinkable { .. }
+                | WastDirective::AssertTrap { .. }
+                | WastDirective::AssertReturn { .. }
+                | WastDirective::AssertExhaustion { .. }
+                | WastDirective::AssertException { .. }
+                | WastDirective::AssertSuspension { .. }
+        )
     }
 
     fn render_i32(v: i32) -> String {
@@ -547,50 +1065,52 @@ mod core_tests {
         }
     }
 
-    fn render_args(args: &[WastArg]) -> Option<String> {
-        let rendered: Option<Vec<String>> = args
+    fn render_args(args: &[WastArg]) -> Result<String, SkipReason> {
+        let rendered = args
             .iter()
             .map(|arg| match arg {
                 WastArg::Core(WastArgCore::I32(v)) => {
-                    Some(format!("RawValue::from({})", render_i32(*v)))
+                    Ok(format!("RawValue::from({})", render_i32(*v)))
                 }
                 WastArg::Core(WastArgCore::I64(v)) => {
-                    Some(format!("RawValue::from({})", render_i64(*v)))
+                    Ok(format!("RawValue::from({})", render_i64(*v)))
                 }
                 WastArg::Core(WastArgCore::F32(v)) => {
-                    Some(format!("RawValue::from(f32::from_bits({}))", v.bits))
+                    Ok(format!("RawValue::from(f32::from_bits({}))", v.bits))
                 }
                 WastArg::Core(WastArgCore::F64(v)) => {
-                    Some(format!("RawValue::from(f64::from_bits({}))", v.bits))
+                    Ok(format!("RawValue::from(f64::from_bits({}))", v.bits))
                 }
                 WastArg::Core(WastArgCore::RefNull(_)) => {
-                    Some("RawValue::from_ref(Ref::Null)".to_string())
+                    Ok("RawValue::from_ref(Ref::Null)".to_string())
                 }
-                WastArg::Core(WastArgCore::RefExtern(n)) => Some(format!(
-                    "RawValue::from_ref(Ref::RefExtern({} as usize))",
+                WastArg::Core(WastArgCore::RefExtern(n)) => Ok(format!(
+                    "RawValue::from_ref(Ref::RefExtern(usize::try_from({}u32).unwrap()))",
                     n
                 )),
-                WastArg::Core(WastArgCore::RefHost(n)) => Some(format!(
-                    "RawValue::from_ref(Ref::RefExtern({} as usize))",
+                WastArg::Core(WastArgCore::RefHost(n)) => Ok(format!(
+                    "RawValue::from_ref(Ref::RefExtern(usize::try_from({}u32).unwrap()))",
                     n
                 )),
-                _ => None,
+                WastArg::Core(WastArgCore::V128(_)) => Err(SkipReason::UnsupportedSimdValue),
+                _ => panic!("unclassified core spec argument: {arg:?}"),
             })
-            .collect();
-        rendered.map(|v| v.join(", "))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rendered.join(", "))
     }
 
-    fn render_expected(results: &[WastRet]) -> Option<String> {
-        let rendered: Option<Vec<String>> = results
+    fn render_expected(results: &[WastRet]) -> Result<String, SkipReason> {
+        let rendered = results
             .iter()
             .map(|ret| match ret {
                 WastRet::Core(WastRetCore::I32(v)) => {
-                    Some(format!("ExpectedValue::I32({})", render_i32(*v)))
+                    Ok(format!("ExpectedValue::I32({})", render_i32(*v)))
                 }
                 WastRet::Core(WastRetCore::I64(v)) => {
-                    Some(format!("ExpectedValue::I64({})", render_i64(*v)))
+                    Ok(format!("ExpectedValue::I64({})", render_i64(*v)))
                 }
-                WastRet::Core(WastRetCore::F32(np)) => Some(match np {
+                WastRet::Core(WastRetCore::F32(np)) => Ok(match np {
                     NanPattern::CanonicalNan => {
                         "ExpectedValue::F32(NanPat::CanonicalNan)".to_string()
                     }
@@ -601,7 +1121,7 @@ mod core_tests {
                         format!("ExpectedValue::F32(NanPat::Value({}))", v.bits)
                     }
                 }),
-                WastRet::Core(WastRetCore::F64(np)) => Some(match np {
+                WastRet::Core(WastRetCore::F64(np)) => Ok(match np {
                     NanPattern::CanonicalNan => {
                         "ExpectedValue::F64(NanPat::CanonicalNan)".to_string()
                     }
@@ -613,36 +1133,40 @@ mod core_tests {
                     }
                 }),
                 WastRet::Core(WastRetCore::RefNull(_)) => {
-                    Some("ExpectedValue::Ref(ExpectedRef::Null)".to_string())
+                    Ok("ExpectedValue::Ref(ExpectedRef::Null)".to_string())
                 }
-                WastRet::Core(WastRetCore::RefExtern(Some(n))) => Some(format!(
+                WastRet::Core(WastRetCore::RefExtern(Some(n))) => Ok(format!(
                     "ExpectedValue::Ref(ExpectedRef::Extern(Some({})))",
                     n
                 )),
                 WastRet::Core(WastRetCore::RefExtern(None)) => {
-                    Some("ExpectedValue::Ref(ExpectedRef::Extern(None))".to_string())
+                    Ok("ExpectedValue::Ref(ExpectedRef::Extern(None))".to_string())
                 }
-                WastRet::Core(WastRetCore::RefHost(n)) => Some(format!(
+                WastRet::Core(WastRetCore::RefHost(n)) => Ok(format!(
                     "ExpectedValue::Ref(ExpectedRef::Extern(Some({})))",
                     n
                 )),
                 WastRet::Core(WastRetCore::RefFunc(_)) => {
-                    Some("ExpectedValue::Ref(ExpectedRef::Func)".to_string())
+                    Ok("ExpectedValue::Ref(ExpectedRef::Func)".to_string())
                 }
                 WastRet::Core(
                     WastRetCore::RefAny
                     | WastRetCore::RefEq
                     | WastRetCore::RefStruct
                     | WastRetCore::RefArray,
-                ) => Some("ExpectedValue::Ref(ExpectedRef::NonNull)".to_string()),
+                ) => Err(SkipReason::UnsupportedGcInstruction),
                 WastRet::Core(WastRetCore::RefI31 | WastRetCore::RefI31Shared) => {
-                    Some("ExpectedValue::Ref(ExpectedRef::I31)".to_string())
+                    Err(SkipReason::UnsupportedGcInstruction)
                 }
-                WastRet::Core(WastRetCore::Either(_)) => None,
-                _ => None,
+                WastRet::Core(WastRetCore::V128(_)) => Err(SkipReason::UnsupportedSimdValue),
+                WastRet::Core(WastRetCore::Either(_)) => {
+                    Err(SkipReason::UnsupportedExpectedAlternative)
+                }
+                _ => panic!("unclassified core spec expected value: {ret:?}"),
             })
-            .collect();
-        rendered.map(|v| v.join(", "))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rendered.join(", "))
     }
 }
 
