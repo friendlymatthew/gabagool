@@ -32,6 +32,12 @@ As a pure interpreter, it is safe to assume `gabagool` is spec compliant. `gabag
 uv run download-core-tests.py
 cargo t --features core-tests --test core_tests
 
+# compare against the committed CI baseline
+python3 check-core-tests.py
+
+# lock newly passing assertions and cases into the baseline
+python3 check-core-tests.py --update
+
 # run the component test suite
 # you need wasm-tools installed!
 cd tests/components && bash fetch_components.sh

@@ -29,6 +29,7 @@ struct CoreTestReport {
     skip_reasons: Vec<(&'static str, usize, usize)>,
     failures: Vec<String>,
     runner_errors: Vec<String>,
+    cases: Vec<(&'static str, &'static str)>,
 }
 
 impl CoreTestReport {
@@ -40,6 +41,7 @@ impl CoreTestReport {
             skip_reasons,
             failures: Vec::new(),
             runner_errors: Vec::new(),
+            cases: Vec::new(),
         }
     }
 
@@ -56,14 +58,15 @@ impl CoreTestReport {
             format!("{name}: {message}")
         });
 
-        let status = if runner_error.is_some() {
-            "RUNNER ERROR"
+        let (display_status, status) = if runner_error.is_some() {
+            ("RUNNER ERROR", "runner_error")
         } else if case_failed {
-            "FAILED"
+            ("FAILED", "failed")
         } else {
-            "ok"
+            ("ok", "ok")
         };
-        println!("test {name} ... {status}");
+        println!("test {name} ... {display_status}");
+        self.cases.push((name, status));
 
         self.executed += case.executed;
         self.failed += case.failures.len();
@@ -79,6 +82,10 @@ impl CoreTestReport {
     }
 
     fn finish(self) {
+        let passed = self
+            .executed
+            .checked_sub(self.failed)
+            .expect("failed assertions cannot exceed executed assertions");
         println!(
             "core spec assertions: {} executed, {} failed, {} skipped",
             self.executed, self.failed, self.skipped
@@ -101,6 +108,18 @@ impl CoreTestReport {
             .join("\n");
         let details_path = concat!(env!("OUT_DIR"), "/core_test_failures.txt");
         std::fs::write(details_path, details).unwrap();
+
+        let mut results = format!(
+            "passed_assertions\t{passed}\nexecuted_assertions\t{}\nfailed_assertions\t{}\nskipped_assertions\t{}\n",
+            self.executed, self.failed, self.skipped
+        );
+        for (name, status) in &self.cases {
+            results.push_str(&format!("case\t{status}\t{name}\n"));
+        }
+        let results_path = "target/core-test-results.tsv";
+        std::fs::create_dir_all("target").unwrap();
+        std::fs::write(results_path, results).unwrap();
+        println!("core spec CI results: {results_path}");
 
         if !self.failures.is_empty() || !self.runner_errors.is_empty() {
             eprintln!(

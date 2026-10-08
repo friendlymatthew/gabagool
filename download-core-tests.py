@@ -7,7 +7,7 @@ import tarfile
 import urllib.request
 
 REPO = "WebAssembly/spec"
-BRANCH = "main"
+REVISION = "9fb3a59c0c8bc4481cb87cf9e652d510998d6798"
 OUT = os.path.join(os.path.dirname(__file__), "tests", "spec")
 
 
@@ -20,13 +20,13 @@ def main():
 
     os.makedirs(out, exist_ok=True)
 
-    url = f"https://github.com/{REPO}/archive/refs/heads/{BRANCH}.tar.gz"
-    print(f"Downloading spec tests from github.com/{REPO} ({BRANCH})...")
+    url = f"https://github.com/{REPO}/archive/{REVISION}.tar.gz"
+    print(f"Downloading spec tests from github.com/{REPO} ({REVISION})...")
 
     with urllib.request.urlopen(url) as resp:
         data = io.BytesIO(resp.read())
 
-    prefix = f"spec-{BRANCH}/test/core/"
+    prefix = f"spec-{REVISION}/test/core/"
     count = 0
 
     with tarfile.open(fileobj=data, mode="r:gz") as tar:

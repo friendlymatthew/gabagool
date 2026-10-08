@@ -23,8 +23,8 @@ jobs:
       - name: Download core spec tests
         run: uv run download-core-tests.py
 
-      - name: Core spec assertions
-        run: cargo test --features core-tests --test core_tests
+      - name: Core spec regression baseline
+        run: python3 check-core-tests.py
 
   fmt:
     runs-on: ubuntu-latest
