@@ -20,8 +20,8 @@ pub use linker::*;
 pub use module::*;
 pub use runtime::{
     CallFrame, DataInstance, ElementInstance, ExecutionState, ExportInstance, ExternalValue,
-    FunctionInstance, GlobalInstance, GuestMemory, Instance, InstantiatedModule, MemoryInstance,
-    RawValue, Ref, Store, TableInstance, TagInstance,
+    FunctionInstance, GlobalInstance, GuestMemory, Instance, MemoryInstance, RawValue, Ref, Store,
+    TableInstance, TagInstance,
 };
 pub use snapshot::StoreSnapshot;
 

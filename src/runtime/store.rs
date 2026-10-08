@@ -225,7 +225,7 @@ pub struct CatchFrame {
 }
 
 /// Runtime state of an instantiated [`crate::Module`]
-pub struct InstantiatedModule {
+pub(crate) struct InstantiatedModule {
     pub code: Arc<ModuleCode>,
     pub function_addrs: Vec<usize>,
     pub table_addrs: Vec<usize>,
@@ -240,7 +240,7 @@ pub struct InstantiatedModule {
 }
 
 impl InstantiatedModule {
-    pub const fn new(code: Arc<ModuleCode>) -> Self {
+    const fn new(code: Arc<ModuleCode>) -> Self {
         Self {
             code,
             function_addrs: Vec::new(),
@@ -505,7 +505,7 @@ impl Store {
         addr
     }
 
-    pub fn allocate_module(
+    fn allocate_module(
         &mut self,
         module: &Module,
         instance_i: u16,

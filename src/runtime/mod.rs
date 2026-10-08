@@ -5,5 +5,6 @@ mod types;
 
 pub use memory::{GuestMemory, MemoryInstance};
 pub use stack::ValueStack;
-pub use store::{CallFrame, ExecutionState, Instance, InstantiatedModule, Store};
+pub(crate) use store::InstantiatedModule;
+pub use store::{CallFrame, ExecutionState, Instance, Store};
 pub use types::*;
