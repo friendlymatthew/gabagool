@@ -17,13 +17,21 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  core-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
       - name: Download core spec tests
         run: uv run download-core-tests.py
 
-      - name: Core spec regression baseline
+      - name: Check core spec regression baseline
         run: python3 check-core-tests.py
 
   fmt:
