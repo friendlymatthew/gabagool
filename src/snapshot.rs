@@ -1156,97 +1156,83 @@ impl Snapshot for FunctionInstance {
     }
 }
 
-impl Store {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.encode()
-    }
-
-    fn encode(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-
+impl Snapshot for Store {
+    fn encode(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(SNAPSHOT_MAGIC);
-        SNAPSHOT_VERSION.encode(&mut buf);
+        SNAPSHOT_VERSION.encode(buf);
 
         // encode the function type per entry
-        (self.functions.len() as u32).encode(&mut buf);
+        (self.functions.len() as u32).encode(buf);
         for fi in &self.functions {
-            fi.encode(&mut buf);
+            fi.encode(buf);
         }
 
         // tables
-        (self.tables.len() as u32).encode(&mut buf);
+        (self.tables.len() as u32).encode(buf);
         for table in &self.tables {
-            table.table_type.encode(&mut buf);
-            table.elem.encode(&mut buf);
+            table.table_type.encode(buf);
+            table.elem.encode(buf);
         }
 
         // memories
-        (self.memories.len() as u32).encode(&mut buf);
+        (self.memories.len() as u32).encode(buf);
         for mem in &self.memories {
-            mem.memory_type.encode(&mut buf);
-            (mem.data.len() as u64).encode(&mut buf);
+            mem.memory_type.encode(buf);
+            (mem.data.len() as u64).encode(buf);
             buf.extend_from_slice(mem.data.as_slice());
         }
 
         // globals
-        (self.globals.len() as u32).encode(&mut buf);
+        (self.globals.len() as u32).encode(buf);
         for g in &self.globals {
-            g.global_type.encode(&mut buf);
-            g.value.encode(&mut buf);
+            g.global_type.encode(buf);
+            g.value.encode(buf);
         }
 
         // tags
-        (self.tags.len() as u32).encode(&mut buf);
+        (self.tags.len() as u32).encode(buf);
         for t in &self.tags {
-            t.tag_type.encode(&mut buf);
+            t.tag_type.encode(buf);
         }
 
         // element segments
-        (self.element_segments.len() as u32).encode(&mut buf);
+        (self.element_segments.len() as u32).encode(buf);
         for es in &self.element_segments {
-            es.ref_type.encode(&mut buf);
-            es.elem.encode(&mut buf);
+            es.ref_type.encode(buf);
+            es.elem.encode(buf);
         }
 
         // data segments
-        (self.data_segments.len() as u32).encode(&mut buf);
+        (self.data_segments.len() as u32).encode(buf);
         for ds in &self.data_segments {
-            (ds.data.len() as u32).encode(&mut buf);
+            (ds.data.len() as u32).encode(buf);
             buf.extend_from_slice(&ds.data);
         }
 
-        self.instances.encode(&mut buf);
+        self.instances.encode(buf);
 
         // value stack
         let (stack_data, stack_cursor) = self.stack.snapshot_data();
-        (stack_data.len() as u32).encode(&mut buf);
-        encode_bulk(stack_data, &mut buf);
-        stack_cursor.encode(&mut buf);
+        (stack_data.len() as u32).encode(buf);
+        encode_bulk(stack_data, buf);
+        stack_cursor.encode(buf);
 
         // call stack
-        self.call_stack.encode(&mut buf);
+        self.call_stack.encode(buf);
 
         // fuel + pending_arity
-        self.fuel.encode(&mut buf);
-        self.pending_arity.encode(&mut buf);
-        self.pending_lifted.encode(&mut buf);
+        self.fuel.encode(buf);
+        self.pending_arity.encode(buf);
+        self.pending_lifted.encode(buf);
 
         // component instances
-        (self.component_instances.len() as u32).encode(&mut buf);
+        (self.component_instances.len() as u32).encode(buf);
         for ci in &self.component_instances {
-            ci.encode(&mut buf);
+            ci.encode(buf);
         }
-
-        buf
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self::decode(bytes)
-    }
-
-    fn decode(bytes: &[u8]) -> Self {
-        let buf = &mut &bytes[..];
-
+    fn decode(buf: &mut &[u8]) -> Self {
         let magic: [u8; 4] = buf[..4].try_into().unwrap();
         assert_eq!(&magic, SNAPSHOT_MAGIC, "invalid snapshot magic");
         *buf = &buf[4..];
@@ -1366,6 +1352,19 @@ impl Store {
             pending_lifted,
             component_instances,
         }
+    }
+}
+
+impl Store {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.encode(&mut out);
+
+        out
+    }
+
+    pub fn from_bytes(mut bytes: &[u8]) -> Self {
+        Self::decode(&mut bytes)
     }
 }
 
