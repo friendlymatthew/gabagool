@@ -121,7 +121,6 @@ pub struct GlobalInstance {
 #[derive(Debug)]
 pub struct ElementInstance {
     pub ref_type: RefType,
-    // code golf: does this really need to be a Vec?
     pub elem: Vec<Ref>,
 }
 
