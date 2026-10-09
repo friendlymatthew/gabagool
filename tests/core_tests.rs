@@ -1,213 +1,386 @@
 #![cfg(feature = "core-tests")]
+use std::collections::HashMap;
 
 use gabagool::{
-    parser::Parser, AddrType, ExportInstance, ExternalValue, FunctionInstance, FunctionType,
-    GlobalInstance, GlobalType, GuestMemory, ImportDescription, Instance, Limit, MemoryInstance,
-    MemoryType, Module, Mutability, RawValue, Ref, Store, ValueType,
+    parser::Parser, AddrType, ExternalValue, FunctionInstance, FunctionType, GlobalInstance,
+    GlobalType, GuestMemory, Instance, Limit, MemoryInstance, MemoryType, Module, Mutability,
+    RawValue, Ref, Store, ValueType,
 };
 
-#[derive(Default)]
-struct CaseReport {
-    executed: usize,
-    failures: Vec<String>,
+const DEPENDENT_SKIP: &str = "depends on earlier unsupported script state";
+
+struct ScriptContext {
+    store: Store,
+    current: Option<Instance>,
+    named: HashMap<String, Instance>,
+    registered: HashMap<String, Instance>,
+    spectest: HashMap<String, ExternalValue>,
 }
 
-impl CaseReport {
-    fn check(&mut self, passed: bool, failure: impl Into<String>) {
-        self.executed += 1;
-
-        if !passed {
-            self.failures.push(failure.into());
-        }
-    }
-}
-
-struct CoreTestReport {
-    filter: Option<String>,
-    exact: bool,
-    executed: usize,
-    failed: usize,
-    skipped: usize,
-    skip_reasons: Vec<(&'static str, usize, usize)>,
-    failures: Vec<String>,
-    runner_errors: Vec<String>,
-    cases: Vec<(&'static str, &'static str)>,
-}
-
-impl CoreTestReport {
-    fn new(mut skipped: usize, mut skip_reasons: Vec<(&'static str, usize, usize)>) -> Self {
-        let mut filter = None;
-        let mut exact = false;
-        for argument in std::env::args().skip(1) {
-            if argument == "--exact" {
-                exact = true;
-            } else if !argument.starts_with('-') && filter.is_none() {
-                filter = Some(argument);
-            }
-        }
-
-        if filter.is_some() {
-            skipped = 0;
-            skip_reasons.clear();
-        }
-
+impl ScriptContext {
+    fn new() -> Self {
         Self {
-            filter,
-            exact,
-            executed: 0,
-            failed: 0,
-            skipped,
-            skip_reasons,
-            failures: Vec::new(),
-            runner_errors: Vec::new(),
-            cases: Vec::new(),
+            store: Store::new(),
+            current: None,
+            named: HashMap::new(),
+            registered: HashMap::new(),
+            spectest: HashMap::new(),
         }
     }
 
-    fn run_case(&mut self, name: &'static str, run: impl FnOnce(&mut CaseReport)) {
-        if let Some(filter) = &self.filter {
-            let matches = if self.exact {
-                name == filter
-            } else {
-                name.contains(filter)
-            };
-            if !matches {
-                return;
-            }
+    fn instantiate_module(&mut self, bytes: &[u8], id: Option<&str>) -> Result<(), String> {
+        let instance = self.instantiate(bytes)?;
+        self.current = Some(instance);
+
+        if let Some(id) = id {
+            self.named.insert(id.to_string(), instance);
         }
 
-        let mut case = CaseReport::default();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut case)));
-        let case_failed = !case.failures.is_empty();
-        let runner_error = result.err().map(|payload| {
-            let message = payload
-                .downcast_ref::<&str>()
+        Ok(())
+    }
+
+    fn instantiate(&mut self, bytes: &[u8]) -> Result<Instance, String> {
+        let module = Module::try_new(bytes).map_err(|error| error.to_string())?;
+        let imports = self
+            .resolve_imports(&module)
+            .map_err(|error| error.to_string())?;
+
+        self.store
+            .instantiate(&module, imports)
+            .map_err(|error| error.to_string())
+    }
+
+    fn register(&mut self, name: &str, target: Option<&str>) -> Result<(), String> {
+        let instance = self.resolve_target(target)?;
+        self.registered.insert(name.to_string(), instance);
+
+        Ok(())
+    }
+
+    fn resolve_target(&self, target: Option<&str>) -> Result<Instance, String> {
+        match target {
+            Some(name) => self
+                .named
+                .get(name)
                 .copied()
-                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("non-string panic");
-            format!("{name}: {message}")
-        });
-
-        let (display_status, status) = if runner_error.is_some() {
-            ("RUNNER ERROR", "runner_error")
-        } else if case_failed {
-            ("FAILED", "failed")
-        } else {
-            ("ok", "ok")
-        };
-        println!("test {name} ... {display_status}");
-
-        if self.filter.is_some() {
-            for failure in &case.failures {
-                println!("  assertion failure: {failure}");
-            }
-            if let Some(error) = &runner_error {
-                println!("  runner error: {error}");
-            }
-        }
-
-        self.cases.push((name, status));
-
-        self.executed += case.executed;
-        self.failed += case.failures.len();
-        self.failures.extend(
-            case.failures
-                .into_iter()
-                .map(|failure| format!("{name}: {failure}")),
-        );
-
-        if let Some(error) = runner_error {
-            self.runner_errors.push(error);
+                .ok_or_else(|| format!("unknown module ${name}")),
+            None => self
+                .current
+                .ok_or_else(|| "directive has no current module".to_string()),
         }
     }
 
-    fn finish(self) {
-        if self.filter.is_none() {
-            println!(
-                "core spec skip manifest: {}",
-                concat!(env!("OUT_DIR"), "/core_test_skips.txt")
-            );
+    fn resolve_imports(&mut self, module: &Module) -> Result<Vec<ExternalValue>, gabagool::Error> {
+        let mut imports = Vec::with_capacity(module.import_declarations().len());
+
+        for import in module.import_declarations() {
+            if let Some(instance) = self.registered.get(&import.module).copied() {
+                let export = self
+                    .store
+                    .exports(instance)
+                    .iter()
+                    .find(|export| export.name == import.name)
+                    .ok_or_else(|| {
+                        gabagool::Error::Instantiation(format!(
+                            "unknown import {}.{}",
+                            import.module, import.name
+                        ))
+                    })?;
+
+                imports.push(export.value.clone());
+                continue;
+            }
+
+            if import.module == "spectest" {
+                let value = match self.spectest.get(&import.name) {
+                    Some(value) => value.clone(),
+                    None => {
+                        let value = resolve_spectest_export(&mut self.store, &import.name)?;
+                        self.spectest.insert(import.name.clone(), value.clone());
+                        value
+                    }
+                };
+                imports.push(value);
+                continue;
+            }
+
+            return Err(gabagool::Error::Instantiation(format!(
+                "unknown module {}",
+                import.module
+            )));
         }
 
-        if let Some(filter) = &self.filter {
-            let mode = if self.exact { "exact" } else { "substring" };
-            let runner_error_label = if self.runner_errors.len() == 1 {
-                "error"
-            } else {
-                "errors"
-            };
-            println!("core spec filter: {filter} ({mode})");
-            println!(
-                "core spec cases: {} run, {} runner {runner_error_label}",
-                self.cases.len(),
-                self.runner_errors.len()
-            );
+        Ok(imports)
+    }
+}
+
+enum AssertionStatus {
+    Passed,
+    Failed(String),
+    Skipped(&'static str),
+}
+
+struct AssertionRecord {
+    location: &'static str,
+    status: AssertionStatus,
+}
+
+struct ScriptRunner {
+    name: &'static str,
+    context: ScriptContext,
+    assertion_filter: Option<String>,
+    assertion_reached: bool,
+    assertions: Vec<AssertionRecord>,
+    directive_skips: Vec<(&'static str, &'static str)>,
+    runner_errors: Vec<String>,
+    blocked: Option<&'static str>,
+}
+
+impl ScriptRunner {
+    fn new(name: &'static str, assertion_filter: Option<String>) -> Self {
+        Self {
+            name,
+            context: ScriptContext::new(),
+            assertion_filter,
+            assertion_reached: false,
+            assertions: Vec::new(),
+            directive_skips: Vec::new(),
+            runner_errors: Vec::new(),
+            blocked: None,
+        }
+    }
+
+    fn directive(
+        &mut self,
+        location: &'static str,
+        run: impl FnOnce(&mut ScriptContext) -> Result<(), String>,
+    ) {
+        if self.assertion_reached {
+            return;
+        }
+
+        if self.blocked.is_some() {
+            if self.assertion_filter.is_none() {
+                self.directive_skips.push((location, DEPENDENT_SKIP));
+            }
+            return;
+        }
+
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut self.context))) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => self.runner_error(location, error),
+            Err(payload) => self.runner_error(location, panic_message(payload)),
+        }
+    }
+
+    fn assertion(
+        &mut self,
+        location: &'static str,
+        run: impl FnOnce(&mut ScriptContext) -> Result<(), String>,
+    ) {
+        if self.assertion_reached {
+            return;
+        }
+
+        let selected = self
+            .assertion_filter
+            .as_deref()
+            .is_none_or(|filter| filter == location);
+
+        if self.blocked.is_some() {
+            if self.assertion_filter.is_none() || selected {
+                self.assertions.push(AssertionRecord {
+                    location,
+                    status: AssertionStatus::Skipped(DEPENDENT_SKIP),
+                });
+            }
+
+            if self.assertion_filter.is_some() && selected {
+                self.assertion_reached = true;
+            }
+            return;
+        }
+
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut self.context)));
+        match result {
+            Ok(Ok(())) if selected => self.assertions.push(AssertionRecord {
+                location,
+                status: AssertionStatus::Passed,
+            }),
+            Ok(Err(error)) if selected => self.assertions.push(AssertionRecord {
+                location,
+                status: AssertionStatus::Failed(error),
+            }),
+            Ok(_) => {}
+            Err(payload) => {
+                if selected {
+                    self.assertions.push(AssertionRecord {
+                        location,
+                        status: AssertionStatus::Skipped(DEPENDENT_SKIP),
+                    });
+                }
+                self.runner_error(location, panic_message(payload));
+            }
+        }
+
+        if self.assertion_filter.is_some() && selected {
+            self.assertion_reached = true;
+        }
+    }
+
+    fn skip(
+        &mut self,
+        location: &'static str,
+        is_assertion: bool,
+        reason: &'static str,
+        blocks_script: bool,
+    ) {
+        if self.assertion_reached {
+            return;
+        }
+
+        if let Some(filter) = &self.assertion_filter {
+            if is_assertion && filter == location {
+                self.assertions.push(AssertionRecord {
+                    location,
+                    status: AssertionStatus::Skipped(reason),
+                });
+                self.assertion_reached = true;
+            }
+
+            if blocks_script && self.blocked.is_none() {
+                self.blocked = Some(reason);
+            }
+            return;
+        }
+
+        if is_assertion {
+            self.assertions.push(AssertionRecord {
+                location,
+                status: AssertionStatus::Skipped(reason),
+            });
+        } else {
+            self.directive_skips.push((location, reason));
+        }
+
+        if blocks_script && self.blocked.is_none() {
+            self.blocked = Some(reason);
+        }
+    }
+
+    fn runner_error(&mut self, location: &'static str, error: String) {
+        self.runner_errors.push(format!("{location}: {error}"));
+        self.blocked = Some(DEPENDENT_SKIP);
+    }
+
+    fn finish(mut self) {
+        if self.assertion_filter.is_some() && !self.assertion_reached {
+            let filter = self.assertion_filter.as_deref().unwrap();
+            self.runner_errors
+                .push(format!("assertion filter did not match {filter}"));
         }
 
         let passed = self
-            .executed
-            .checked_sub(self.failed)
-            .expect("failed assertions cannot exceed executed assertions");
-        println!(
-            "core spec assertions: {} executed, {} failed, {} skipped",
-            self.executed, self.failed, self.skipped
-        );
-
-        for (reason, assertions, directives) in self.skip_reasons {
-            println!("  skipped {assertions} assertions across {directives} directives: {reason}");
-        }
-
-        let details = self
-            .failures
+            .assertions
             .iter()
-            .map(|failure| format!("failed: {failure}"))
-            .chain(
-                self.runner_errors
-                    .iter()
-                    .map(|error| format!("runner error: {error}")),
-            )
-            .collect::<Vec<_>>()
-            .join("\n");
-        let details_path = concat!(env!("OUT_DIR"), "/core_test_failures.txt");
-        std::fs::write(details_path, details).unwrap();
+            .filter(|record| matches!(record.status, AssertionStatus::Passed))
+            .count();
+        let failed = self
+            .assertions
+            .iter()
+            .filter(|record| matches!(record.status, AssertionStatus::Failed(_)))
+            .count();
+        let skipped = self.assertions.len() - passed - failed;
 
-        if self.filter.is_none() {
-            let mut results = format!(
-                "passed_assertions\t{passed}\nexecuted_assertions\t{}\nfailed_assertions\t{}\nskipped_assertions\t{}\n",
-                self.executed, self.failed, self.skipped
-            );
-            for (name, status) in &self.cases {
-                results.push_str(&format!("case\t{status}\t{name}\n"));
+        let mut contents = String::new();
+        for record in &self.assertions {
+            match &record.status {
+                AssertionStatus::Passed => {
+                    contents.push_str(&format!("assertion\tpassed\t{}\n", record.location));
+                }
+                AssertionStatus::Failed(error) => contents.push_str(&format!(
+                    "assertion\tfailed\t{}\t{}\n",
+                    record.location,
+                    sanitize(error)
+                )),
+                AssertionStatus::Skipped(reason) => contents.push_str(&format!(
+                    "assertion\tskipped\t{}\t{}\n",
+                    record.location, reason
+                )),
             }
-            let results_path = "target/core-test-results.tsv";
-            std::fs::create_dir_all("target").unwrap();
-            std::fs::write(results_path, results).unwrap();
-            println!("core spec CI results: {results_path}");
+        }
+        for (location, reason) in &self.directive_skips {
+            contents.push_str(&format!("directive\tskipped\t{location}\t{reason}\n"));
+        }
+        for error in &self.runner_errors {
+            contents.push_str(&format!("runner_error\t{}\n", sanitize(error)));
         }
 
-        if !self.failures.is_empty() || !self.runner_errors.is_empty() {
-            let assertion_label = if self.failures.len() == 1 {
-                "failure"
-            } else {
-                "failures"
-            };
-            let runner_error_label = if self.runner_errors.len() == 1 {
-                "error"
-            } else {
-                "errors"
-            };
-            println!(
-                "core spec details: {} assertion {assertion_label} and {} runner {runner_error_label} written to {}",
-                self.failures.len(),
-                self.runner_errors.len(),
-                details_path
-            );
+        let result_dir = std::path::Path::new("target/core-test-results");
+        std::fs::create_dir_all(result_dir).unwrap();
+        std::fs::write(result_dir.join(format!("{}.tsv", self.name)), contents).unwrap();
+
+        println!(
+            "{}: {passed} passed, {failed} failed, {skipped} skipped",
+            self.name
+        );
+        for record in self
+            .assertions
+            .iter()
+            .filter(|record| matches!(record.status, AssertionStatus::Failed(_)))
+            .take(20)
+        {
+            if let AssertionStatus::Failed(error) = &record.status {
+                println!("  {}: {error}", record.location);
+            }
+        }
+        if failed > 20 {
+            println!("  ... and {} more assertion failures", failed - 20);
+        }
+        for error in &self.runner_errors {
+            println!("  runner error: {error}");
         }
 
-        if self.failed != 0 || !self.runner_errors.is_empty() {
-            std::process::exit(1);
-        }
+        assert!(
+            failed == 0 && self.runner_errors.is_empty(),
+            "{} had {failed} assertion failures and {} runner errors",
+            self.name,
+            self.runner_errors.len()
+        );
     }
+}
+
+fn run_script(name: &'static str, run: impl FnOnce(&mut ScriptRunner)) {
+    let assertion_filter = std::env::var("CORE_TEST_ASSERTION").ok();
+    if assertion_filter
+        .as_deref()
+        .is_some_and(|filter| !filter.starts_with(&format!("{name}.wast:")))
+    {
+        return;
+    }
+
+    let mut script = ScriptRunner::new(name, assertion_filter);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut script)));
+
+    if let Err(payload) = result {
+        script.runner_error("script", panic_message(payload));
+    }
+
+    script.finish();
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("non-string panic")
+        .to_string()
+}
+
+fn sanitize(value: &str) -> String {
+    value.replace(['\t', '\n', '\r'], " ")
 }
 
 #[derive(Debug)]
@@ -233,19 +406,147 @@ enum ExpectedValue {
     Ref(ExpectedRef),
 }
 
-/// create a spectest-style memory: 1 page initial, 2 pages max
-/// (matching the standard WebAssembly spectest module)
-fn create_spectest_memory(store: &mut Store, mt: &MemoryType) -> ExternalValue {
-    let addr = store.memories.len();
-    // spectest module always provides memory with 1 page initial, 2 pages max
-    store.memories.push(MemoryInstance {
-        memory_type: MemoryType {
-            addr_type: mt.addr_type,
-            limit: Limit { min: 1, max: 2 },
-        },
-        data: GuestMemory::new(65536),
-    });
-    ExternalValue::Memory { addr }
+fn spec_invoke(
+    context: &mut ScriptContext,
+    target: Option<&str>,
+    name: &str,
+    args: &[RawValue],
+) -> Result<Vec<RawValue>, String> {
+    let instance = context.resolve_target(target)?;
+    invoke_and_resume(&mut context.store, instance, name, args).map_err(|error| error.to_string())
+}
+
+fn spec_assert_return(
+    context: &mut ScriptContext,
+    target: Option<&str>,
+    name: &str,
+    args: &[RawValue],
+    expected: &[ExpectedValue],
+) -> Result<(), String> {
+    let actual = spec_invoke(context, target, name, args)?;
+
+    if values_match(expected, &actual) {
+        Ok(())
+    } else {
+        Err(format!(
+            "assert_return {name:?} expected {expected:?}, got {actual:?}"
+        ))
+    }
+}
+
+fn spec_assert_get(
+    context: &mut ScriptContext,
+    target: Option<&str>,
+    name: &str,
+    expected: &[ExpectedValue],
+) -> Result<(), String> {
+    let instance = context.resolve_target(target)?;
+    let export = context
+        .store
+        .exports(instance)
+        .iter()
+        .find(|export| export.name == name)
+        .ok_or_else(|| format!("unknown export {name:?}"))?;
+    let ExternalValue::Global { addr } = export.value else {
+        return Err(format!("export {name:?} is not a global"));
+    };
+    let actual = [context.store.globals[addr].value];
+
+    if values_match(expected, &actual) {
+        Ok(())
+    } else {
+        Err(format!(
+            "assert_return get {name:?} expected {expected:?}, got {actual:?}"
+        ))
+    }
+}
+
+fn spec_assert_trap(
+    context: &mut ScriptContext,
+    target: Option<&str>,
+    name: &str,
+    args: &[RawValue],
+) -> Result<(), String> {
+    let instance = context.resolve_target(target)?;
+
+    match invoke_and_resume(&mut context.store, instance, name, args) {
+        Err(gabagool::Error::Trap(_)) => Ok(()),
+        Ok(results) => Err(format!("expected trap, got {results:?}")),
+        Err(error) => Err(format!("expected trap, got {error}")),
+    }
+}
+
+fn spec_assert_exhaustion(
+    context: &mut ScriptContext,
+    target: Option<&str>,
+    name: &str,
+    args: &[RawValue],
+) -> Result<(), String> {
+    let instance = context.resolve_target(target)?;
+
+    match invoke_and_resume(&mut context.store, instance, name, args) {
+        Err(gabagool::Error::Trap(gabagool::Trap::CallStackExhausted)) => Ok(()),
+        Ok(results) => Err(format!("expected exhaustion, got {results:?}")),
+        Err(error) => Err(format!("expected exhaustion, got {error}")),
+    }
+}
+
+fn spec_assert_exception(
+    context: &mut ScriptContext,
+    target: Option<&str>,
+    name: &str,
+    args: &[RawValue],
+) -> Result<(), String> {
+    let instance = context.resolve_target(target)?;
+
+    match invoke_and_resume(&mut context.store, instance, name, args) {
+        Err(gabagool::Error::Exception(_)) => Ok(()),
+        Ok(results) => Err(format!("expected exception, got {results:?}")),
+        Err(error) => Err(format!("expected exception, got {error}")),
+    }
+}
+
+fn spec_assert_module_trap(context: &mut ScriptContext, bytes: &[u8]) -> Result<(), String> {
+    let module = Module::try_new(bytes).map_err(|error| error.to_string())?;
+    let imports = context
+        .resolve_imports(&module)
+        .map_err(|error| error.to_string())?;
+
+    match context.store.instantiate(&module, imports) {
+        Err(gabagool::Error::Trap(_)) => Ok(()),
+        Ok(_) => Err("expected module instantiation to trap".to_string()),
+        Err(error) => Err(format!("expected trap, got {error}")),
+    }
+}
+
+fn spec_assert_unlinkable(context: &mut ScriptContext, bytes: &[u8]) -> Result<(), String> {
+    let module =
+        Module::try_new(bytes).map_err(|error| format!("expected a valid module, got {error}"))?;
+    let result = context
+        .resolve_imports(&module)
+        .and_then(|imports| context.store.instantiate(&module, imports));
+
+    match result {
+        Err(gabagool::Error::Instantiation(_)) => Ok(()),
+        Ok(_) => Err("expected module instantiation to be unlinkable".to_string()),
+        Err(error) => Err(format!("expected an unlinkable module, got {error}")),
+    }
+}
+
+fn spec_assert_malformed(bytes: &[u8]) -> Result<(), String> {
+    if Parser::new(bytes).parse().is_err() {
+        Ok(())
+    } else {
+        Err("expected malformed module to fail parsing".to_string())
+    }
+}
+
+fn spec_assert_invalid(bytes: &[u8]) -> Result<(), String> {
+    if Module::try_new(bytes).is_err() {
+        Ok(())
+    } else {
+        Err("expected invalid module to fail validation".to_string())
+    }
 }
 
 fn invoke_and_resume(
@@ -255,12 +556,11 @@ fn invoke_and_resume(
     args: &[RawValue],
 ) -> Result<Vec<RawValue>, gabagool::Error> {
     let mut state = store.invoke(instance, name, args.to_vec())?;
+
     loop {
         match state {
-            gabagool::ExecutionState::Completed(v) => return Ok(v),
-            gabagool::ExecutionState::Suspended { .. } => {
-                state = store.resume()?;
-            }
+            gabagool::ExecutionState::Completed(values) => return Ok(values),
+            gabagool::ExecutionState::Suspended { .. } => state = store.resume()?,
             gabagool::ExecutionState::FuelExhausted => {
                 return Err(gabagool::Error::Instantiation("fuel exhausted".into()));
             }
@@ -268,221 +568,39 @@ fn invoke_and_resume(
     }
 }
 
-fn spec_step_assert_return(
-    store: &mut Store,
-    instance: Instance,
-    name: &str,
-    args: &[RawValue],
-    expected: &[ExpectedValue],
-    step: usize,
-    report: &mut CaseReport,
-) {
-    let result = invoke_and_resume(store, instance, name, args);
-    match result {
-        Ok(actual) => {
-            report.check(
-                values_match(expected, &actual),
-                format!(
-                    "step {} assert_return(\"{}\", {:?}): expected {:?}, got {:?}",
-                    step, name, args, expected, actual
-                ),
-            );
-        }
-        Err(e) => {
-            report.check(
-                false,
-                format!(
-                    "step {} assert_return(\"{}\", {:?}): unexpected error: {}",
-                    step, name, args, e
-                ),
-            );
-        }
-    }
-}
-
-fn spec_step_assert_trap(
-    store: &mut Store,
-    instance: Instance,
-    name: &str,
-    args: &[RawValue],
-    step: usize,
-    report: &mut CaseReport,
-) {
-    match invoke_and_resume(store, instance, name, args) {
-        Ok(results) => report.check(
-            false,
-            format!(
-                "step {} assert_trap(\"{}\", {:?}): expected trap, got {:?}",
-                step, name, args, results
-            ),
-        ),
-        Err(gabagool::Error::Trap(_)) => report.check(true, ""),
-        Err(other) => report.check(
-            false,
-            format!(
-                "step {} assert_trap(\"{}\", {:?}): expected trap, got error: {}",
-                step, name, args, other
-            ),
-        ),
-    }
-}
-
-fn spec_step_assert_exhaustion(
-    store: &mut Store,
-    instance: Instance,
-    name: &str,
-    args: &[RawValue],
-    step: usize,
-    report: &mut CaseReport,
-) {
-    match invoke_and_resume(store, instance, name, args) {
-        Err(gabagool::Error::Trap(gabagool::Trap::CallStackExhausted)) => report.check(true, ""),
-        Ok(results) => report.check(
-            false,
-            format!(
-                "step {} assert_exhaustion(\"{}\", {:?}): expected exhaustion, got {:?}",
-                step, name, args, results
-            ),
-        ),
-        Err(other) => report.check(
-            false,
-            format!(
-                "step {} assert_exhaustion(\"{}\", {:?}): expected exhaustion, got error: {}",
-                step, name, args, other
-            ),
-        ),
-    }
-}
-
-fn spec_step_assert_exception(
-    store: &mut Store,
-    instance: Instance,
-    name: &str,
-    args: &[RawValue],
-    step: usize,
-    report: &mut CaseReport,
-) {
-    match invoke_and_resume(store, instance, name, args) {
-        Ok(results) => {
-            report.check(
-                false,
-                format!(
-                    "step {} assert_exception(\"{}\", {:?}): expected exception, got {:?}",
-                    step, name, args, results
-                ),
-            );
-        }
-        Err(gabagool::Error::Exception(_)) => {
-            report.check(true, "");
-        }
-        Err(other) => {
-            report.check(
-                false,
-                format!(
-                    "step {} assert_exception(\"{}\", {:?}): expected exception, got error: {}",
-                    step, name, args, other
-                ),
-            );
-        }
-    }
-}
-
-fn spec_step_invoke(store: &mut Store, instance: Instance, name: &str, args: &[RawValue]) {
-    invoke_and_resume(store, instance, name, args)
-        .unwrap_or_else(|error| panic!("standalone invoke failed: {error}"));
-}
-
 fn values_match(expected: &[ExpectedValue], actual: &[RawValue]) -> bool {
-    if expected.len() != actual.len() {
-        return false;
-    }
-
-    expected
-        .iter()
-        .zip(actual.iter())
-        .all(|(exp, act)| match exp {
-            ExpectedValue::I32(e) => *e == act.as_i32(),
-            ExpectedValue::I64(e) => *e == act.as_i64(),
-            ExpectedValue::F32(pat) => {
-                let a = act.as_f32();
-                match pat {
-                    NanPat::CanonicalNan => a.is_nan() && (a.to_bits() & 0x003F_FFFF == 0),
-                    NanPat::ArithmeticNan => a.is_nan(),
-                    NanPat::Value(e) => a.to_bits() == *e,
-                }
-            }
-            ExpectedValue::F64(pat) => {
-                let a = act.as_f64();
-                match pat {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual.iter())
+            .all(|(expected, actual)| match expected {
+                ExpectedValue::I32(value) => *value == actual.as_i32(),
+                ExpectedValue::I64(value) => *value == actual.as_i64(),
+                ExpectedValue::F32(pattern) => match pattern {
                     NanPat::CanonicalNan => {
-                        a.is_nan() && (a.to_bits() & 0x0007_FFFF_FFFF_FFFF == 0)
+                        actual.as_f32().is_nan() && (actual.as_f32().to_bits() & 0x003F_FFFF == 0)
                     }
-                    NanPat::ArithmeticNan => a.is_nan(),
-                    NanPat::Value(e) => a.to_bits() == *e,
-                }
-            }
-            ExpectedValue::Ref(exp_ref) => {
-                let act_ref = act.as_ref();
-                match (exp_ref, act_ref) {
+                    NanPat::ArithmeticNan => actual.as_f32().is_nan(),
+                    NanPat::Value(value) => actual.as_f32().to_bits() == *value,
+                },
+                ExpectedValue::F64(pattern) => match pattern {
+                    NanPat::CanonicalNan => {
+                        actual.as_f64().is_nan()
+                            && (actual.as_f64().to_bits() & 0x0007_FFFF_FFFF_FFFF == 0)
+                    }
+                    NanPat::ArithmeticNan => actual.as_f64().is_nan(),
+                    NanPat::Value(value) => actual.as_f64().to_bits() == *value,
+                },
+                ExpectedValue::Ref(expected) => match (expected, actual.as_ref()) {
                     (ExpectedRef::Null, Ref::Null) => true,
-                    (ExpectedRef::Extern(Some(n)), Ref::RefExtern(m)) => {
-                        usize::try_from(*n).unwrap() == m
+                    (ExpectedRef::Extern(Some(expected)), Ref::RefExtern(actual)) => {
+                        usize::try_from(*expected).unwrap() == actual
                     }
                     (ExpectedRef::Extern(None), Ref::RefExtern(_)) => true,
                     (ExpectedRef::Func, Ref::FunctionAddr(_)) => true,
                     _ => false,
-                }
-            }
-        })
-}
-
-fn try_resolve_imports_with_registered(
-    store: &mut Store,
-    module: &Module,
-    registered_exports: &[(&str, &[ExportInstance])],
-) -> Result<Vec<ExternalValue>, gabagool::Error> {
-    module
-        .import_declarations()
-        .iter()
-        .map(|import| {
-            for &(reg_name, exports) in registered_exports {
-                if import.module == reg_name {
-                    for export in exports {
-                        if export.name == import.name {
-                            let kind_ok = matches!(
-                                (&export.value, &import.description),
-                                (ExternalValue::Function { .. }, ImportDescription::Func(_))
-                                    | (ExternalValue::Table { .. }, ImportDescription::Table(_))
-                                    | (ExternalValue::Memory { .. }, ImportDescription::Mem(_))
-                                    | (ExternalValue::Global { .. }, ImportDescription::Global(_))
-                                    | (ExternalValue::Tag { .. }, ImportDescription::Tag(_))
-                            );
-                            if kind_ok {
-                                return Ok(export.value.clone());
-                            } else {
-                                return Err(gabagool::Error::Instantiation(format!(
-                                    "incompatible import type for {}.{}",
-                                    import.module, import.name
-                                )));
-                            }
-                        }
-                    }
-                    return Err(gabagool::Error::Instantiation(format!(
-                        "unknown import {}.{}",
-                        import.module, import.name
-                    )));
-                }
-            }
-            if import.module == "spectest" {
-                return resolve_spectest_export(store, &import.name);
-            }
-
-            Err(gabagool::Error::Instantiation(format!(
-                "unknown module {}",
-                import.module
-            )))
-        })
-        .collect()
+                },
+            })
 }
 
 fn resolve_spectest_export(
@@ -568,13 +686,16 @@ fn resolve_spectest_export(
     }
 
     if name == "memory" {
-        return Ok(create_spectest_memory(
-            store,
-            &MemoryType {
+        let addr = store.memories.len();
+        store.memories.push(MemoryInstance {
+            memory_type: MemoryType {
                 addr_type: AddrType::I32,
                 limit: Limit { min: 1, max: 2 },
             },
-        ));
+            data: GuestMemory::new(65536),
+        });
+
+        return Ok(ExternalValue::Memory { addr });
     }
 
     Err(gabagool::Error::Instantiation(format!(

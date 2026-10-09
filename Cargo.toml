@@ -31,7 +31,6 @@ wasmi = "1.0.9"
 [[test]]
 name = "core_tests"
 path = "tests/core_tests.rs"
-harness = false
 required-features = ["core-tests"]
 
 [[bench]]
