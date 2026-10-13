@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use crate::error::{Error, Result};
 use crate::{
-    ensure_parse, bail_parse, Alias, CanonicalDef, ComponentDefinedKind, ComponentExport,
+    bail_parse, ensure_parse, Alias, CanonicalDef, ComponentDefinedKind, ComponentExport,
     ComponentExportDecl, ComponentFuncKind, ComponentFuncResult, ComponentImport,
     ComponentInlineExport, ComponentInstantiateArg, ComponentSection, ComponentSort,
     ComponentStart, ComponentTypeDecl, ComponentTypeDef, ComponentValueKind, CoreExportDecl,
@@ -552,7 +552,9 @@ impl<'a> Parser<'a> {
                     dtor: match self.read_u8()? {
                         0 => None,
                         1 => Some(self.read_u32()?),
-                        b => bail_parse!("expected 0x00 or 0x01 for resource dtor flag, got {b:#x}"),
+                        b => {
+                            bail_parse!("expected 0x00 or 0x01 for resource dtor flag, got {b:#x}")
+                        }
                     },
                 }
             }

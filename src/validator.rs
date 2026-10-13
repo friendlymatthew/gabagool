@@ -196,8 +196,7 @@ impl<'a> Validator<'a> {
             | Instruction::I32TruncSaturatedF64Unsigned => {
                 self.ctx.cvtop(ValueType::F64, ValueType::I32)?
             }
-            Instruction::I64ExtendI32Signed
-            | Instruction::I64ExtendI32Unsigned => {
+            Instruction::I64ExtendI32Signed | Instruction::I64ExtendI32Unsigned => {
                 self.ctx.cvtop(ValueType::I32, ValueType::I64)?
             }
             Instruction::I64TruncF32Signed
@@ -765,7 +764,8 @@ mod tests {
         module.types.push(func_type(I32, I32));
         module.types.push(func_type(NONE, I32));
 
-        // function 0 has local 0; function 1 has none, so reading local 0 must fail
+        // function 0 has local 0; function 1 has none, so reading local 0 must
+        // fail
         module
             .functions
             .push(function(0, &[], vec![Instruction::LocalGet(0)]));
@@ -963,16 +963,32 @@ mod tests {
         // relop
         add(
             vec![
-                I32Eq, I32Ne, I32LtSigned, I32LtUnsigned, I32GtSigned, I32GtUnsigned,
-                I32LeSigned, I32LeUnsigned, I32GeSigned, I32GeUnsigned,
+                I32Eq,
+                I32Ne,
+                I32LtSigned,
+                I32LtUnsigned,
+                I32GtSigned,
+                I32GtUnsigned,
+                I32LeSigned,
+                I32LeUnsigned,
+                I32GeSigned,
+                I32GeUnsigned,
             ],
             vec![i32t, i32t],
             i32t,
         );
         add(
             vec![
-                I64Eq, I64Ne, I64LtSigned, I64LtUnsigned, I64GtSigned, I64GtUnsigned,
-                I64LeSigned, I64LeUnsigned, I64GeSigned, I64GeUnsigned,
+                I64Eq,
+                I64Ne,
+                I64LtSigned,
+                I64LtUnsigned,
+                I64GtSigned,
+                I64GtUnsigned,
+                I64LeSigned,
+                I64LeUnsigned,
+                I64GeSigned,
+                I64GeUnsigned,
             ],
             vec![i64t, i64t],
             i32t,
@@ -991,7 +1007,10 @@ mod tests {
         // unop
         add(
             vec![
-                I32CountLeadingZeros, I32CountTrailingZeros, I32PopCount, I32Extend8Signed,
+                I32CountLeadingZeros,
+                I32CountTrailingZeros,
+                I32PopCount,
+                I32Extend8Signed,
                 I32Extend16Signed,
             ],
             vec![i32t],
@@ -999,19 +1018,27 @@ mod tests {
         );
         add(
             vec![
-                I64CountLeadingZeros, I64CountTrailingZeros, I64PopCount, I64Extend8Signed,
-                I64Extend16Signed, I64Extend32Signed,
+                I64CountLeadingZeros,
+                I64CountTrailingZeros,
+                I64PopCount,
+                I64Extend8Signed,
+                I64Extend16Signed,
+                I64Extend32Signed,
             ],
             vec![i64t],
             i64t,
         );
         add(
-            vec![F32Abs, F32Neg, F32Ceil, F32Floor, F32Trunc, F32Nearest, F32Sqrt],
+            vec![
+                F32Abs, F32Neg, F32Ceil, F32Floor, F32Trunc, F32Nearest, F32Sqrt,
+            ],
             vec![f32t],
             f32t,
         );
         add(
-            vec![F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt],
+            vec![
+                F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt,
+            ],
             vec![f64t],
             f64t,
         );
@@ -1019,18 +1046,42 @@ mod tests {
         // binop
         add(
             vec![
-                I32Add, I32Sub, I32Mul, I32DivSigned, I32DivUnsigned, I32RemainderSigned,
-                I32RemainderUnsigned, I32And, I32Or, I32Xor, I32Shl, I32ShrSigned,
-                I32ShrUnsigned, I32RotateLeft, I32RotateRight,
+                I32Add,
+                I32Sub,
+                I32Mul,
+                I32DivSigned,
+                I32DivUnsigned,
+                I32RemainderSigned,
+                I32RemainderUnsigned,
+                I32And,
+                I32Or,
+                I32Xor,
+                I32Shl,
+                I32ShrSigned,
+                I32ShrUnsigned,
+                I32RotateLeft,
+                I32RotateRight,
             ],
             vec![i32t, i32t],
             i32t,
         );
         add(
             vec![
-                I64Add, I64Sub, I64Mul, I64DivSigned, I64DivUnsigned, I64RemainderSigned,
-                I64RemainderUnsigned, I64And, I64Or, I64Xor, I64Shl, I64ShrSigned,
-                I64ShrUnsigned, I64RotateLeft, I64RotateRight,
+                I64Add,
+                I64Sub,
+                I64Mul,
+                I64DivSigned,
+                I64DivUnsigned,
+                I64RemainderSigned,
+                I64RemainderUnsigned,
+                I64And,
+                I64Or,
+                I64Xor,
+                I64Shl,
+                I64ShrSigned,
+                I64ShrUnsigned,
+                I64RotateLeft,
+                I64RotateRight,
             ],
             vec![i64t, i64t],
             i64t,
@@ -1050,24 +1101,35 @@ mod tests {
         add(vec![I32WrapI64], vec![i64t], i32t);
         add(
             vec![
-                I32TruncF32Signed, I32TruncF32Unsigned, I32TruncSaturatedF32Signed,
-                I32TruncSaturatedF32Unsigned, I32ReinterpretF32,
+                I32TruncF32Signed,
+                I32TruncF32Unsigned,
+                I32TruncSaturatedF32Signed,
+                I32TruncSaturatedF32Unsigned,
+                I32ReinterpretF32,
             ],
             vec![f32t],
             i32t,
         );
         add(
             vec![
-                I32TruncF64Signed, I32TruncF64Unsigned, I32TruncSaturatedF64Signed,
+                I32TruncF64Signed,
+                I32TruncF64Unsigned,
+                I32TruncSaturatedF64Signed,
                 I32TruncSaturatedF64Unsigned,
             ],
             vec![f64t],
             i32t,
         );
-        add(vec![I64ExtendI32Signed, I64ExtendI32Unsigned], vec![i32t], i64t);
+        add(
+            vec![I64ExtendI32Signed, I64ExtendI32Unsigned],
+            vec![i32t],
+            i64t,
+        );
         add(
             vec![
-                I64TruncF32Signed, I64TruncF32Unsigned, I64TruncSaturatedF32Signed,
+                I64TruncF32Signed,
+                I64TruncF32Unsigned,
+                I64TruncSaturatedF32Signed,
                 I64TruncSaturatedF32Unsigned,
             ],
             vec![f32t],
@@ -1075,14 +1137,21 @@ mod tests {
         );
         add(
             vec![
-                I64TruncF64Signed, I64TruncF64Unsigned, I64TruncSaturatedF64Signed,
-                I64TruncSaturatedF64Unsigned, I64ReinterpretF64,
+                I64TruncF64Signed,
+                I64TruncF64Unsigned,
+                I64TruncSaturatedF64Signed,
+                I64TruncSaturatedF64Unsigned,
+                I64ReinterpretF64,
             ],
             vec![f64t],
             i64t,
         );
         add(
-            vec![F32ConvertI32Signed, F32ConvertI32Unsigned, F32ReinterpretI32],
+            vec![
+                F32ConvertI32Signed,
+                F32ConvertI32Unsigned,
+                F32ReinterpretI32,
+            ],
             vec![i32t],
             f32t,
         );
@@ -1098,7 +1167,11 @@ mod tests {
             f64t,
         );
         add(
-            vec![F64ConvertI64Signed, F64ConvertI64Unsigned, F64ReinterpretI64],
+            vec![
+                F64ConvertI64Signed,
+                F64ConvertI64Unsigned,
+                F64ReinterpretI64,
+            ],
             vec![i64t],
             f64t,
         );
@@ -1152,7 +1225,8 @@ mod tests {
         for (instruction, params, _) in numeric_table() {
             let body = body_for(&instruction, &params);
 
-            // only the result is left, so a function returning nothing is invalid
+            // only the result is left, so a function returning nothing is
+            // invalid
             assert!(
                 validate_body(NONE, NONE, &[], body).is_err(),
                 "{instruction:?} should leave exactly one value"

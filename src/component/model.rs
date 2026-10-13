@@ -1,6 +1,6 @@
 use crate::module::{ImportDeclaration, ImportDescription, ParsedModule, SubType};
 use crate::parser::Parser;
-use crate::{flatten, bail_parse, Error, Result};
+use crate::{bail_parse, flatten, Error, Result};
 
 #[derive(Debug)]
 pub struct Component {

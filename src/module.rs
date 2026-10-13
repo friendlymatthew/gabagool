@@ -1,7 +1,7 @@
 use crate::component::ParsedComponent;
 use crate::{
-    compiler::{self, ModuleCode},
     bail_parse,
+    compiler::{self, ModuleCode},
     parser::Parser,
     Result,
 };

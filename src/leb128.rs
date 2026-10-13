@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::{ensure_parse, bail_parse};
+use crate::{bail_parse, ensure_parse};
 
 /// The maximum length of a leb128-encoded 32-bit integer
 pub const MAX_LEB128_LEN_32: usize = 5;
