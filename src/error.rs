@@ -51,6 +51,7 @@ impl fmt::Display for Trap {
 #[derive(Debug)]
 pub enum Error {
     Parse(String),
+    Validation(String),
     Instantiation(String),
     Trap(Trap),
     Exception(Exception),
@@ -64,6 +65,10 @@ impl Error {
     pub fn instantiation(message: impl Into<String>) -> Self {
         Self::Instantiation(message.into())
     }
+
+    pub fn validation(message: impl Into<String>) -> Self {
+        Self::Validation(message.into())
+    }
 }
 
 impl fmt::Display for Error {
@@ -73,6 +78,7 @@ impl fmt::Display for Error {
             Self::Instantiation(msg) => write!(f, "instantiation error: {msg}"),
             Self::Trap(trap) => write!(f, "trap: {trap}"),
             Self::Exception(_) => write!(f, "unhandled exception"),
+            Self::Validation(msg) => write!(f, "validation error: {msg}"),
         }
     }
 }
@@ -114,6 +120,16 @@ macro_rules! instantiation_err {
     };
     ($message:expr $(,)?) => {
         return Err($crate::error::Error::instantiation($message))
+    };
+}
+
+#[macro_export]
+macro_rules! validation_err {
+    ($fmt:literal $($arg:tt)*) => {
+        return Err($crate::error::Error::Validation(format!($fmt $($arg)*)))
+    };
+    ($message:expr $(,)?) => {
+        return Err($crate::error::Error::validation($message))
     };
 }
 

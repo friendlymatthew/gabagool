@@ -10,6 +10,7 @@ mod module;
 pub mod parser;
 pub mod runtime;
 pub mod snapshot;
+mod validator;
 
 #[cfg(feature = "jit")]
 mod jit;

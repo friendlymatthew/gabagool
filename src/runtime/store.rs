@@ -860,7 +860,7 @@ impl Store {
         let mut compiled_modules = Vec::with_capacity(flattened.modules.len());
 
         for module in &flattened.modules {
-            compiled_modules.push(Module::from_parsed((**module).clone()));
+            compiled_modules.push(Module::from_validated((**module).clone()));
         }
 
         let mut core_instances = Vec::new();
@@ -3574,7 +3574,7 @@ mod tests {
         .unwrap();
         let mut parsed = Parser::new(&wasm).parse().unwrap().try_as_module().unwrap();
         parsed.globals[1].initial_expression = vec![Instruction::GlobalGet(99)];
-        let module = Module::from_parsed(parsed);
+        let module = Module::from_validated(parsed);
         let mut store = Store::new();
         let globals_before = store.globals.len();
 

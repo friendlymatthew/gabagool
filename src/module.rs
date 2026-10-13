@@ -26,12 +26,20 @@ pub struct Module {
 
 impl Module {
     pub fn try_new(bytes: &[u8]) -> Result<Self> {
-        let module = Parser::new(bytes).parse()?.try_as_module()?;
+        let mut parsed = Parser::new(bytes).parse()?.try_as_module()?;
 
-        Ok(Self::from_parsed(module))
+        // todo: uncomment when the validation works !
+        // Validator::new(&parsed).validate()?;
+
+        parsed.is_validated = true;
+
+        Ok(Self::from_validated(parsed))
     }
 
-    pub fn from_parsed(parsed: ParsedModule) -> Self {
+    pub fn from_validated(parsed: ParsedModule) -> Self {
+        // todo: uncomment when the validation properly wired up
+        //  debug_assert!(parsed.is_validated);
+
         let code = compiler::compile(&parsed);
 
         Self {
@@ -100,6 +108,8 @@ pub struct ParsedModule {
     pub exports: Vec<Export>,
     pub tags: Vec<Tag>,
     pub customs: Vec<CustomSection>,
+
+    is_validated: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -132,7 +142,7 @@ pub enum RefType {
     Ref { nullable: bool, heap_type: HeapType },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ValueType {
     I32,
     I64,
@@ -202,6 +212,20 @@ pub struct SubType {
     pub is_final: bool,
     pub supertypes: Vec<u32>,
     pub composite_type: CompositeType,
+}
+
+impl SubType {
+    pub const fn is_function_type(&self) -> bool {
+        matches!(self.composite_type, CompositeType::Func(_))
+    }
+
+    pub const fn try_as_function_type(&self) -> Option<&FunctionType> {
+        let CompositeType::Func(f) = &self.composite_type else {
+            return None;
+        };
+
+        Some(f)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
