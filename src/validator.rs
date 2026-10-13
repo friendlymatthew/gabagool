@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::{
     bail_validation, ensure_validation, Error, Function, Instruction, ParsedModule, Result,
     ValueType,
