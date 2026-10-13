@@ -141,10 +141,37 @@ macro_rules! trap {
 }
 
 #[macro_export]
-macro_rules! ensure {
-    ($cond:expr, $err:expr) => {
+macro_rules! ensure_trap {
+    ($cond:expr, $trap:expr) => {
         if !$cond {
-            return Err($err);
+            $crate::trap!($trap);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_validation {
+    ($cond:expr, $($msg:tt)+) => {
+        if !$cond {
+            $crate::validation_err!($($msg)+);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_instantiation {
+    ($cond:expr, $($msg:tt)+) => {
+        if !$cond {
+            $crate::instantiation_err!($($msg)+);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_parse {
+    ($cond:expr, $($msg:tt)+) => {
+        if !$cond {
+            $crate::parse_err!($($msg)+);
         }
     };
 }

@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::{ensure, parse_err};
+use crate::{ensure_parse, parse_err};
 
 /// The maximum length of a leb128-encoded 32-bit integer
 pub const MAX_LEB128_LEN_32: usize = 5;
@@ -14,9 +14,9 @@ fn size_u32(x: u32) -> usize {
 
 #[inline]
 pub fn write_u32(buf: &mut [u8], mut x: u32) -> Result<usize> {
-    ensure!(
+    ensure_parse!(
         size_u32(x) <= buf.len(),
-        Error::Parse("The number being read is too large for the provided buffer.".into())
+        "the number being read is too large for the provided buffer"
     );
 
     for (i, curr_byte) in buf.iter_mut().enumerate().take(MAX_LEB128_LEN_32) {
@@ -32,7 +32,7 @@ pub fn write_u32(buf: &mut [u8], mut x: u32) -> Result<usize> {
     }
 
     Err(Error::Parse(
-        "The number being encoded exceeds the maximum representable length.".into(),
+        "the number being encoded exceeds the maximum representable length".into(),
     ))
 }
 
@@ -42,9 +42,9 @@ pub fn read_u32(buf: &[u8]) -> Result<(u32, usize)> {
     let mut s: usize = 0;
 
     for (i, &b) in buf.iter().enumerate() {
-        ensure!(
+        ensure_parse!(
             i < MAX_LEB128_LEN_32,
-            Error::Parse("The number being decoded exceeds the maximum length of a leb128-encoded 32-bit integer.".into())
+            "the number being decoded exceeds the maximum length of a leb128-encoded 32-bit integer"
         );
 
         if b < 0x80 {
@@ -60,7 +60,7 @@ pub fn read_u32(buf: &[u8]) -> Result<(u32, usize)> {
     }
 
     parse_err!(
-        "The number being decoded exceeds the maximum length of a leb128-encoded 32-bit integer."
+        "the number being decoded exceeds the maximum length of a leb128-encoded 32-bit integer"
     )
 }
 
@@ -68,9 +68,9 @@ pub fn read_u32(buf: &[u8]) -> Result<(u32, usize)> {
 pub fn write_i32(buf: &mut [u8], mut x: i32) -> Result<usize> {
     let mut i = 0;
     loop {
-        ensure!(
+        ensure_parse!(
             i < buf.len() && i < MAX_LEB128_LEN_32,
-            Error::Parse("buffer too small for signed LEB128 i32".into())
+            "buffer too small for signed LEB128 i32"
         );
         let mut byte = (x & 0x7F) as u8;
         x >>= 7;
@@ -92,9 +92,9 @@ pub fn read_i32(buf: &[u8]) -> Result<(i32, usize)> {
     let mut shift: u32 = 0;
 
     for (i, &byte) in buf.iter().enumerate() {
-        ensure!(
+        ensure_parse!(
             i < MAX_LEB128_LEN_32,
-            Error::Parse("The number being decoded exceeds the maximum length of a signed leb128-encoded 32-bit integer.".into())
+            "the number being decoded exceeds the maximum length of a signed leb128-encoded 32-bit integer"
         );
 
         result |= ((byte & 0x7F) as i32) << shift;
@@ -116,7 +116,7 @@ pub fn read_i32(buf: &[u8]) -> Result<(i32, usize)> {
         }
     }
 
-    parse_err!("Unterminated signed leb128-encoded 32-bit integer.")
+    parse_err!("unterminated signed leb128-encoded 32-bit integer")
 }
 
 #[inline]
@@ -125,9 +125,9 @@ pub fn read_u64(buf: &[u8]) -> Result<(u64, usize)> {
     let mut s: usize = 0;
 
     for (i, &b) in buf.iter().enumerate() {
-        ensure!(
+        ensure_parse!(
             i < MAX_LEB128_LEN_64,
-            Error::Parse("The number being decoded exceeds the maximum length of a leb128-encoded 64-bit integer.".into())
+            "the number being decoded exceeds the maximum length of a leb128-encoded 64-bit integer"
         );
 
         if b < 0x80 {
@@ -143,7 +143,7 @@ pub fn read_u64(buf: &[u8]) -> Result<(u64, usize)> {
     }
 
     parse_err!(
-        "The number being decoded exceeds the maximum length of a leb128-encoded 64-bit integer."
+        "the number being decoded exceeds the maximum length of a leb128-encoded 64-bit integer"
     )
 }
 
@@ -153,9 +153,9 @@ pub fn read_i64(buf: &[u8]) -> Result<(i64, usize)> {
     let mut shift: u32 = 0;
 
     for (i, &byte) in buf.iter().enumerate() {
-        ensure!(
+        ensure_parse!(
             i < MAX_LEB128_LEN_64,
-            Error::Parse("The number being decoded exceeds the maximum length of a signed leb128-encoded 64-bit integer.".into())
+            "the number being decoded exceeds the maximum length of a signed leb128-encoded 64-bit integer"
         );
 
         result |= ((byte & 0x7F) as i64) << shift;
@@ -176,7 +176,7 @@ pub fn read_i64(buf: &[u8]) -> Result<(i64, usize)> {
         }
     }
 
-    parse_err!("Unterminated signed leb128-encoded 64-bit integer.")
+    parse_err!("unterminated signed leb128-encoded 64-bit integer")
 }
 
 #[cfg(all(test, not(any(feature = "core-tests", feature = "component-tests"))))]

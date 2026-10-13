@@ -1,5 +1,6 @@
 use crate::{
-    ensure, validation_err, Error, Function, Instruction, Local, ParsedModule, Result, ValueType,
+    ensure_validation, validation_err, Error, Function, Instruction, Local, ParsedModule, Result,
+    ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -207,10 +208,7 @@ impl<'a> FunctionContext<'a> {
 
         self.pop_values_expect(end_types)?;
 
-        ensure!(
-            self.value_stack.len() == value_height,
-            Error::validation("not matching")
-        );
+        ensure_validation!(self.value_stack.len() == value_height, "not matching");
 
         self.control_stack
             .pop()

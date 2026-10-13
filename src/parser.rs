@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use crate::error::{Error, Result};
 use crate::{
-    ensure, parse_err, Alias, CanonicalDef, ComponentDefinedKind, ComponentExport,
+    ensure_parse, parse_err, Alias, CanonicalDef, ComponentDefinedKind, ComponentExport,
     ComponentExportDecl, ComponentFuncKind, ComponentFuncResult, ComponentImport,
     ComponentInlineExport, ComponentInstantiateArg, ComponentSection, ComponentSort,
     ComponentStart, ComponentTypeDecl, ComponentTypeDef, ComponentValueKind, CoreExportDecl,
@@ -130,13 +130,8 @@ impl<'a> Parser<'a> {
                 foreign_section_id => parse_err!("unrecognized section id {foreign_section_id}"),
             };
 
-            ensure!(
-                self.cursor == expected_section_end,
-                Error::Parse(format!(
-                    "component section {id} size mismatch: expected to end at {expected_section_end}, got {}",
-                    self.cursor
-                ))
-            );
+            ensure_parse!(self.cursor == expected_section_end, "component section {id} size mismatch: expected to end at {expected_section_end}, got {}",
+                    self.cursor);
         }
 
         Ok(ParsedComponent { sections })
@@ -149,11 +144,9 @@ impl<'a> Parser<'a> {
                 args: self.parse_vec(|p| {
                     let name = p.parse_name()?;
                     let sort = p.read_u8()?;
-                    ensure!(
+                    ensure_parse!(
                         sort == 0x12,
-                        Error::Parse(format!(
-                            "expected instance sort (0x12) in core instantiate arg, got {sort:#x}"
-                        ))
+                        "expected instance sort (0x12) in core instantiate arg, got {sort:#x}"
                     );
                     Ok(CoreInstantiateArg {
                         name,
@@ -276,9 +269,9 @@ impl<'a> Parser<'a> {
         let out = match b {
             0x00 => {
                 let sort = self.read_u8()?;
-                ensure!(
+                ensure_parse!(
                     sort == 0x11,
-                    Error::Parse(format!("expected core module sort (0x11), got {sort:#x}"))
+                    "expected core module sort (0x11), got {sort:#x}"
                 );
                 ExternDesc::CoreModule(self.read_u32()?)
             }
@@ -305,9 +298,9 @@ impl<'a> Parser<'a> {
             0 => {
                 let second = self.read_u8()?;
 
-                ensure!(
+                ensure_parse!(
                     second == 0,
-                    Error::Parse(format!("expected 0x00 after canonical lift, got {second}"))
+                    "expected 0x00 after canonical lift, got {second}"
                 );
 
                 CanonicalDef::Lift {
@@ -319,11 +312,9 @@ impl<'a> Parser<'a> {
             1 => {
                 let second = self.read_u8()?;
 
-                ensure!(
+                ensure_parse!(
                     second == 0,
-                    Error::Parse(format!(
-                        "expected 0x00 after canonical lower, got {second:#x}"
-                    ))
+                    "expected 0x00 after canonical lower, got {second:#x}"
                 );
 
                 CanonicalDef::Lower {
@@ -687,12 +678,10 @@ impl<'a> Parser<'a> {
 
             if id != 0 {
                 let order = section_logical_order(id);
-                ensure!(
+                ensure_parse!(
                     order > 0 && order > last_non_custom_id,
-                    Error::Parse(format!(
-                        "unexpected content after last section: section {} after previous",
-                        id
-                    ))
+                    "unexpected content after last section: section {} after previous",
+                    id
                 );
                 last_non_custom_id = order;
             }
@@ -705,9 +694,9 @@ impl<'a> Parser<'a> {
                 .checked_add(section_size)
                 .ok_or_else(|| Error::Parse("section size overflow".into()))?;
 
-            ensure!(
+            ensure_parse!(
                 section_end <= self.buffer.len(),
-                Error::Parse("section size exceeds remaining bytes".into())
+                "section size exceeds remaining bytes"
             );
 
             match id {
@@ -740,57 +729,50 @@ impl<'a> Parser<'a> {
                 12 => data_count = Some(self.read_u32()?),
                 13 => module.tags.extend(self.parse_tag_section()?),
                 foreign_id => {
-                    parse_err!("Encountered foreign section id: {}", foreign_id)
+                    parse_err!("encountered foreign section id: {}", foreign_id)
                 }
             }
 
             let seen = self.cursor - section_start;
-            ensure!(
+            ensure_parse!(
                 seen == section_size,
-                Error::Parse(format!(
-                    "section {} size mismatch, expected {}, got {}",
-                    id, section_size, seen
-                ))
+                "section {} size mismatch, expected {}, got {}",
+                id,
+                section_size,
+                seen
             );
         }
 
-        ensure!(
+        ensure_parse!(
             function_count == code_count,
-            Error::Parse(format!(
-                "function and code section have inconsistent lengths: {} functions vs {} code entries",
-                function_count,
-                code_count,
-            ))
+            "function and code section have inconsistent lengths: {} functions vs {} code entries",
+            function_count,
+            code_count,
         );
 
         if let Some(count) = data_count {
             let count =
                 usize::try_from(count).map_err(|_| Error::Parse("data count is invalid".into()))?;
 
-            ensure!(
+            ensure_parse!(
                 count == module.data_segments.len(),
-                Error::Parse(format!(
-                    "Data count {} does not match number of data segments {}",
-                    count,
-                    module.data_segments.len()
-                ))
+                "data count {} does not match number of data segments {}",
+                count,
+                module.data_segments.len()
             );
         }
 
         if self.uses_data_count_instructions {
-            ensure!(
-                data_count.is_some(),
-                Error::Parse("data count section required".into())
-            );
+            ensure_parse!(data_count.is_some(), "data count section required");
         }
 
         Ok(module)
     }
 
     fn parse_preamble(&mut self) -> Result<(u8, u8)> {
-        ensure!(
+        ensure_parse!(
             self.read_slice(4)? == b"\0asm",
-            Error::Parse("Expected magic number in preamble.".into())
+            "expected magic number in preamble"
         );
 
         let preamble = self.read_slice(4)?;
@@ -917,7 +899,7 @@ impl<'a> Parser<'a> {
             0x72 => HeapType::NoExtern,
             0x73 => HeapType::NoFunc,
             0x74 => HeapType::NoExn,
-            foreign => parse_err!("Unrecognized abstract heap type byte: {}", foreign),
+            foreign => parse_err!("unrecognized abstract heap type byte: {}", foreign),
         };
         Ok(ht)
     }
@@ -929,10 +911,7 @@ impl<'a> Parser<'a> {
             _ => {
                 // Type index encoded as s33 (positive signed integer)
                 let i = self.read_i64()?;
-                ensure!(
-                    i >= 0,
-                    Error::Parse(format!("heap type index must be non-negative, got {}", i))
-                );
+                ensure_parse!(i >= 0, "heap type index must be non-negative, got {}", i);
                 Ok(HeapType::TypeIndex(i as u32))
             }
         }
@@ -973,7 +952,7 @@ impl<'a> Parser<'a> {
                     heap_type: ht,
                 }
             }
-            foreign => parse_err!("Unrecognized reference byte. Got: {}", foreign),
+            foreign => parse_err!("unrecognized reference byte. Got: {}", foreign),
         };
         Ok(r)
     }
@@ -1003,7 +982,7 @@ impl<'a> Parser<'a> {
             }
             // Reference types (includes 0x70, 0x6F, 0x63, 0x64, 0x69-0x6E, 0x71-0x74)
             0x63 | 0x64 | 0x69..=0x74 => ValueType::Ref(self.parse_reference_type()?),
-            foreign => parse_err!("Unrecognized type. Got: {}", foreign),
+            foreign => parse_err!("unrecognized type. Got: {}", foreign),
         };
         Ok(value_type)
     }
@@ -1017,7 +996,7 @@ impl<'a> Parser<'a> {
             0x00 => Ok(Mutability::Const),
             0x01 => Ok(Mutability::Var),
             foreign => parse_err!(
-                "Unrecognized mutability byte. Expected 0x00 or 0x01, Got: {}",
+                "unrecognized mutability byte. Expected 0x00 or 0x01, Got: {}",
                 foreign
             ),
         }
@@ -1063,7 +1042,7 @@ impl<'a> Parser<'a> {
                 Ok(CompositeType::Struct(StructType { fields }))
             }
             _ => parse_err!(
-                "Expected composite type (0x5E/0x5F/0x60), got: 0x{:02X} at pos {}",
+                "expected composite type (0x5E/0x5F/0x60), got: 0x{:02X} at pos {}",
                 b,
                 self.cursor - 1
             ),
@@ -1121,7 +1100,7 @@ impl<'a> Parser<'a> {
         let has_page_size = flag & 0x08 != 0;
 
         if flag & !0x0D != 0 {
-            parse_err!("Expected valid limit flag. Got: 0x{:02X}", flag);
+            parse_err!("expected valid limit flag. Got: 0x{:02X}", flag);
         }
 
         let addr_type = if is_64 { AddrType::I64 } else { AddrType::I32 };
@@ -1170,7 +1149,7 @@ impl<'a> Parser<'a> {
                 0x00 => Mutability::Const,
                 0x01 => Mutability::Var,
                 foreign => parse_err!(
-                    "Unrecognized mutability byte. Expected 0x00 or 0x01, Got: {}",
+                    "unrecognized mutability byte. Expected 0x00 or 0x01, Got: {}",
                     foreign
                 ),
             },
@@ -1206,7 +1185,7 @@ impl<'a> Parser<'a> {
             (align_raw, 0)
         };
 
-        ensure!(align <= 4, Error::Parse("malformed memop flags".into()));
+        ensure_parse!(align <= 4, "malformed memop flags");
 
         Ok(MemArg {
             align,
@@ -1232,7 +1211,7 @@ impl<'a> Parser<'a> {
             0x03 => Ok(CatchClause::CatchAllRef {
                 label: self.read_u32()?,
             }),
-            _ => parse_err!("Unknown catch clause kind: {}", kind),
+            _ => parse_err!("unknown catch clause kind: {}", kind),
         }
     }
 
@@ -1413,7 +1392,7 @@ impl<'a> Parser<'a> {
                 0x1C => Instruction::RefI31,
                 0x1D => Instruction::I31GetSigned,
                 0x1E => Instruction::I31GetUnsigned,
-                foreign => parse_err!("Encountered unknown GC opcode: 0xFB 0x{:02X}", foreign),
+                foreign => parse_err!("encountered unknown GC opcode: 0xFB 0x{:02X}", foreign),
             },
             0xFC => match self.read_u32()? {
                 0 => Instruction::I32TruncSaturatedF32Signed,
@@ -1451,7 +1430,7 @@ impl<'a> Parser<'a> {
                 15 => Instruction::TableGrow(self.read_u32()?),
                 16 => Instruction::TableSize(self.read_u32()?),
                 17 => Instruction::TableFill(self.read_u32()?),
-                foreign => parse_err!("Encountered foreign table opcode: {}", foreign),
+                foreign => parse_err!("encountered foreign table opcode: {}", foreign),
             },
             0x28 => Instruction::I32Load(self.parse_memarg()?),
             0x29 => Instruction::I64Load(self.parse_memarg()?),
@@ -1915,9 +1894,9 @@ impl<'a> Parser<'a> {
                 0x111 => Instruction::I16x8RelaxedQ15mulrSigned,
                 0x112 => Instruction::I16x8RelaxedDotI8x16I7x16Signed,
                 0x113 => Instruction::I32x4RelaxedDotI8x16I7x16AddSigned,
-                foreign => parse_err!("Encountered unknown SIMD opcode: 0xFD 0x{:X}", foreign),
+                foreign => parse_err!("encountered unknown SIMD opcode: 0xFD 0x{:X}", foreign),
             },
-            foreign => parse_err!("Encountered unknown opcode: {}", foreign),
+            foreign => parse_err!("encountered unknown opcode: {}", foreign),
         };
 
         Ok(instr)
@@ -1929,9 +1908,9 @@ impl<'a> Parser<'a> {
         let current_pos = self.cursor;
 
         let name = self.parse_name()?;
-        ensure!(
+        ensure_parse!(
             self.cursor - current_pos <= size,
-            Error::Parse("custom section name exceeds section size".into())
+            "custom section name exceeds section size"
         );
         let slice_len = size - (self.cursor - current_pos);
 
@@ -1960,7 +1939,7 @@ impl<'a> Parser<'a> {
                     ImportDescription::Tag(self.read_u32()?)
                 }
                 foreign => parse_err!(
-                    "Unrecognized import description. Got: {}, at: {}",
+                    "unrecognized import description. Got: {}, at: {}",
                     foreign,
                     self.cursor
                 ),
@@ -1981,9 +1960,9 @@ impl<'a> Parser<'a> {
         if byte == 0x40 {
             // table with init expression: 0x40 0x00 reftype limit expr
             self.cursor += 1;
-            ensure!(
+            ensure_parse!(
                 self.read_u8()? == 0x00,
-                Error::Parse("Expected 0x00 after 0x40 in table definition".into())
+                "expected 0x00 after 0x40 in table definition"
             );
             let table_type = self.parse_table_type()?;
             let init = self.parse_expression()?;
@@ -2015,9 +1994,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_tag(&mut self) -> Result<Tag> {
-        ensure!(
+        ensure_parse!(
             self.read_u8()? == 0x00,
-            Error::Parse("Expected 0x00 attribute byte for tag.".into())
+            "expected 0x00 attribute byte for tag"
         );
         Ok(Tag {
             type_index: self.read_u32()?,
@@ -2038,7 +2017,7 @@ impl<'a> Parser<'a> {
                 0x03 => ExportDescription::Global(self.read_u32()?),
                 0x04 => ExportDescription::Tag(self.read_u32()?),
                 foreign => parse_err!(
-                    "Encountered foreign byte when parsing export description. Got: {}",
+                    "encountered foreign byte when parsing export description. Got: {}",
                     foreign
                 ),
             },
@@ -2069,10 +2048,7 @@ impl<'a> Parser<'a> {
                 }
             }
             1 => {
-                ensure!(
-                    self.read_u8()? == 0x00,
-                    Error::Parse("Expected elemkind 0x00.".into())
-                );
+                ensure_parse!(self.read_u8()? == 0x00, "expected elemkind 0x00");
 
                 let expression = self
                     .parse_vec(Self::read_u32)?
@@ -2089,10 +2065,7 @@ impl<'a> Parser<'a> {
             2 => {
                 let table_index = self.read_u32()?;
                 let offset = self.parse_expression()?;
-                ensure!(
-                    self.read_u8()? == 0x00,
-                    Error::Parse("Expected elemkind 0x00.".into())
-                );
+                ensure_parse!(self.read_u8()? == 0x00, "expected elemkind 0x00");
 
                 let expression = self
                     .parse_vec(Self::read_u32)?
@@ -2110,10 +2083,7 @@ impl<'a> Parser<'a> {
                 }
             }
             3 => {
-                ensure!(
-                    self.read_u8()? == 0x00,
-                    Error::Parse("Expected elemkind 0x00.".into())
-                );
+                ensure_parse!(self.read_u8()? == 0x00, "expected elemkind 0x00");
 
                 let expression = self
                     .parse_vec(Self::read_u32)?
@@ -2165,7 +2135,7 @@ impl<'a> Parser<'a> {
                 expression: self.parse_vec(Self::parse_expression)?,
                 mode: ElementMode::Declarative,
             },
-            foreign => parse_err!("Encountered foreign element segement kind: {}", foreign),
+            foreign => parse_err!("encountered foreign element segement kind: {}", foreign),
         };
 
         Ok(segment)
@@ -2189,7 +2159,7 @@ impl<'a> Parser<'a> {
         let type_index = self
             .function_types
             .pop_front()
-            .ok_or_else(|| Error::Parse("Function type list empty".into()))?;
+            .ok_or_else(|| Error::Parse("function type list empty".into()))?;
 
         let locals = self.parse_vec(Self::parse_local)?;
 
@@ -2198,10 +2168,7 @@ impl<'a> Parser<'a> {
             .map(|Local { count, .. }| *count as usize)
             .sum::<usize>();
 
-        ensure!(
-            total_locals <= u32::MAX as usize,
-            Error::Parse("too many locals".into())
-        );
+        ensure_parse!(total_locals <= u32::MAX as usize, "too many locals");
 
         let func = Function {
             type_index,
@@ -2258,7 +2225,7 @@ impl<'a> Parser<'a> {
                     mode: DataMode::Active { memory, offset },
                 }
             }
-            foreign => parse_err!("Encountered foreign data kind. Got: {}", foreign),
+            foreign => parse_err!("encountered foreign data kind. Got: {}", foreign),
         };
 
         Ok(segment)

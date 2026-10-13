@@ -12,9 +12,9 @@ use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    ensure, instantiation_err, trap, AddrType, Component, ComponentInstance, ComponentValue,
-    DataMode, ElementMode, GuestMemory, ImportDescription, InstantiatedComponent, Instruction,
-    LiftedFunc, Module, Mutability, Trap,
+    ensure_instantiation, ensure_trap, instantiation_err, trap, AddrType, Component,
+    ComponentInstance, ComponentValue, DataMode, ElementMode, GuestMemory, ImportDescription,
+    InstantiatedComponent, Instruction, LiftedFunc, Module, Mutability, Trap,
 };
 
 use crate::error::Exception;
@@ -403,7 +403,7 @@ impl Store {
     fn extract_function_type(types: &[SubType], type_index: u32) -> Result<FunctionType> {
         let sub_type = types.get(type_index as usize).ok_or_else(|| {
             Error::Instantiation(format!(
-                "Type index {} too large to index into types. Len: {}",
+                "type index {} too large to index into types. Len: {}",
                 type_index,
                 types.len()
             ))
@@ -411,7 +411,7 @@ impl Store {
 
         match &sub_type.composite_type {
             CompositeType::Func(ft) => Ok(ft.clone()),
-            _ => instantiation_err!("Type index {} is not a function type", type_index),
+            _ => instantiation_err!("type index {} is not a function type", type_index),
         }
     }
 
@@ -696,40 +696,37 @@ impl Store {
                         | FunctionInstance::Host { function_type, .. } => function_type,
                     };
 
-                    ensure!(
+                    ensure_instantiation!(
                         *expected == *actual,
-                        Error::Instantiation(err(&format!(
-                            "expected {:?}, got {:?}",
-                            expected, actual
-                        )))
+                        err(&format!("expected {:?}, got {:?}", expected, actual))
                     );
                 }
                 (ExternalValue::Table { addr }, ImportDescription::Table(expected_tt)) => {
                     let actual_tt = &self.tables[*addr].table_type;
 
-                    ensure!(
+                    ensure_instantiation!(
                         actual_tt.element_reference_type == expected_tt.element_reference_type
                             && actual_tt.addr_type == expected_tt.addr_type
                             && limits_match(&actual_tt.limit, &expected_tt.limit),
-                        Error::Instantiation(err("table type mismatch"))
+                        err("table type mismatch")
                     );
                 }
                 (ExternalValue::Memory { addr }, ImportDescription::Mem(expected_mt)) => {
                     let actual_mt = &self.memories[*addr].memory_type;
 
-                    ensure!(
+                    ensure_instantiation!(
                         actual_mt.addr_type == expected_mt.addr_type
                             && limits_match(&actual_mt.limit, &expected_mt.limit),
-                        Error::Instantiation(err("memory type mismatch"))
+                        err("memory type mismatch")
                     );
                 }
                 (ExternalValue::Global { addr }, ImportDescription::Global(expected_gt)) => {
                     let actual_gt = &self.globals[*addr].global_type;
 
-                    ensure!(
+                    ensure_instantiation!(
                         actual_gt.value_type == expected_gt.value_type
                             && actual_gt.mutability == expected_gt.mutability,
-                        Error::Instantiation(err("global type mismatch"))
+                        err("global type mismatch")
                     );
                 }
                 (ExternalValue::Tag { addr }, ImportDescription::Tag(type_i)) => {
@@ -740,10 +737,7 @@ impl Store {
 
                     if *addr < self.tags.len() {
                         let actual = &self.tags[*addr].tag_type;
-                        ensure!(
-                            *expected == *actual,
-                            Error::instantiation("tag type mismatch")
-                        );
+                        ensure_instantiation!(*expected == *actual, "tag type mismatch");
                     }
                 }
                 _ => instantiation_err!("import kind mismatch"),
@@ -757,13 +751,11 @@ impl Store {
         module: &Module,
         external_addresses: Vec<ExternalValue>,
     ) -> Result<Instance> {
-        ensure!(
+        ensure_instantiation!(
             module.import_declarations.len() == external_addresses.len(),
-            Error::Instantiation(format!(
-                "Expected {} imports, got {}",
-                module.import_declarations.len(),
-                external_addresses.len()
-            ))
+            "expected {} imports, got {}",
+            module.import_declarations.len(),
+            external_addresses.len()
         );
 
         self.validate_imports(module, &external_addresses)?;
@@ -1664,9 +1656,11 @@ impl Store {
 
         let args_len = args.size_hint().0;
 
-        ensure!(
+        ensure_instantiation!(
             num_args == args_len,
-            Error::Instantiation(format!("expected {} args, got {}", num_args, args_len))
+            "expected {} args, got {}",
+            num_args,
+            args_len
         );
 
         self.stack.extend_exact(args);
@@ -1685,9 +1679,9 @@ impl Store {
     }
 
     fn push_function_call(&mut self, func_addr: usize) -> Result<bool> {
-        ensure!(
+        ensure_trap!(
             self.call_stack.len() < MAX_CALL_DEPTH,
-            Error::Trap(Trap::CallStackExhausted)
+            Trap::CallStackExhausted
         );
 
         let (num_args, num_results) = match &self.functions[func_addr] {
@@ -1712,10 +1706,7 @@ impl Store {
                 function_name,
                 ..
             } => {
-                ensure!(
-                    self.stack.len() >= num_args,
-                    Error::Instantiation("not enough args on stack".into())
-                );
+                ensure_instantiation!(self.stack.len() >= num_args, "not enough args on stack");
 
                 let module_name = module_name.clone();
                 let function_name = function_name.clone();
@@ -1726,10 +1717,7 @@ impl Store {
             }
         };
 
-        ensure!(
-            self.stack.len() >= num_args,
-            Error::Instantiation("not enough args on stack".into())
-        );
+        ensure_instantiation!(self.stack.len() >= num_args, "not enough args on stack");
         let args_start = self.stack.len() - num_args;
         let mut locals = self.stack.slice_from(args_start).to_vec();
         self.stack.truncate(args_start);
@@ -1920,10 +1908,7 @@ impl Store {
                         | FunctionInstance::Host { function_type, .. } => function_type,
                     };
 
-                    ensure!(
-                        expected == actual,
-                        Error::Trap(Trap::IndirectCallTypeMismatch)
-                    );
+                    ensure_trap!(expected == actual, Trap::IndirectCallTypeMismatch);
 
                     if self.push_function_call(*func_addr)? {
                         return Ok(RunOutcome::Suspended);
@@ -1971,10 +1956,7 @@ impl Store {
                         | FunctionInstance::Host { function_type, .. } => function_type,
                     };
 
-                    ensure!(
-                        expected == actual,
-                        Error::Trap(Trap::IndirectCallTypeMismatch)
-                    );
+                    ensure_trap!(expected == actual, Trap::IndirectCallTypeMismatch);
 
                     let func_addr = *func_addr;
                     let num_args = expected.params.len();
@@ -2055,9 +2037,9 @@ impl Store {
                 }
                 Op::GlobalSet { global_i } => {
                     let addr = self.instances[mi].global_addrs[global_i as usize];
-                    ensure!(
+                    ensure_instantiation!(
                         matches!(self.globals[addr].global_type.mutability, Mutability::Var),
-                        Error::Instantiation("cannot set immutable global".into())
+                        "cannot set immutable global"
                     );
                     self.globals[addr].value = self.stack.pop();
                 }
@@ -2083,10 +2065,7 @@ impl Store {
                 Op::RefEq => todo!(),
                 Op::RefAsNonNull => {
                     let val = self.stack.pop();
-                    ensure!(
-                        !matches!(val.as_ref(), Ref::Null),
-                        Error::Trap(Trap::NullReference)
-                    );
+                    ensure_trap!(!matches!(val.as_ref(), Ref::Null), Trap::NullReference);
                     self.stack.push(val);
                 }
                 Op::TryCatchPush { handler_i } => {
@@ -2469,11 +2448,8 @@ impl Store {
                     let a = pop_val!(self, I32);
                     let b = pop_val!(self, I32);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
-                    ensure!(
-                        !(b == i32::MIN && a == -1),
-                        Error::Trap(Trap::IntegerOverflow)
-                    );
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
+                    ensure_trap!(!(b == i32::MIN && a == -1), Trap::IntegerOverflow);
 
                     self.stack.push(b.wrapping_div(a));
                 }
@@ -2481,21 +2457,21 @@ impl Store {
                     let a = pop_val!(self, I32);
                     let b = pop_val!(self, I32);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
                     self.stack.push(((b as u32) / (a as u32)) as i32);
                 }
                 Op::I32RemainderSigned => {
                     let a = pop_val!(self, I32);
                     let b = pop_val!(self, I32);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
                     self.stack.push(b.wrapping_rem(a));
                 }
                 Op::I32RemainderUnsigned => {
                     let a = pop_val!(self, I32);
                     let b = pop_val!(self, I32);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
                     self.stack.push(((b as u32) % (a as u32)) as i32);
                 }
                 Op::I32And => binop!(self, I32, |b, a| b & a),
@@ -2542,11 +2518,8 @@ impl Store {
                     let a = pop_val!(self, I64);
                     let b = pop_val!(self, I64);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
-                    ensure!(
-                        !(b == i64::MIN && a == -1),
-                        Error::Trap(Trap::IntegerOverflow)
-                    );
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
+                    ensure_trap!(!(b == i64::MIN && a == -1), Trap::IntegerOverflow);
 
                     self.stack.push(b.wrapping_div(a));
                 }
@@ -2554,7 +2527,7 @@ impl Store {
                     let a = pop_val!(self, I64);
                     let b = pop_val!(self, I64);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
 
                     self.stack.push(((b as u64) / (a as u64)) as i64);
                 }
@@ -2562,7 +2535,7 @@ impl Store {
                     let a = pop_val!(self, I64);
                     let b = pop_val!(self, I64);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
 
                     self.stack.push(b.wrapping_rem(a));
                 }
@@ -2570,7 +2543,7 @@ impl Store {
                     let a = pop_val!(self, I64);
                     let b = pop_val!(self, I64);
 
-                    ensure!(a != 0, Error::Trap(Trap::IntegerDivideByZero));
+                    ensure_trap!(a != 0, Trap::IntegerDivideByZero);
                     self.stack.push(((b as u64) % (a as u64)) as i64);
                 }
                 Op::I64And => binop!(self, I64, |b, a| b & a),
@@ -2716,42 +2689,36 @@ impl Store {
                 }
                 Op::I32TruncF32Signed => {
                     let a = pop_val!(self, F32);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
+                    ensure_trap!(
                         t >= i32::MIN as f32 && t < i32::MAX as f32,
-                        Error::Trap(Trap::IntegerOverflow)
+                        Trap::IntegerOverflow
                     );
                     self.stack.push(t as i32);
                 }
                 Op::I32TruncF32Unsigned => {
                     let a = pop_val!(self, F32);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
-                        t >= 0.0 && t < u32::MAX as f32,
-                        Error::Trap(Trap::IntegerOverflow)
-                    );
+                    ensure_trap!(t >= 0.0 && t < u32::MAX as f32, Trap::IntegerOverflow);
                     self.stack.push(t as u32 as i32);
                 }
                 Op::I32TruncF64Signed => {
                     let a = pop_val!(self, F64);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
+                    ensure_trap!(
                         t >= i32::MIN as f64 && t <= i32::MAX as f64,
-                        Error::Trap(Trap::IntegerOverflow)
+                        Trap::IntegerOverflow
                     );
                     self.stack.push(t as i32);
                 }
                 Op::I32TruncF64Unsigned => {
                     let a = pop_val!(self, F64);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
-                        t >= 0.0 && t <= u32::MAX as f64,
-                        Error::Trap(Trap::IntegerOverflow)
-                    );
+                    ensure_trap!(t >= 0.0 && t <= u32::MAX as f64, Trap::IntegerOverflow);
                     self.stack.push(t as u32 as i32);
                 }
                 Op::I64ExtendI32Signed => {
@@ -2764,42 +2731,36 @@ impl Store {
                 }
                 Op::I64TruncF32Signed => {
                     let a = pop_val!(self, F32);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
+                    ensure_trap!(
                         t >= i64::MIN as f32 && t < i64::MAX as f32,
-                        Error::Trap(Trap::IntegerOverflow)
+                        Trap::IntegerOverflow
                     );
                     self.stack.push(t as i64);
                 }
                 Op::I64TruncF32Unsigned => {
                     let a = pop_val!(self, F32);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
-                        t >= 0.0 && t < u64::MAX as f32,
-                        Error::Trap(Trap::IntegerOverflow)
-                    );
+                    ensure_trap!(t >= 0.0 && t < u64::MAX as f32, Trap::IntegerOverflow);
                     self.stack.push(t as u64 as i64);
                 }
                 Op::I64TruncF64Signed => {
                     let a = pop_val!(self, F64);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
+                    ensure_trap!(
                         t >= i64::MIN as f64 && t < i64::MAX as f64,
-                        Error::Trap(Trap::IntegerOverflow)
+                        Trap::IntegerOverflow
                     );
                     self.stack.push(t as i64);
                 }
                 Op::I64TruncF64Unsigned => {
                     let a = pop_val!(self, F64);
-                    ensure!(!a.is_nan(), Error::Trap(Trap::InvalidConversionToInteger));
+                    ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
                     let t = a.trunc();
-                    ensure!(
-                        t >= 0.0 && t < u64::MAX as f64,
-                        Error::Trap(Trap::IntegerOverflow)
-                    );
+                    ensure_trap!(t >= 0.0 && t < u64::MAX as f64, Trap::IntegerOverflow);
                     self.stack.push(t as u64 as i64);
                 }
                 Op::F32ConvertI32Signed => {
