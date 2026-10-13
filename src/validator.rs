@@ -112,9 +112,153 @@ impl<'a> Validator<'a> {
                 let ty = self.ctx.local_type(*x)?;
                 self.ctx.apply(&[ty], &[ty])?;
             }
-            Instruction::I32Add | Instruction::I32Sub | Instruction::I32Mul => {
-                self.ctx.binop(ValueType::I32)?;
+            // unop: nt -> nt
+            Instruction::I32CountLeadingZeros
+            | Instruction::I32CountTrailingZeros
+            | Instruction::I32PopCount
+            | Instruction::I32Extend8Signed
+            | Instruction::I32Extend16Signed => self.ctx.unop(ValueType::I32)?,
+            Instruction::I64CountLeadingZeros
+            | Instruction::I64CountTrailingZeros
+            | Instruction::I64PopCount
+            | Instruction::I64Extend8Signed
+            | Instruction::I64Extend16Signed
+            | Instruction::I64Extend32Signed => self.ctx.unop(ValueType::I64)?,
+            Instruction::F32Abs
+            | Instruction::F32Neg
+            | Instruction::F32Ceil
+            | Instruction::F32Floor
+            | Instruction::F32Trunc
+            | Instruction::F32Nearest
+            | Instruction::F32Sqrt => self.ctx.unop(ValueType::F32)?,
+            Instruction::F64Abs
+            | Instruction::F64Neg
+            | Instruction::F64Ceil
+            | Instruction::F64Floor
+            | Instruction::F64Trunc
+            | Instruction::F64Nearest
+            | Instruction::F64Sqrt => self.ctx.unop(ValueType::F64)?,
+            // binop: nt nt -> nt
+            Instruction::I32Add
+            | Instruction::I32Sub
+            | Instruction::I32Mul
+            | Instruction::I32DivSigned
+            | Instruction::I32DivUnsigned
+            | Instruction::I32RemainderSigned
+            | Instruction::I32RemainderUnsigned
+            | Instruction::I32And
+            | Instruction::I32Or
+            | Instruction::I32Xor
+            | Instruction::I32Shl
+            | Instruction::I32ShrSigned
+            | Instruction::I32ShrUnsigned
+            | Instruction::I32RotateLeft
+            | Instruction::I32RotateRight => self.ctx.binop(ValueType::I32)?,
+            Instruction::I64Add
+            | Instruction::I64Sub
+            | Instruction::I64Mul
+            | Instruction::I64DivSigned
+            | Instruction::I64DivUnsigned
+            | Instruction::I64RemainderSigned
+            | Instruction::I64RemainderUnsigned
+            | Instruction::I64And
+            | Instruction::I64Or
+            | Instruction::I64Xor
+            | Instruction::I64Shl
+            | Instruction::I64ShrSigned
+            | Instruction::I64ShrUnsigned
+            | Instruction::I64RotateLeft
+            | Instruction::I64RotateRight => self.ctx.binop(ValueType::I64)?,
+            Instruction::F32Add
+            | Instruction::F32Sub
+            | Instruction::F32Mul
+            | Instruction::F32Div
+            | Instruction::F32Min
+            | Instruction::F32Max
+            | Instruction::F32CopySign => self.ctx.binop(ValueType::F32)?,
+            Instruction::F64Add
+            | Instruction::F64Sub
+            | Instruction::F64Mul
+            | Instruction::F64Div
+            | Instruction::F64Min
+            | Instruction::F64Max
+            | Instruction::F64CopySign => self.ctx.binop(ValueType::F64)?,
+            // cvtop: nt1 -> nt2
+            Instruction::I32WrapI64 => self.ctx.cvtop(ValueType::I64, ValueType::I32)?,
+            Instruction::I32TruncF32Signed
+            | Instruction::I32TruncF32Unsigned
+            | Instruction::I32TruncSaturatedF32Signed
+            | Instruction::I32TruncSaturatedF32Unsigned
+            | Instruction::I32ReinterpretF32 => self.ctx.cvtop(ValueType::F32, ValueType::I32)?,
+            Instruction::I32TruncF64Signed
+            | Instruction::I32TruncF64Unsigned
+            | Instruction::I32TruncSaturatedF64Signed
+            | Instruction::I32TruncSaturatedF64Unsigned => {
+                self.ctx.cvtop(ValueType::F64, ValueType::I32)?
             }
+            Instruction::I64ExtendI32Signed
+            | Instruction::I64ExtendI32Unsigned => {
+                self.ctx.cvtop(ValueType::I32, ValueType::I64)?
+            }
+            Instruction::I64TruncF32Signed
+            | Instruction::I64TruncF32Unsigned
+            | Instruction::I64TruncSaturatedF32Signed
+            | Instruction::I64TruncSaturatedF32Unsigned => {
+                self.ctx.cvtop(ValueType::F32, ValueType::I64)?
+            }
+            Instruction::I64TruncF64Signed
+            | Instruction::I64TruncF64Unsigned
+            | Instruction::I64TruncSaturatedF64Signed
+            | Instruction::I64TruncSaturatedF64Unsigned
+            | Instruction::I64ReinterpretF64 => self.ctx.cvtop(ValueType::F64, ValueType::I64)?,
+            Instruction::F32ConvertI32Signed
+            | Instruction::F32ConvertI32Unsigned
+            | Instruction::F32ReinterpretI32 => self.ctx.cvtop(ValueType::I32, ValueType::F32)?,
+            Instruction::F32ConvertI64Signed | Instruction::F32ConvertI64Unsigned => {
+                self.ctx.cvtop(ValueType::I64, ValueType::F32)?
+            }
+            Instruction::F32DemoteF64 => self.ctx.cvtop(ValueType::F64, ValueType::F32)?,
+            Instruction::F64ConvertI32Signed | Instruction::F64ConvertI32Unsigned => {
+                self.ctx.cvtop(ValueType::I32, ValueType::F64)?
+            }
+            Instruction::F64ConvertI64Signed
+            | Instruction::F64ConvertI64Unsigned
+            | Instruction::F64ReinterpretI64 => self.ctx.cvtop(ValueType::I64, ValueType::F64)?,
+            Instruction::F64PromoteF32 => self.ctx.cvtop(ValueType::F32, ValueType::F64)?,
+            Instruction::I32EqZero => self.ctx.testop(ValueType::I32)?,
+            Instruction::I64EqZero => self.ctx.testop(ValueType::I64)?,
+            Instruction::I32Eq
+            | Instruction::I32Ne
+            | Instruction::I32LtSigned
+            | Instruction::I32LtUnsigned
+            | Instruction::I32GtSigned
+            | Instruction::I32GtUnsigned
+            | Instruction::I32LeSigned
+            | Instruction::I32LeUnsigned
+            | Instruction::I32GeSigned
+            | Instruction::I32GeUnsigned => self.ctx.relop(ValueType::I32)?,
+            Instruction::I64Eq
+            | Instruction::I64Ne
+            | Instruction::I64LtSigned
+            | Instruction::I64LtUnsigned
+            | Instruction::I64GtSigned
+            | Instruction::I64GtUnsigned
+            | Instruction::I64LeSigned
+            | Instruction::I64LeUnsigned
+            | Instruction::I64GeSigned
+            | Instruction::I64GeUnsigned => self.ctx.relop(ValueType::I64)?,
+            Instruction::F32Eq
+            | Instruction::F32Ne
+            | Instruction::F32Lt
+            | Instruction::F32Gt
+            | Instruction::F32Le
+            | Instruction::F32Ge => self.ctx.relop(ValueType::F32)?,
+            Instruction::F64Eq
+            | Instruction::F64Ne
+            | Instruction::F64Lt
+            | Instruction::F64Gt
+            | Instruction::F64Le
+            | Instruction::F64Ge => self.ctx.relop(ValueType::F64)?,
             _ => unimplemented!(),
         }
 
@@ -631,5 +775,449 @@ mod tests {
             .push(function(1, &[], vec![Instruction::LocalGet(0)]));
 
         assert!(Validator::new(&module).validate().is_err());
+    }
+
+    fn constant(t: ValueType) -> Instruction {
+        match t {
+            ValueType::I32 => Instruction::I32Const(1),
+            ValueType::I64 => Instruction::I64Const(1),
+            ValueType::F32 => Instruction::F32Const(1.0),
+            ValueType::F64 => Instruction::F64Const(1.0),
+            _ => unreachable!("no constant for {t:?}"),
+        }
+    }
+
+    #[test]
+    fn testop_takes_one_operand_and_returns_i32() {
+        for (t, eqz) in [
+            (ValueType::I32, Instruction::I32EqZero),
+            (ValueType::I64, Instruction::I64EqZero),
+        ] {
+            let body = vec![constant(t), eqz.clone()];
+
+            assert!(validate_body(NONE, I32, &[], body.clone()).is_ok());
+
+            // the result is i32 even for i64.eqz
+            assert!(validate_body(NONE, I64, &[], body).is_err());
+        }
+    }
+
+    #[test]
+    fn testop_rejects_the_wrong_operand_type() {
+        let body = vec![Instruction::I32Const(1), Instruction::I64EqZero];
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+
+        let body = vec![Instruction::I64Const(1), Instruction::I32EqZero];
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn testop_with_empty_stack_errors() {
+        assert!(validate_body(NONE, I32, &[], vec![Instruction::I32EqZero]).is_err());
+    }
+
+    #[test]
+    fn every_relop_takes_two_operands_and_returns_i32() {
+        use Instruction::*;
+
+        let cases: [(ValueType, Vec<Instruction>); 4] = [
+            (
+                ValueType::I32,
+                vec![
+                    I32Eq,
+                    I32Ne,
+                    I32LtSigned,
+                    I32LtUnsigned,
+                    I32GtSigned,
+                    I32GtUnsigned,
+                    I32LeSigned,
+                    I32LeUnsigned,
+                    I32GeSigned,
+                    I32GeUnsigned,
+                ],
+            ),
+            (
+                ValueType::I64,
+                vec![
+                    I64Eq,
+                    I64Ne,
+                    I64LtSigned,
+                    I64LtUnsigned,
+                    I64GtSigned,
+                    I64GtUnsigned,
+                    I64LeSigned,
+                    I64LeUnsigned,
+                    I64GeSigned,
+                    I64GeUnsigned,
+                ],
+            ),
+            (
+                ValueType::F32,
+                vec![F32Eq, F32Ne, F32Lt, F32Gt, F32Le, F32Ge],
+            ),
+            (
+                ValueType::F64,
+                vec![F64Eq, F64Ne, F64Lt, F64Gt, F64Le, F64Ge],
+            ),
+        ];
+
+        for (t, relops) in cases {
+            for relop in relops {
+                let body = vec![constant(t), constant(t), relop.clone()];
+
+                assert!(
+                    validate_body(NONE, I32, &[], body.clone()).is_ok(),
+                    "{relop:?} should be i32"
+                );
+
+                // never returns the operand type, except where that is i32
+                if t != ValueType::I32 {
+                    assert!(
+                        validate_body(&[], &[t], &[], body).is_err(),
+                        "{relop:?} should not return {t:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn relop_consumes_both_operands() {
+        let body = vec![
+            Instruction::I64Const(1),
+            Instruction::I64Const(2),
+            Instruction::I64Eq,
+        ];
+
+        // nothing but the i32 result is left
+        assert!(validate_body(NONE, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn relop_rejects_mismatched_operand_types() {
+        let body = vec![
+            Instruction::I32Const(1),
+            Instruction::I64Const(2),
+            Instruction::I32Eq,
+        ];
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+
+        let body = vec![
+            Instruction::I64Const(1),
+            Instruction::I64Const(2),
+            Instruction::F64Eq,
+        ];
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn relop_with_too_few_operands_errors() {
+        let body = vec![Instruction::F32Const(1.0), Instruction::F32Lt];
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+
+        assert!(validate_body(NONE, I32, &[], vec![Instruction::F32Lt]).is_err());
+    }
+
+    #[test]
+    fn relop_result_can_feed_other_instructions() {
+        // (i64.eq a b) as an i32 condition, then i32.eqz of that
+        let body = vec![
+            Instruction::LocalGet(0),
+            Instruction::LocalGet(0),
+            Instruction::I64Eq,
+            Instruction::I32EqZero,
+        ];
+
+        assert!(validate_body(I64, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn relop_in_unreachable_code_accepts_missing_operands() {
+        let body = vec![Instruction::Unreachable, Instruction::F64Gt];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    /// (instruction, operand types in push order, result type)
+    fn numeric_table() -> Vec<(Instruction, Vec<ValueType>, ValueType)> {
+        use Instruction::*;
+
+        let (i32t, i64t, f32t, f64t) = (
+            ValueType::I32,
+            ValueType::I64,
+            ValueType::F32,
+            ValueType::F64,
+        );
+
+        let mut table = Vec::new();
+        let mut add = |instructions: Vec<Instruction>, params: Vec<ValueType>, result| {
+            for instruction in instructions {
+                table.push((instruction, params.clone(), result));
+            }
+        };
+
+        // testop
+        add(vec![I32EqZero], vec![i32t], i32t);
+        add(vec![I64EqZero], vec![i64t], i32t);
+
+        // relop
+        add(
+            vec![
+                I32Eq, I32Ne, I32LtSigned, I32LtUnsigned, I32GtSigned, I32GtUnsigned,
+                I32LeSigned, I32LeUnsigned, I32GeSigned, I32GeUnsigned,
+            ],
+            vec![i32t, i32t],
+            i32t,
+        );
+        add(
+            vec![
+                I64Eq, I64Ne, I64LtSigned, I64LtUnsigned, I64GtSigned, I64GtUnsigned,
+                I64LeSigned, I64LeUnsigned, I64GeSigned, I64GeUnsigned,
+            ],
+            vec![i64t, i64t],
+            i32t,
+        );
+        add(
+            vec![F32Eq, F32Ne, F32Lt, F32Gt, F32Le, F32Ge],
+            vec![f32t, f32t],
+            i32t,
+        );
+        add(
+            vec![F64Eq, F64Ne, F64Lt, F64Gt, F64Le, F64Ge],
+            vec![f64t, f64t],
+            i32t,
+        );
+
+        // unop
+        add(
+            vec![
+                I32CountLeadingZeros, I32CountTrailingZeros, I32PopCount, I32Extend8Signed,
+                I32Extend16Signed,
+            ],
+            vec![i32t],
+            i32t,
+        );
+        add(
+            vec![
+                I64CountLeadingZeros, I64CountTrailingZeros, I64PopCount, I64Extend8Signed,
+                I64Extend16Signed, I64Extend32Signed,
+            ],
+            vec![i64t],
+            i64t,
+        );
+        add(
+            vec![F32Abs, F32Neg, F32Ceil, F32Floor, F32Trunc, F32Nearest, F32Sqrt],
+            vec![f32t],
+            f32t,
+        );
+        add(
+            vec![F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt],
+            vec![f64t],
+            f64t,
+        );
+
+        // binop
+        add(
+            vec![
+                I32Add, I32Sub, I32Mul, I32DivSigned, I32DivUnsigned, I32RemainderSigned,
+                I32RemainderUnsigned, I32And, I32Or, I32Xor, I32Shl, I32ShrSigned,
+                I32ShrUnsigned, I32RotateLeft, I32RotateRight,
+            ],
+            vec![i32t, i32t],
+            i32t,
+        );
+        add(
+            vec![
+                I64Add, I64Sub, I64Mul, I64DivSigned, I64DivUnsigned, I64RemainderSigned,
+                I64RemainderUnsigned, I64And, I64Or, I64Xor, I64Shl, I64ShrSigned,
+                I64ShrUnsigned, I64RotateLeft, I64RotateRight,
+            ],
+            vec![i64t, i64t],
+            i64t,
+        );
+        add(
+            vec![F32Add, F32Sub, F32Mul, F32Div, F32Min, F32Max, F32CopySign],
+            vec![f32t, f32t],
+            f32t,
+        );
+        add(
+            vec![F64Add, F64Sub, F64Mul, F64Div, F64Min, F64Max, F64CopySign],
+            vec![f64t, f64t],
+            f64t,
+        );
+
+        // cvtop
+        add(vec![I32WrapI64], vec![i64t], i32t);
+        add(
+            vec![
+                I32TruncF32Signed, I32TruncF32Unsigned, I32TruncSaturatedF32Signed,
+                I32TruncSaturatedF32Unsigned, I32ReinterpretF32,
+            ],
+            vec![f32t],
+            i32t,
+        );
+        add(
+            vec![
+                I32TruncF64Signed, I32TruncF64Unsigned, I32TruncSaturatedF64Signed,
+                I32TruncSaturatedF64Unsigned,
+            ],
+            vec![f64t],
+            i32t,
+        );
+        add(vec![I64ExtendI32Signed, I64ExtendI32Unsigned], vec![i32t], i64t);
+        add(
+            vec![
+                I64TruncF32Signed, I64TruncF32Unsigned, I64TruncSaturatedF32Signed,
+                I64TruncSaturatedF32Unsigned,
+            ],
+            vec![f32t],
+            i64t,
+        );
+        add(
+            vec![
+                I64TruncF64Signed, I64TruncF64Unsigned, I64TruncSaturatedF64Signed,
+                I64TruncSaturatedF64Unsigned, I64ReinterpretF64,
+            ],
+            vec![f64t],
+            i64t,
+        );
+        add(
+            vec![F32ConvertI32Signed, F32ConvertI32Unsigned, F32ReinterpretI32],
+            vec![i32t],
+            f32t,
+        );
+        add(
+            vec![F32ConvertI64Signed, F32ConvertI64Unsigned],
+            vec![i64t],
+            f32t,
+        );
+        add(vec![F32DemoteF64], vec![f64t], f32t);
+        add(
+            vec![F64ConvertI32Signed, F64ConvertI32Unsigned],
+            vec![i32t],
+            f64t,
+        );
+        add(
+            vec![F64ConvertI64Signed, F64ConvertI64Unsigned, F64ReinterpretI64],
+            vec![i64t],
+            f64t,
+        );
+        add(vec![F64PromoteF32], vec![f32t], f64t);
+
+        table
+    }
+
+    /// A type that is guaranteed to differ from `t`.
+    fn other_than(t: ValueType) -> ValueType {
+        if t == ValueType::I32 {
+            ValueType::I64
+        } else {
+            ValueType::I32
+        }
+    }
+
+    fn body_for(instruction: &Instruction, params: &[ValueType]) -> Vec<Instruction> {
+        let mut body: Vec<Instruction> = params.iter().map(|&t| constant(t)).collect();
+        body.push(instruction.clone());
+        body
+    }
+
+    #[test]
+    fn numeric_instructions_have_their_spec_type() {
+        for (instruction, params, result) in numeric_table() {
+            let body = body_for(&instruction, &params);
+
+            assert!(
+                validate_body(NONE, &[result], &[], body).is_ok(),
+                "{instruction:?} should be {params:?} -> {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_instructions_reject_a_wrong_result_type() {
+        for (instruction, params, result) in numeric_table() {
+            let body = body_for(&instruction, &params);
+
+            assert!(
+                validate_body(NONE, &[other_than(result)], &[], body).is_err(),
+                "{instruction:?} should not return {:?}",
+                other_than(result)
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_instructions_consume_their_operands() {
+        for (instruction, params, _) in numeric_table() {
+            let body = body_for(&instruction, &params);
+
+            // only the result is left, so a function returning nothing is invalid
+            assert!(
+                validate_body(NONE, NONE, &[], body).is_err(),
+                "{instruction:?} should leave exactly one value"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_instructions_reject_a_missing_operand() {
+        for (instruction, params, result) in numeric_table() {
+            let body = body_for(&instruction, &params[1..]);
+
+            assert!(
+                validate_body(NONE, &[result], &[], body).is_err(),
+                "{instruction:?} should need {} operand(s)",
+                params.len()
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_instructions_reject_a_wrong_operand_type() {
+        for (instruction, params, result) in numeric_table() {
+            for bad in 0..params.len() {
+                let mut wrong = params.clone();
+                wrong[bad] = other_than(params[bad]);
+
+                let body = body_for(&instruction, &wrong);
+
+                assert!(
+                    validate_body(NONE, &[result], &[], body).is_err(),
+                    "{instruction:?} should reject operand {bad} being {:?}",
+                    wrong[bad]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_instructions_accept_missing_operands_in_unreachable_code() {
+        for (instruction, _, result) in numeric_table() {
+            let body = vec![Instruction::Unreachable, instruction.clone()];
+
+            assert!(
+                validate_body(NONE, &[result], &[], body).is_ok(),
+                "{instruction:?} should type check after unreachable"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_instructions_compose() {
+        // ((a + b) as i64) * 2, wrapped back to i32, compared with a
+        let body = vec![
+            Instruction::LocalGet(0),
+            Instruction::LocalGet(1),
+            Instruction::I32Add,
+            Instruction::I64ExtendI32Signed,
+            Instruction::I64Const(2),
+            Instruction::I64Mul,
+            Instruction::I32WrapI64,
+            Instruction::LocalGet(0),
+            Instruction::I32Eq,
+        ];
+
+        assert!(validate_body(&[ValueType::I32, ValueType::I32], I32, &[], body).is_ok());
     }
 }
