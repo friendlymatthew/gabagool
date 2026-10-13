@@ -1724,9 +1724,8 @@ impl Store {
 
         let cf = &self.instances[usize::from(module_i)].code.compiled_funcs
             [usize::try_from(compiled_func_i).expect("u32 fits in usize")];
-        for _ in &cf.local_types[num_args..] {
-            locals.push(RawValue::default());
-        }
+
+        locals.resize(locals.len() + cf.local_types.len(), RawValue::default());
 
         let stack_base = self.stack.len();
 

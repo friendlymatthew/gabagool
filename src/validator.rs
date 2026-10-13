@@ -1,5 +1,5 @@
 use crate::{
-    bail_validation, ensure_validation, Error, Function, Instruction, Local, ParsedModule, Result,
+    bail_validation, ensure_validation, Error, Function, Instruction, ParsedModule, Result,
     ValueType,
 };
 
@@ -63,11 +63,13 @@ impl<'a> Validator<'a> {
             .try_as_function_type()
             .ok_or_else(|| Error::validation("does not have function type"))?;
 
-        let mut locals = ty.params.clone();
+        let locals = {
+            let mut out = Vec::with_capacity(ty.params.len() + f.locals.len());
+            out.extend_from_slice(&ty.params);
+            out.extend_from_slice(&f.locals);
 
-        for &Local { count, value_type } in f.locals.iter() {
-            locals.extend(std::iter::repeat_n(value_type, count as usize));
-        }
+            out
+        };
 
         self.ctx = FunctionContext::new(locals);
         self.ctx.push_control(&[], &ty.results, false);
@@ -612,7 +614,7 @@ mod tests {
             type_index,
             locals: locals
                 .iter()
-                .map(|&(count, value_type)| Local { count, value_type })
+                .flat_map(|&(ct, vt)| vec![vt; ct as usize])
                 .collect(),
             body,
         }

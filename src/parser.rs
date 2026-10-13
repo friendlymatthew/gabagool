@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::iter::RepeatN;
 
 use crate::error::{Error, Result};
 use crate::{
@@ -17,9 +18,11 @@ use crate::module::{
     AddrType, ArrayType, BlockType, CatchClause, CompositeType, CustomSection, DataMode,
     DataSegment, ElementMode, ElementSegment, Export, ExportDescription, FieldType, Function,
     FunctionType, Global, GlobalType, HeapType, ImportDeclaration, ImportDescription, Instruction,
-    Limit, Local, MemArg, MemoryType, Mutability, ParsedModule, RefType, StorageType, StructType,
-    SubType, TableDef, TableType, Tag, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
+    Limit, MemArg, MemoryType, Mutability, ParsedModule, RefType, StorageType, StructType, SubType,
+    TableDef, TableType, Tag, ValueType, TERM_ELSE_BYTE, TERM_END_BYTE,
 };
+
+const MAX_LOCALS: usize = 50_000;
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -2147,11 +2150,11 @@ impl<'a> Parser<'a> {
         self.parse_vec(Self::parse_element_segement)
     }
 
-    fn parse_local(&mut self) -> Result<Local> {
-        Ok(Local {
-            count: self.read_u32()?,
-            value_type: self.parse_value_type()?,
-        })
+    fn parse_local(&mut self) -> Result<RepeatN<ValueType>> {
+        let count = self.read_u32()?;
+        let vt = self.parse_value_type()?;
+
+        Ok(std::iter::repeat_n(vt, count as usize))
     }
 
     fn parse_code(&mut self) -> Result<Function> {
@@ -2163,14 +2166,22 @@ impl<'a> Parser<'a> {
             .pop_front()
             .ok_or_else(|| Error::Parse("function type list empty".into()))?;
 
-        let locals = self.parse_vec(Self::parse_local)?;
+        let locals = {
+            let runs = self.parse_vec(Self::parse_local)?;
 
-        let total_locals = locals
-            .iter()
-            .map(|Local { count, .. }| *count as usize)
-            .sum::<usize>();
+            let total_locals = runs
+                .iter()
+                .map(|l| l.len())
+                .try_fold(0usize, |acc, x| acc.checked_add(x))
+                .ok_or_else(|| Error::parse("too many locals"))?;
 
-        ensure_parse!(total_locals <= u32::MAX as usize, "too many locals");
+            ensure_parse!(total_locals <= MAX_LOCALS, "too many locals");
+
+            let mut out = Vec::with_capacity(total_locals);
+            out.extend(runs.into_iter().flatten());
+
+            out
+        };
 
         let func = Function {
             type_index,

@@ -837,15 +837,9 @@ pub struct ElementSegment {
 }
 
 #[derive(Debug, Clone)]
-pub struct Local {
-    pub count: u32,
-    pub value_type: ValueType,
-}
-
-#[derive(Debug, Clone)]
 pub struct Function {
     pub type_index: u32,
-    pub locals: Vec<Local>,
+    pub locals: Vec<ValueType>,
     pub body: Vec<Instruction>,
 }
 

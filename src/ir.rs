@@ -28,7 +28,7 @@ pub struct CompiledCatchClause {
 #[derive(Debug, Clone)]
 pub struct CompiledFunction {
     pub ops: Vec<Op>,
-    // contains [args; num_args] [...local_types]
+    // holds declared locals only, excluding params
     pub local_types: Vec<ValueType>,
     pub(crate) max_stack_height: u32,
 }

@@ -1,6 +1,6 @@
 use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry, Op};
 use crate::module::{
-    BlockType, CatchClause, CompositeType, Function, Instruction, ParsedModule, SubType, ValueType,
+    BlockType, CatchClause, CompositeType, Function, Instruction, ParsedModule, SubType,
 };
 use crate::{FunctionType, ImportDescription};
 
@@ -220,26 +220,9 @@ impl<'a> Compiler<'a> {
 
         let assembled = self.assemble();
 
-        let extra_locals: usize = func.locals.iter().map(|l| l.count as usize).sum();
-        let mut local_types: Vec<ValueType> = match &st.composite_type {
-            CompositeType::Func(ft) => {
-                let mut v = Vec::with_capacity(ft.params.len() + extra_locals);
-                v.extend_from_slice(&ft.params);
-
-                v
-            }
-            _ => Vec::with_capacity(extra_locals),
-        };
-
-        for local in &func.locals {
-            for _ in 0..local.count {
-                local_types.push(local.value_type.clone());
-            }
-        }
-
         CompiledFunction {
             ops: assembled,
-            local_types,
+            local_types: func.locals.clone(),
             max_stack_height: self.max_stack_height as u32,
         }
     }
