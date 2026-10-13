@@ -1,5 +1,5 @@
 use crate::{
-    ensure_validation, bail_validation, Error, Function, Instruction, Local, ParsedModule, Result,
+    bail_validation, ensure_validation, Error, Function, Instruction, Local, ParsedModule, Result,
     ValueType,
 };
 
@@ -91,6 +91,30 @@ impl<'a> Validator<'a> {
             Instruction::I32Const(_) => {
                 self.ctx.push_value(ValueType::I32);
             }
+            Instruction::I64Const(_) => {
+                self.ctx.push_value(ValueType::I64);
+            }
+            Instruction::F32Const(_) => {
+                self.ctx.push_value(ValueType::F32);
+            }
+            Instruction::F64Const(_) => {
+                self.ctx.push_value(ValueType::F64);
+            }
+            Instruction::LocalGet(x) => {
+                let ty = self.ctx.local_type(*x)?;
+                self.ctx.apply(&[], &[ty])?;
+            }
+            Instruction::LocalSet(x) => {
+                let ty = self.ctx.local_type(*x)?;
+                self.ctx.apply(&[ty], &[])?;
+            }
+            Instruction::LocalTee(x) => {
+                let ty = self.ctx.local_type(*x)?;
+                self.ctx.apply(&[ty], &[ty])?;
+            }
+            Instruction::I32Add | Instruction::I32Sub | Instruction::I32Mul => {
+                self.ctx.binop(ValueType::I32)?;
+            }
             _ => unimplemented!(),
         }
 
@@ -112,6 +136,42 @@ impl<'a> FunctionContext<'a> {
             value_stack: Vec::new(),
             control_stack: Vec::new(),
         }
+    }
+
+    fn local_type(&self, index: u32) -> Result<ValueType> {
+        self.locals.get(index as usize).copied().ok_or_else(|| {
+            Error::validation(format!(
+                "unknown local {index}, function has {} locals",
+                self.locals.len()
+            ))
+        })
+    }
+
+    fn apply(&mut self, params: &[ValueType], results: &[ValueType]) -> Result<()> {
+        self.pop_values_expect(params)?;
+        self.push_values(results.iter().cloned());
+
+        Ok(())
+    }
+
+    fn unop(&mut self, t: ValueType) -> Result<()> {
+        self.apply(&[t], &[t])
+    }
+
+    fn binop(&mut self, t: ValueType) -> Result<()> {
+        self.apply(&[t, t], &[t])
+    }
+
+    fn testop(&mut self, t: ValueType) -> Result<()> {
+        self.apply(&[t], &[ValueType::I32])
+    }
+
+    fn relop(&mut self, t: ValueType) -> Result<()> {
+        self.apply(&[t, t], &[ValueType::I32])
+    }
+
+    fn cvtop(&mut self, from: ValueType, to: ValueType) -> Result<()> {
+        self.apply(&[from], &[to])
     }
 
     fn push_value(&mut self, v: impl Into<StackType>) {
@@ -218,6 +278,8 @@ impl<'a> FunctionContext<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{CompositeType, FunctionType, SubType};
+
     use super::*;
 
     const NONE: &[ValueType] = &[];
@@ -389,5 +451,185 @@ mod tests {
 
         v.push_control(I32, I64, false);
         assert_eq!(v.control_stack.last().unwrap().label_types(), I64);
+    }
+
+    fn func_type(params: &[ValueType], results: &[ValueType]) -> SubType {
+        SubType {
+            is_final: true,
+            supertypes: vec![],
+            composite_type: CompositeType::Func(FunctionType {
+                params: params.to_vec(),
+                results: results.to_vec(),
+            }),
+        }
+    }
+
+    fn function(type_index: u32, locals: &[(u32, ValueType)], body: Vec<Instruction>) -> Function {
+        Function {
+            type_index,
+            locals: locals
+                .iter()
+                .map(|&(count, value_type)| Local { count, value_type })
+                .collect(),
+            body,
+        }
+    }
+
+    fn validate_body(
+        params: &[ValueType],
+        results: &[ValueType],
+        locals: &[(u32, ValueType)],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(params, results));
+        module.functions.push(function(0, locals, body));
+
+        Validator::new(&module).validate()
+    }
+
+    #[test]
+    fn local_type_is_bounds_checked() {
+        let ctx = FunctionContext::new(vec![ValueType::I32, ValueType::F64]);
+
+        assert_eq!(ctx.local_type(0).unwrap(), ValueType::I32);
+        assert_eq!(ctx.local_type(1).unwrap(), ValueType::F64);
+        assert!(ctx.local_type(2).is_err());
+    }
+
+    #[test]
+    fn local_get_reads_a_param() {
+        let body = vec![Instruction::LocalGet(0)];
+
+        assert!(validate_body(I32, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn local_get_has_the_locals_type() {
+        let body = vec![Instruction::LocalGet(0)];
+
+        // a param i32 does not satisfy an i64 result
+        assert!(validate_body(I32, I64, &[], body).is_err());
+    }
+
+    #[test]
+    fn local_indices_are_params_then_declared_locals() {
+        let params = [ValueType::I32, ValueType::F32];
+        let locals = [(1, ValueType::I64)];
+
+        assert!(validate_body(&params, I64, &locals, vec![Instruction::LocalGet(2)]).is_ok());
+        assert!(validate_body(
+            &params,
+            &[ValueType::F32],
+            &locals,
+            vec![Instruction::LocalGet(1)]
+        )
+        .is_ok());
+        assert!(validate_body(&params, I32, &locals, vec![Instruction::LocalGet(2)]).is_err());
+    }
+
+    #[test]
+    fn local_count_is_expanded() {
+        let locals = [(3, ValueType::F32)];
+        let f32 = &[ValueType::F32];
+
+        // locals 0, 1, 2 exist, 3 does not
+        assert!(validate_body(NONE, f32, &locals, vec![Instruction::LocalGet(2)]).is_ok());
+        assert!(validate_body(NONE, f32, &locals, vec![Instruction::LocalGet(3)]).is_err());
+    }
+
+    #[test]
+    fn local_get_out_of_range_errors() {
+        assert!(validate_body(NONE, I32, &[], vec![Instruction::LocalGet(0)]).is_err());
+        assert!(validate_body(I32, I32, &[], vec![Instruction::LocalGet(1)]).is_err());
+    }
+
+    #[test]
+    fn local_set_pops_a_matching_value() {
+        let body = vec![Instruction::I32Const(1), Instruction::LocalSet(0)];
+
+        assert!(validate_body(I32, NONE, &[], body).is_ok());
+    }
+
+    #[test]
+    fn local_set_wrong_type_errors() {
+        let body = vec![Instruction::I64Const(1), Instruction::LocalSet(0)];
+
+        assert!(validate_body(I32, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn local_set_with_empty_stack_errors() {
+        assert!(validate_body(I32, NONE, &[], vec![Instruction::LocalSet(0)]).is_err());
+    }
+
+    #[test]
+    fn local_set_out_of_range_errors() {
+        let body = vec![Instruction::I32Const(1), Instruction::LocalSet(1)];
+
+        assert!(validate_body(I32, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn local_set_leaves_nothing_on_the_stack() {
+        // a function returning i32 would need the value that set consumed
+        let body = vec![Instruction::I32Const(1), Instruction::LocalSet(0)];
+
+        assert!(validate_body(I32, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn local_tee_keeps_the_value() {
+        let body = vec![Instruction::I32Const(1), Instruction::LocalTee(0)];
+
+        assert!(validate_body(I32, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn local_tee_then_drop_leaves_an_empty_stack() {
+        let body = vec![
+            Instruction::I32Const(1),
+            Instruction::LocalTee(0),
+            Instruction::Drop,
+        ];
+
+        assert!(validate_body(I32, NONE, &[], body).is_ok());
+    }
+
+    #[test]
+    fn local_tee_wrong_type_errors() {
+        let body = vec![Instruction::I64Const(1), Instruction::LocalTee(0)];
+
+        assert!(validate_body(I32, I64, &[], body).is_err());
+    }
+
+    #[test]
+    fn local_tee_with_empty_stack_errors() {
+        assert!(validate_body(I32, I32, &[], vec![Instruction::LocalTee(0)]).is_err());
+    }
+
+    #[test]
+    fn local_set_in_unreachable_code_accepts_a_missing_operand() {
+        let body = vec![Instruction::Unreachable, Instruction::LocalSet(0)];
+
+        assert!(validate_body(I32, NONE, &[], body).is_ok());
+    }
+
+    #[test]
+    fn locals_do_not_leak_between_functions() {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(I32, I32));
+        module.types.push(func_type(NONE, I32));
+
+        // function 0 has local 0; function 1 has none, so reading local 0 must fail
+        module
+            .functions
+            .push(function(0, &[], vec![Instruction::LocalGet(0)]));
+
+        module
+            .functions
+            .push(function(1, &[], vec![Instruction::LocalGet(0)]));
+
+        assert!(Validator::new(&module).validate().is_err());
     }
 }

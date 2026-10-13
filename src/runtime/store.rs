@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    ensure_instantiation, ensure_trap, bail_instantiation, bail_trap, AddrType, Component,
+    bail_instantiation, bail_trap, ensure_instantiation, ensure_trap, AddrType, Component,
     ComponentInstance, ComponentValue, DataMode, ElementMode, GuestMemory, ImportDescription,
     InstantiatedComponent, Instruction, LiftedFunc, Module, Mutability, Trap,
 };
@@ -3279,7 +3279,9 @@ impl Store {
                 Instruction::I64Mul => ops.push(Op::I64Mul),
                 Instruction::F32Const(v) => ops.push(Op::F32Const { value: *v }),
                 Instruction::F64Const(v) => ops.push(Op::F64Const { value: *v }),
-                other => bail_instantiation!("unexpected instruction in init sequence: {:?}", other),
+                other => {
+                    bail_instantiation!("unexpected instruction in init sequence: {:?}", other)
+                }
             }
         }
         ops.push(Op::Return);
