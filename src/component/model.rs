@@ -1,6 +1,6 @@
 use crate::module::{ImportDeclaration, ImportDescription, ParsedModule, SubType};
 use crate::parser::Parser;
-use crate::{flatten, parse_err, Error, Result};
+use crate::{flatten, bail_parse, Error, Result};
 
 #[derive(Debug)]
 pub struct Component {
@@ -253,7 +253,7 @@ impl TryFrom<u8> for CoreSort {
             0x10 => Self::Type,
             0x11 => Self::Module,
             0x12 => Self::Instance,
-            b => parse_err!("unknown core sort: {b:#x}"),
+            b => bail_parse!("unknown core sort: {b:#x}"),
         };
 
         Ok(out)
@@ -450,7 +450,7 @@ impl PrimitiveValueKind {
             0x75 => Self::F64,
             0x74 => Self::Char,
             0x73 => Self::String,
-            _ => parse_err!("unknown primitive val type: {b:#x}"),
+            _ => bail_parse!("unknown primitive val type: {b:#x}"),
         };
         Ok(out)
     }

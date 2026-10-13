@@ -62,12 +62,12 @@ impl Error {
         Self::Parse(message.into())
     }
 
-    pub fn instantiation(message: impl Into<String>) -> Self {
-        Self::Instantiation(message.into())
-    }
-
     pub fn validation(message: impl Into<String>) -> Self {
         Self::Validation(message.into())
+    }
+
+    pub fn instantiation(message: impl Into<String>) -> Self {
+        Self::Instantiation(message.into())
     }
 }
 
@@ -104,7 +104,7 @@ impl From<Utf8Error> for Error {
 }
 
 #[macro_export]
-macro_rules! parse_err {
+macro_rules! bail_parse {
     ($fmt:literal $($arg:tt)*) => {
         return Err($crate::error::Error::parse(format!($fmt $($arg)*)))
     };
@@ -114,7 +114,7 @@ macro_rules! parse_err {
 }
 
 #[macro_export]
-macro_rules! instantiation_err {
+macro_rules! bail_instantiation {
     ($fmt:literal $($arg:tt)*) => {
         return Err($crate::error::Error::instantiation(format!($fmt $($arg)*)))
     };
@@ -124,7 +124,7 @@ macro_rules! instantiation_err {
 }
 
 #[macro_export]
-macro_rules! validation_err {
+macro_rules! bail_validation {
     ($fmt:literal $($arg:tt)*) => {
         return Err($crate::error::Error::Validation(format!($fmt $($arg)*)))
     };
@@ -134,7 +134,7 @@ macro_rules! validation_err {
 }
 
 #[macro_export]
-macro_rules! trap {
+macro_rules! bail_trap {
     ($trap:expr) => {
         return Err($crate::error::Error::Trap($trap))
     };
@@ -144,7 +144,7 @@ macro_rules! trap {
 macro_rules! ensure_trap {
     ($cond:expr, $trap:expr) => {
         if !$cond {
-            $crate::trap!($trap);
+            $crate::bail_trap!($trap);
         }
     };
 }
@@ -153,7 +153,7 @@ macro_rules! ensure_trap {
 macro_rules! ensure_validation {
     ($cond:expr, $($msg:tt)+) => {
         if !$cond {
-            $crate::validation_err!($($msg)+);
+            $crate::bail_validation!($($msg)+);
         }
     };
 }
@@ -162,7 +162,7 @@ macro_rules! ensure_validation {
 macro_rules! ensure_instantiation {
     ($cond:expr, $($msg:tt)+) => {
         if !$cond {
-            $crate::instantiation_err!($($msg)+);
+            $crate::bail_instantiation!($($msg)+);
         }
     };
 }
@@ -171,7 +171,7 @@ macro_rules! ensure_instantiation {
 macro_rules! ensure_parse {
     ($cond:expr, $($msg:tt)+) => {
         if !$cond {
-            $crate::parse_err!($($msg)+);
+            $crate::bail_parse!($($msg)+);
         }
     };
 }

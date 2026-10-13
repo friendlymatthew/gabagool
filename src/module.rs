@@ -1,7 +1,7 @@
 use crate::component::ParsedComponent;
 use crate::{
     compiler::{self, ModuleCode},
-    parse_err,
+    bail_parse,
     parser::Parser,
     Result,
 };
@@ -78,7 +78,7 @@ impl Parsed {
     pub fn try_as_module(self) -> Result<ParsedModule> {
         let out = match self {
             Self::Module(m) => m,
-            Self::Component(_) => parse_err!("expected module"),
+            Self::Component(_) => bail_parse!("expected module"),
         };
 
         Ok(out)
@@ -86,7 +86,7 @@ impl Parsed {
 
     pub fn try_as_component(self) -> Result<ParsedComponent> {
         let out = match self {
-            Self::Module(_) => parse_err!("expected component"),
+            Self::Module(_) => bail_parse!("expected component"),
             Self::Component(c) => c,
         };
 

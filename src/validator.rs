@@ -1,5 +1,5 @@
 use crate::{
-    ensure_validation, validation_err, Error, Function, Instruction, Local, ParsedModule, Result,
+    ensure_validation, bail_validation, Error, Function, Instruction, Local, ParsedModule, Result,
     ValueType,
 };
 
@@ -129,7 +129,7 @@ impl<'a> FunctionContext<'a> {
                 return Ok(StackType::Bot);
             }
 
-            validation_err!("expected value on the stack but the block has none")
+            bail_validation!("expected value on the stack but the block has none")
         }
 
         let t = self
@@ -146,7 +146,7 @@ impl<'a> FunctionContext<'a> {
         match actual {
             StackType::Bot => Ok(actual),
             StackType::Known(value_type) if expected == &value_type => Ok(actual),
-            _ => validation_err!("type mismatch, expected: {:?}, got: {:?}", expected, actual),
+            _ => bail_validation!("type mismatch, expected: {:?}, got: {:?}", expected, actual),
         }
     }
 

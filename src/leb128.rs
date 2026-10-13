@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::{ensure_parse, parse_err};
+use crate::{ensure_parse, bail_parse};
 
 /// The maximum length of a leb128-encoded 32-bit integer
 pub const MAX_LEB128_LEN_32: usize = 5;
@@ -49,7 +49,7 @@ pub fn read_u32(buf: &[u8]) -> Result<(u32, usize)> {
 
         if b < 0x80 {
             if i == MAX_LEB128_LEN_32 - 1 && b > 0x0F {
-                parse_err!("integer too large");
+                bail_parse!("integer too large");
             }
 
             return Ok((x | (b as u32) << s, i + 1));
@@ -59,7 +59,7 @@ pub fn read_u32(buf: &[u8]) -> Result<(u32, usize)> {
         s += 7
     }
 
-    parse_err!(
+    bail_parse!(
         "the number being decoded exceeds the maximum length of a leb128-encoded 32-bit integer"
     )
 }
@@ -105,7 +105,7 @@ pub fn read_i32(buf: &[u8]) -> Result<(i32, usize)> {
                 let sign_bit = (byte >> 3) & 1;
                 let expected_upper = if sign_bit == 1 { 0x7 } else { 0x0 };
                 if (byte >> 4) & 0x7 != expected_upper {
-                    parse_err!("integer too large");
+                    bail_parse!("integer too large");
                 }
             }
             // Sign-extend if the sign bit (bit 6) of the last byte is set
@@ -116,7 +116,7 @@ pub fn read_i32(buf: &[u8]) -> Result<(i32, usize)> {
         }
     }
 
-    parse_err!("unterminated signed leb128-encoded 32-bit integer")
+    bail_parse!("unterminated signed leb128-encoded 32-bit integer")
 }
 
 #[inline]
@@ -132,7 +132,7 @@ pub fn read_u64(buf: &[u8]) -> Result<(u64, usize)> {
 
         if b < 0x80 {
             if i == MAX_LEB128_LEN_64 - 1 && b > 0x01 {
-                parse_err!("integer too large");
+                bail_parse!("integer too large");
             }
 
             return Ok((x | (b as u64) << s, i + 1));
@@ -142,7 +142,7 @@ pub fn read_u64(buf: &[u8]) -> Result<(u64, usize)> {
         s += 7
     }
 
-    parse_err!(
+    bail_parse!(
         "the number being decoded exceeds the maximum length of a leb128-encoded 64-bit integer"
     )
 }
@@ -166,7 +166,7 @@ pub fn read_i64(buf: &[u8]) -> Result<(i64, usize)> {
                 let sign_bit = byte & 1;
                 let expected_upper = if sign_bit == 1 { 0x7F } else { 0x0 };
                 if (byte >> 1) != (expected_upper >> 1) {
-                    parse_err!("integer too large");
+                    bail_parse!("integer too large");
                 }
             }
             if shift < 64 && (byte & 0x40) != 0 {
@@ -176,7 +176,7 @@ pub fn read_i64(buf: &[u8]) -> Result<(i64, usize)> {
         }
     }
 
-    parse_err!("unterminated signed leb128-encoded 64-bit integer")
+    bail_parse!("unterminated signed leb128-encoded 64-bit integer")
 }
 
 #[cfg(all(test, not(any(feature = "core-tests", feature = "component-tests"))))]

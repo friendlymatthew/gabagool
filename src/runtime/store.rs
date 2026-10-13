@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 #[cfg(feature = "jit")]
 use crate::jit::assembler::JitFunction;
 use crate::{
-    ensure_instantiation, ensure_trap, instantiation_err, trap, AddrType, Component,
+    ensure_instantiation, ensure_trap, bail_instantiation, bail_trap, AddrType, Component,
     ComponentInstance, ComponentValue, DataMode, ElementMode, GuestMemory, ImportDescription,
     InstantiatedComponent, Instruction, LiftedFunc, Module, Mutability, Trap,
 };
@@ -50,9 +50,9 @@ impl<V> ExecutionState<V> {
     pub fn into_completed(self) -> Result<Vec<V>> {
         match self {
             Self::Completed(v) => Ok(v),
-            Self::FuelExhausted => instantiation_err!("execution paused: fuel exhausted"),
+            Self::FuelExhausted => bail_instantiation!("execution paused: fuel exhausted"),
             Self::Suspended { func_name, .. } => {
-                instantiation_err!("execution suspended on host function: {}", func_name)
+                bail_instantiation!("execution suspended on host function: {}", func_name)
             }
         }
     }
@@ -118,7 +118,7 @@ macro_rules! local_get_load {
             .checked_add($offset as u64)
             .and_then(|v| usize::try_from(v).ok());
         let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
-            trap!(Trap::OutOfBoundsMemoryAccess);
+            bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
         let $bytes: [u8; $width] = mem.data.read_fixed::<$width>(ea);
         $self.stack.push($convert);
@@ -137,7 +137,7 @@ macro_rules! local_get_store {
             .and_then(|v| usize::try_from(v).ok());
         let mem = &mut $self.memories[mem_addr];
         let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
-            trap!(Trap::OutOfBoundsMemoryAccess);
+            bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
         let bytes: [u8; $width] = $to_bytes(val);
         mem.data.write_bytes(ea, &bytes);
@@ -170,7 +170,7 @@ macro_rules! mem_load_c {
             .checked_add($offset as u64)
             .and_then(|v| usize::try_from(v).ok());
         let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
-            trap!(Trap::OutOfBoundsMemoryAccess);
+            bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
         let $bytes: [u8; $width] = mem.data.read_fixed::<$width>(ea);
 
@@ -189,7 +189,7 @@ macro_rules! mem_store_c {
             .and_then(|v| usize::try_from(v).ok());
         let mem = &mut $self.memories[mem_addr];
         let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
-            trap!(Trap::OutOfBoundsMemoryAccess);
+            bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
         let bytes: [u8; $width] = $to_bytes;
         mem.data.write_bytes(ea, &bytes);
@@ -350,10 +350,10 @@ impl Store {
                 if let ExternalValue::Function { addr } = export.value {
                     return Ok(addr);
                 }
-                instantiation_err!("export '{}' is not a function", name);
+                bail_instantiation!("export '{}' is not a function", name);
             }
         }
-        instantiation_err!("export '{}' not found", name)
+        bail_instantiation!("export '{}' not found", name)
     }
 
     fn get_memory(&self, instance: Instance, name: &str) -> Result<usize> {
@@ -362,10 +362,10 @@ impl Store {
                 if let ExternalValue::Memory { addr } = export.value {
                     return Ok(addr);
                 }
-                instantiation_err!("export '{}' is not a memory", name);
+                bail_instantiation!("export '{}' is not a memory", name);
             }
         }
-        instantiation_err!("memory export '{}' not found", name)
+        bail_instantiation!("memory export '{}' not found", name)
     }
 
     pub fn get_param_types(&self, instance: Instance, name: &str) -> Result<Vec<ValueType>> {
@@ -411,7 +411,7 @@ impl Store {
 
         match &sub_type.composite_type {
             CompositeType::Func(ft) => Ok(ft.clone()),
-            _ => instantiation_err!("type index {} is not a function type", type_index),
+            _ => bail_instantiation!("type index {} is not a function type", type_index),
         }
     }
 
@@ -688,7 +688,7 @@ impl Store {
                 (ExternalValue::Function { addr }, ImportDescription::Func(type_i)) => {
                     let expected = match &module.types()[*type_i as usize].composite_type {
                         CompositeType::Func(ft) => ft,
-                        _ => instantiation_err!(err("type index is not a function type")),
+                        _ => bail_instantiation!(err("type index is not a function type")),
                     };
 
                     let actual = match &self.functions[*addr] {
@@ -732,7 +732,7 @@ impl Store {
                 (ExternalValue::Tag { addr }, ImportDescription::Tag(type_i)) => {
                     let expected = match &module.types()[*type_i as usize].composite_type {
                         CompositeType::Func(ft) => ft,
-                        _ => instantiation_err!(err("type index is not a function type")),
+                        _ => bail_instantiation!(err("type index is not a function type")),
                     };
 
                     if *addr < self.tags.len() {
@@ -740,7 +740,7 @@ impl Store {
                         ensure_instantiation!(*expected == *actual, "tag type mismatch");
                     }
                 }
-                _ => instantiation_err!("import kind mismatch"),
+                _ => bail_instantiation!("import kind mismatch"),
             }
         }
         Ok(())
@@ -823,7 +823,7 @@ impl Store {
 
         if let Some(start_a) = start_func_addr {
             if self.push_function_call(start_a)? {
-                instantiation_err!("start function cannot be a host import");
+                bail_instantiation!("start function cannot be a host import");
             }
             self.run()?;
         }
@@ -887,7 +887,7 @@ impl Store {
                     let func_type = match &flattened.types[*type_i as usize] {
                         ComponentTypeDef::Func(ft) => ft.clone(),
                         other => {
-                            instantiation_err!("canon lift type_i points to non-func: {other:?}")
+                            bail_instantiation!("canon lift type_i points to non-func: {other:?}")
                         }
                     };
 
@@ -1033,7 +1033,7 @@ impl Store {
 
         let out = match result {
             ExecutionState::Completed(vals) => vals[0].as_i32(),
-            _ => instantiation_err!("realloc did not complete"),
+            _ => bail_instantiation!("realloc did not complete"),
         };
 
         Ok(out)
@@ -1180,11 +1180,11 @@ impl Store {
                 let defined = resolve_defined_type(param_ty, types);
                 let cases = match defined {
                     Some(ComponentDefinedKind::Variant(cases)) => cases,
-                    _ => instantiation_err!("variant lower requires variant type"),
+                    _ => bail_instantiation!("variant lower requires variant type"),
                 };
 
                 let Some(case_i) = cases.iter().position(|c| c.name == case_name) else {
-                    instantiation_err!("enum case not found: {case_name}")
+                    bail_instantiation!("enum case not found: {case_name}")
                 };
 
                 let max_payload = cases
@@ -1209,11 +1209,11 @@ impl Store {
 
                 let cases = match defined {
                     Some(ComponentDefinedKind::Enum(cases)) => cases,
-                    _ => instantiation_err!("enum lower requires enum type"),
+                    _ => bail_instantiation!("enum lower requires enum type"),
                 };
 
                 let Some(case_i) = cases.iter().position(|c| *c == case_name) else {
-                    instantiation_err!("enum case not found: {case_name}")
+                    bail_instantiation!("enum case not found: {case_name}")
                 };
 
                 flat.push(RawValue::from(case_i as i32));
@@ -1223,7 +1223,7 @@ impl Store {
 
                 let inner_ty = match defined {
                     Some(ComponentDefinedKind::Option(ty)) => ty,
-                    _ => instantiation_err!("option lower requires option type"),
+                    _ => bail_instantiation!("option lower requires option type"),
                 };
 
                 let payload_count = inner_ty.flat_count(types);
@@ -1247,7 +1247,7 @@ impl Store {
                 let defined = resolve_defined_type(param_ty, types);
                 let (ok_ty, err_ty) = match defined {
                     Some(ComponentDefinedKind::Result { ok, err }) => (ok, err),
-                    _ => instantiation_err!("result lower requires result type"),
+                    _ => bail_instantiation!("result lower requires result type"),
                 };
 
                 let ok_count = ok_ty.as_ref().map_or(0, |ty| ty.flat_count(types));
@@ -1280,7 +1280,7 @@ impl Store {
             ComponentValue::Flags(set_flags) => {
                 let all_flags = match resolve_defined_type(param_ty, types) {
                     Some(ComponentDefinedKind::Flags(names)) => names,
-                    _ => instantiation_err!("flags lower requires flags type"),
+                    _ => bail_instantiation!("flags lower requires flags type"),
                 };
 
                 let num_i32s = all_flags.len().div_ceil(32).max(1);
@@ -1635,7 +1635,7 @@ impl Store {
         let args = args.into_iter().map(Into::into);
 
         if self.pending_arity.is_some() {
-            instantiation_err!("cannot invoke while execution is paused; call resume() first");
+            bail_instantiation!("cannot invoke while execution is paused; call resume() first");
         }
 
         let fi = self
@@ -1827,7 +1827,7 @@ impl Store {
 
             match op {
                 Op::Nop => {}
-                Op::Unreachable => trap!(Trap::Unreachable),
+                Op::Unreachable => bail_trap!(Trap::Unreachable),
                 Op::Return => self.do_return(depth),
                 Op::Jump { target, keep, drop } => {
                     self.stack.keep_top(keep as usize, drop as usize);
@@ -1894,13 +1894,13 @@ impl Store {
                         .ok_or(Error::Trap(Trap::UndefinedElement))?;
 
                     let Ref::FunctionAddr(func_addr) = elem else {
-                        trap!(Trap::UndefinedElement);
+                        bail_trap!(Trap::UndefinedElement);
                     };
 
                     let expected =
                         match &self.instances[mi].code.types[type_i as usize].composite_type {
                             CompositeType::Func(ft) => ft,
-                            _ => instantiation_err!("type index {} not a func type", type_i),
+                            _ => bail_instantiation!("type index {} not a func type", type_i),
                         };
 
                     let actual = match &self.functions[*func_addr] {
@@ -1942,13 +1942,13 @@ impl Store {
                         .ok_or(Error::Trap(Trap::UndefinedElement))?;
 
                     let Ref::FunctionAddr(func_addr) = elem else {
-                        trap!(Trap::UndefinedElement);
+                        bail_trap!(Trap::UndefinedElement);
                     };
 
                     let expected =
                         match &self.instances[mi].code.types[type_i as usize].composite_type {
                             CompositeType::Func(ft) => ft,
-                            _ => instantiation_err!("type index {} not a func type", type_i),
+                            _ => bail_instantiation!("type index {} not a func type", type_i),
                         };
 
                     let actual = match &self.functions[*func_addr] {
@@ -1974,9 +1974,9 @@ impl Store {
                 }
                 Op::CallRef { .. } => {
                     let func_addr = match self.stack.pop().as_ref() {
-                        Ref::Null => trap!(Trap::NullReference),
+                        Ref::Null => bail_trap!(Trap::NullReference),
                         Ref::FunctionAddr(f) => f,
-                        _ => instantiation_err!("expected function or null ref"),
+                        _ => bail_instantiation!("expected function or null ref"),
                     };
                     if self.push_function_call(func_addr)? {
                         return Ok(RunOutcome::Suspended);
@@ -1984,9 +1984,9 @@ impl Store {
                 }
                 Op::ReturnCallRef { .. } => {
                     let func_addr = match self.stack.pop().as_ref() {
-                        Ref::Null => trap!(Trap::NullReference),
+                        Ref::Null => bail_trap!(Trap::NullReference),
                         Ref::FunctionAddr(f) => f,
-                        _ => instantiation_err!("expected function or null ref"),
+                        _ => bail_instantiation!("expected function or null ref"),
                     };
 
                     let num_args = self.func_num_params(func_addr);
@@ -2088,12 +2088,12 @@ impl Store {
                 Op::ThrowRef => {
                     let exn_ref = self.stack.pop().as_ref();
                     match exn_ref {
-                        Ref::Null => trap!(Trap::NullReference),
+                        Ref::Null => bail_trap!(Trap::NullReference),
                         Ref::ExnRef(i) => {
                             let exn = self.exceptions[i].clone();
                             self.handle_exception(exn.tag_addr, exn.values)?;
                         }
-                        _ => trap!(Trap::NullReference),
+                        _ => bail_trap!(Trap::NullReference),
                     }
                 }
                 Op::TableGet { table_i } => {
@@ -2136,11 +2136,11 @@ impl Store {
                     let d = self.stack.pop_address(at);
 
                     if s.saturating_add(n) > self.element_segments[ea].elem.len() {
-                        trap!(Trap::OutOfBoundsTableAccess);
+                        bail_trap!(Trap::OutOfBoundsTableAccess);
                     }
 
                     if d.saturating_add(n) > self.tables[ta].elem.len() {
-                        trap!(Trap::OutOfBoundsTableAccess);
+                        bail_trap!(Trap::OutOfBoundsTableAccess);
                     }
 
                     if n > 0 {
@@ -2171,11 +2171,11 @@ impl Store {
                     let d = self.stack.pop_address(dst_at);
 
                     if s.saturating_add(n) > self.tables[src_a].elem.len() {
-                        trap!(Trap::OutOfBoundsTableAccess);
+                        bail_trap!(Trap::OutOfBoundsTableAccess);
                     }
 
                     if d.saturating_add(n) > self.tables[dst_a].elem.len() {
-                        trap!(Trap::OutOfBoundsTableAccess);
+                        bail_trap!(Trap::OutOfBoundsTableAccess);
                     }
 
                     if n > 0 {
@@ -2226,7 +2226,7 @@ impl Store {
 
                     let i = self.stack.pop_address(at);
                     if i.saturating_add(n) > self.tables[ta].elem.len() {
-                        trap!(Trap::OutOfBoundsTableAccess);
+                        bail_trap!(Trap::OutOfBoundsTableAccess);
                     }
 
                     if n > 0 {
@@ -2355,11 +2355,11 @@ impl Store {
                     let d = self.stack.pop_address(at);
 
                     if s.saturating_add(n) > self.data_segments[da].data.len() {
-                        trap!(Trap::OutOfBoundsMemoryAccess);
+                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
                     }
 
                     if d.saturating_add(n) > self.memories[ma].data.len() {
-                        trap!(Trap::OutOfBoundsMemoryAccess);
+                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
                     }
 
                     if n > 0 {
@@ -2384,11 +2384,11 @@ impl Store {
                     let i1 = self.stack.pop_address(at);
 
                     if i1.saturating_add(n) > self.memories[m1].data.len() {
-                        trap!(Trap::OutOfBoundsMemoryAccess);
+                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
                     }
 
                     if i2.saturating_add(n) > self.memories[m2].data.len() {
-                        trap!(Trap::OutOfBoundsMemoryAccess);
+                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
                     }
 
                     if n > 0 {
@@ -2408,7 +2408,7 @@ impl Store {
                     let i = self.stack.pop_address(at);
 
                     if i.saturating_add(n) > self.memories[ma].data.len() {
-                        trap!(Trap::OutOfBoundsMemoryAccess);
+                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
                     }
 
                     if n > 0 {
@@ -3279,7 +3279,7 @@ impl Store {
                 Instruction::I64Mul => ops.push(Op::I64Mul),
                 Instruction::F32Const(v) => ops.push(Op::F32Const { value: *v }),
                 Instruction::F64Const(v) => ops.push(Op::F64Const { value: *v }),
-                other => instantiation_err!("unexpected instruction in init sequence: {:?}", other),
+                other => bail_instantiation!("unexpected instruction in init sequence: {:?}", other),
             }
         }
         ops.push(Op::Return);
@@ -3397,7 +3397,7 @@ impl Store {
                     let (b, a) = (const_pop_i64(&mut stack)?, const_pop_i64(&mut stack)?);
                     stack.push(RawValue::from(a.wrapping_mul(b)));
                 }
-                other => instantiation_err!("unexpected instruction in const expr: {:?}", other),
+                other => bail_instantiation!("unexpected instruction in const expr: {:?}", other),
             }
         }
 
