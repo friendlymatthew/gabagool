@@ -784,6 +784,10 @@ impl<'a> Parser<'a> {
         Ok((preamble[0], preamble[2]))
     }
 
+    const fn bytes_left(&self) -> usize {
+        self.buffer.len() - self.cursor
+    }
+
     fn peek_u8(&self) -> Result<u8> {
         self.buffer
             .get(self.cursor)
@@ -862,9 +866,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_vec<T>(&mut self, parse: impl Fn(&mut Self) -> Result<T>) -> Result<Vec<T>> {
-        let len = self.read_u32()?;
+        let len = self.read_u32()? as usize;
 
-        let mut items = Vec::with_capacity(len as usize);
+        ensure_parse!(
+            len <= self.bytes_left(),
+            "length oob: vec of {len} exceeds {} remaining bytes",
+            self.bytes_left()
+        );
+
+        let mut items = Vec::with_capacity(len);
 
         for _ in 0..len {
             items.push(parse(self)?);
@@ -2279,5 +2289,26 @@ const fn section_logical_order(id: u8) -> u8 {
         // data
         11 => 13,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vec_length_exceeding_remaining_bytes_errors() {
+        let bytes = [
+            0x00, 0x61, 0x73, 0x6d, // magic
+            0x01, 0x00, 0x00, 0x00, // version
+            0x01, 0x05, // type section, size 5
+            0xff, 0xff, 0xff, 0xff, 0x0f, // vec length = u32::MAX
+        ];
+
+        let err = Parser::new(&bytes).parse().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "parse error: length oob: vec of 4294967295 exceeds 0 remaining bytes"
+        );
     }
 }
