@@ -1,4 +1,5 @@
 use crate::component::ParsedComponent;
+use crate::validator::Validator;
 use crate::{
     bail_parse,
     compiler::{self, ModuleCode},
@@ -28,8 +29,7 @@ impl Module {
     pub fn try_new(bytes: &[u8]) -> Result<Self> {
         let mut parsed = Parser::new(bytes).parse()?.try_as_module()?;
 
-        // todo: uncomment when the validation works !
-        // Validator::new(&parsed).validate()?;
+        Validator::new(&parsed).validate()?;
 
         parsed.is_validated = true;
 

@@ -1,8 +1,8 @@
 #![allow(unused)]
 
 use crate::{
-    bail_validation, ensure_validation, Error, Function, Instruction, ParsedModule, Result,
-    ValueType,
+    bail_validation, ensure_validation, Error, Function, Global, GlobalType, ImportDeclaration,
+    ImportDescription, Instruction, Mutability, ParsedModule, Result, ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -37,13 +37,34 @@ impl<'a> Frame<'a> {
 
 pub struct Validator<'a> {
     module: &'a ParsedModule,
+    globals: Vec<GlobalType>,
     ctx: FunctionContext<'a>,
 }
 
 impl<'a> Validator<'a> {
     pub fn new(module: &'a ParsedModule) -> Self {
+        let globals = module
+            .import_declarations
+            .iter()
+            .filter_map(|i| {
+                if let ImportDescription::Global(g) = &i.description {
+                    Some(g)
+                } else {
+                    None
+                }
+            })
+            .chain(
+                module
+                    .globals
+                    .iter()
+                    .map(|Global { global_type, .. }| global_type),
+            )
+            .cloned()
+            .collect::<Vec<_>>();
+
         Self {
             module,
+            globals,
             ctx: FunctionContext::default(),
         }
     }
@@ -262,10 +283,26 @@ impl<'a> Validator<'a> {
             | Instruction::F64Gt
             | Instruction::F64Le
             | Instruction::F64Ge => self.ctx.relop(ValueType::F64)?,
+            Instruction::GlobalGet(i) => {
+                let gt = self.global_type(*i)?;
+                self.ctx.apply(&[], &[gt.value_type])?;
+            }
+            Instruction::GlobalSet(i) => {
+                let gt = self.global_type(*i)?;
+                ensure_validation!(gt.mutability == Mutability::Var, "global is immutable");
+                self.ctx.apply(&[gt.value_type], &[])?;
+            }
             _ => unimplemented!(),
         }
 
         Ok(())
+    }
+
+    fn global_type(&self, i: u32) -> Result<GlobalType> {
+        self.globals
+            .get(i as usize)
+            .cloned()
+            .ok_or_else(|| Error::validation("unknown globals"))
     }
 }
 
@@ -285,10 +322,10 @@ impl<'a> FunctionContext<'a> {
         }
     }
 
-    fn local_type(&self, index: u32) -> Result<ValueType> {
-        self.locals.get(index as usize).copied().ok_or_else(|| {
+    fn local_type(&self, i: u32) -> Result<ValueType> {
+        self.locals.get(i as usize).copied().ok_or_else(|| {
             Error::validation(format!(
-                "unknown local {index}, function has {} locals",
+                "unknown local {i}, function has {} locals",
                 self.locals.len()
             ))
         })
@@ -1297,5 +1334,134 @@ mod tests {
         ];
 
         assert!(validate_body(&[ValueType::I32, ValueType::I32], I32, &[], body).is_ok());
+    }
+
+    fn global(value_type: ValueType, mutability: Mutability) -> GlobalType {
+        GlobalType {
+            value_type,
+            mutability,
+        }
+    }
+
+    fn validate_body_with_globals(
+        imported: &[GlobalType],
+        defined: &[GlobalType],
+        results: &[ValueType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(NONE, results));
+        module.functions.push(function(0, &[], body));
+
+        for gt in imported {
+            module.import_declarations.push(ImportDeclaration {
+                module: "env".into(),
+                name: "g".into(),
+                description: ImportDescription::Global(gt.clone()),
+            });
+        }
+
+        for gt in defined {
+            module.globals.push(Global {
+                global_type: gt.clone(),
+                initial_expression: vec![],
+            });
+        }
+
+        Validator::new(&module).validate()
+    }
+
+    #[test]
+    fn global_get_has_the_globals_type() {
+        let globals = [global(ValueType::I32, Mutability::Const)];
+        let body = vec![Instruction::GlobalGet(0)];
+
+        assert!(validate_body_with_globals(&[], &globals, I32, body.clone()).is_ok());
+        assert!(validate_body_with_globals(&[], &globals, I64, body).is_err());
+    }
+
+    #[test]
+    fn global_get_out_of_range_errors() {
+        let globals = [global(ValueType::I32, Mutability::Const)];
+
+        assert!(
+            validate_body_with_globals(&[], &[], I32, vec![Instruction::GlobalGet(0)]).is_err()
+        );
+        assert!(
+            validate_body_with_globals(&[], &globals, I32, vec![Instruction::GlobalGet(1)])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn global_indices_are_imports_then_defined() {
+        let imported = [global(ValueType::F64, Mutability::Const)];
+        let defined = [global(ValueType::I32, Mutability::Const)];
+
+        assert!(validate_body_with_globals(
+            &imported,
+            &defined,
+            &[ValueType::F64],
+            vec![Instruction::GlobalGet(0)]
+        )
+        .is_ok());
+        assert!(validate_body_with_globals(
+            &imported,
+            &defined,
+            I32,
+            vec![Instruction::GlobalGet(1)]
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn global_set_pops_a_matching_value() {
+        let globals = [global(ValueType::I32, Mutability::Var)];
+        let body = vec![Instruction::I32Const(1), Instruction::GlobalSet(0)];
+
+        assert!(validate_body_with_globals(&[], &globals, NONE, body).is_ok());
+    }
+
+    #[test]
+    fn global_set_on_immutable_global_errors() {
+        let globals = [global(ValueType::I32, Mutability::Const)];
+        let body = vec![Instruction::I32Const(1), Instruction::GlobalSet(0)];
+
+        let err = validate_body_with_globals(&[], &globals, NONE, body).unwrap_err();
+        assert!(err.to_string().contains("immutable"), "{err}");
+    }
+
+    #[test]
+    fn global_set_on_immutable_imported_global_errors() {
+        let imported = [global(ValueType::I32, Mutability::Const)];
+        let defined = [global(ValueType::I32, Mutability::Var)];
+        let body = vec![Instruction::I32Const(1), Instruction::GlobalSet(0)];
+
+        assert!(validate_body_with_globals(&imported, &defined, NONE, body).is_err());
+    }
+
+    #[test]
+    fn global_set_wrong_type_errors() {
+        let globals = [global(ValueType::I32, Mutability::Var)];
+        let body = vec![Instruction::I64Const(1), Instruction::GlobalSet(0)];
+
+        assert!(validate_body_with_globals(&[], &globals, NONE, body).is_err());
+    }
+
+    #[test]
+    fn global_set_with_empty_stack_errors() {
+        let globals = [global(ValueType::I32, Mutability::Var)];
+
+        assert!(
+            validate_body_with_globals(&[], &globals, NONE, vec![Instruction::GlobalSet(0)])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn global_set_out_of_range_errors() {
+        let body = vec![Instruction::I32Const(1), Instruction::GlobalSet(0)];
+
+        assert!(validate_body_with_globals(&[], &[], NONE, body).is_err());
     }
 }
