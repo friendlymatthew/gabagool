@@ -346,6 +346,28 @@ impl<'a> Validator<'a> {
 
                 self.ctx.push_values(results.iter().copied());
             }
+            Instruction::Br(l) => {
+                let types = self.ctx.label_types(*l)?;
+                self.ctx.pop_values_expect(types)?;
+                self.ctx.mark_unreachable()?;
+            }
+            Instruction::BrIf(l) => {
+                self.ctx.pop_value_expect(&ValueType::I32)?;
+                let types = self.ctx.label_types(*l)?;
+                self.ctx.pop_values_expect(types)?;
+                self.ctx.push_values(types.iter().copied());
+            }
+            Instruction::Return => {
+                let types = self
+                    .ctx
+                    .control_stack
+                    .first()
+                    .ok_or_else(|| Error::validation("return outside of function"))?
+                    .end_types;
+
+                self.ctx.pop_values_expect(types)?;
+                self.ctx.mark_unreachable()?;
+            }
             _ => unimplemented!(),
         }
 
@@ -396,6 +418,17 @@ impl<'a> FunctionContext<'a> {
             value_stack: Vec::new(),
             control_stack: Vec::new(),
         }
+    }
+
+    fn label_types(&self, l: u32) -> Result<&'a [ValueType]> {
+        let frame = self
+            .control_stack
+            .len()
+            .checked_sub(l as usize + 1)
+            .and_then(|i| self.control_stack.get(i))
+            .ok_or_else(|| Error::Validation(format!("unknown label: {l}")))?;
+
+        Ok(frame.label_types())
     }
 
     fn local_type(&self, i: u32) -> Result<ValueType> {
@@ -1910,5 +1943,259 @@ mod tests {
         ];
 
         assert!(validate_body(I32, NONE, &[], body).is_err());
+    }
+
+    fn block_empty(body: Vec<Instruction>) -> Instruction {
+        Instruction::Block(BlockType::Empty, body)
+    }
+
+    #[test]
+    fn br_carries_the_labels_values() {
+        let body = vec![block_i32(vec![
+            Instruction::I32Const(1),
+            Instruction::Br(0),
+        ])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn br_with_wrong_value_type_errors() {
+        let body = vec![block_i32(vec![
+            Instruction::I64Const(1),
+            Instruction::Br(0),
+        ])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn br_with_missing_value_errors() {
+        let body = vec![block_i32(vec![Instruction::Br(0)])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn code_after_br_is_unreachable() {
+        // after br the stack is polymorphic, so i32.add can pop operands that
+        // were never pushed
+        let body = vec![block_empty(vec![
+            Instruction::Br(0),
+            Instruction::I32Add,
+            Instruction::Drop,
+        ])];
+
+        assert!(validate_body(NONE, NONE, &[], body).is_ok());
+    }
+
+    #[test]
+    fn values_pushed_after_br_still_count() {
+        // unreachable code may pop anything, but what it pushes is still
+        // checked at the end
+        let body = vec![block_empty(vec![
+            Instruction::Br(0),
+            Instruction::I32Const(1),
+        ])];
+
+        assert!(validate_body(NONE, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn br_to_loop_uses_its_params() {
+        let i32_to_none = func_type(I32, NONE);
+
+        // the loop's label carries its i32 param, not its (empty) results
+        let ok = vec![
+            Instruction::I32Const(1),
+            Instruction::Loop(
+                BlockType::TypeIndex(1),
+                vec![Instruction::I32Const(2), Instruction::Br(0)],
+            ),
+        ];
+        assert!(validate_body_with_types(&[i32_to_none.clone()], NONE, NONE, ok).is_ok());
+
+        let missing = vec![
+            Instruction::I32Const(1),
+            Instruction::Loop(
+                BlockType::TypeIndex(1),
+                vec![Instruction::Drop, Instruction::Br(0)],
+            ),
+        ];
+        assert!(validate_body_with_types(&[i32_to_none], NONE, NONE, missing).is_err());
+    }
+
+    #[test]
+    fn br_to_loop_does_not_use_its_results() {
+        let body = vec![Instruction::Loop(
+            BlockType::SingleValue(ValueType::I32),
+            vec![Instruction::I32Const(1), Instruction::Br(0)],
+        )];
+
+        // br 0 needs nothing, so the i32 is left over: the loop's end is never
+        // reached and that leftover is discarded by mark_unreachable,
+        // so this is valid; the loop then still produces its declared
+        // i32 for the function
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn br_to_outer_label_uses_its_types() {
+        // br 1 targets the outer i32 block; br 0 would need the inner block's
+        // i64
+        let outer = |value| {
+            vec![block_i32(vec![
+                Instruction::Block(
+                    BlockType::SingleValue(ValueType::I64),
+                    vec![value, Instruction::Br(1)],
+                ),
+                Instruction::Drop,
+                Instruction::I32Const(2),
+            ])]
+        };
+
+        assert!(validate_body(NONE, I32, &[], outer(Instruction::I32Const(1))).is_ok());
+        assert!(validate_body(NONE, I32, &[], outer(Instruction::I64Const(1))).is_err());
+    }
+
+    #[test]
+    fn br_to_function_frame_is_valid() {
+        // function + one block: label 1 is the function itself. the block is
+        // typed i32 so the function frame still has its result after
+        // the block ends
+        let body = vec![block_i32(vec![
+            Instruction::I32Const(1),
+            Instruction::Br(1),
+        ])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn br_to_unknown_label_errors() {
+        let body = vec![block_empty(vec![Instruction::Br(2)])];
+
+        let err = validate_body(NONE, NONE, &[], body).unwrap_err();
+        assert!(err.to_string().contains("unknown label"), "{err}");
+    }
+
+    #[test]
+    fn br_if_keeps_the_labels_values() {
+        // the i32 stays on the stack for the block's own end when the branch is
+        // not taken
+        let body = vec![block_i32(vec![
+            Instruction::I32Const(1),
+            Instruction::LocalGet(0),
+            Instruction::BrIf(0),
+        ])];
+
+        assert!(validate_body(I32, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn br_if_without_condition_errors() {
+        let body = vec![block_empty(vec![Instruction::BrIf(0)])];
+
+        assert!(validate_body(NONE, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn br_if_pops_condition_before_values() {
+        let swapped = vec![block_i32(vec![
+            Instruction::LocalGet(0),
+            Instruction::I32Const(1),
+            Instruction::BrIf(0),
+        ])];
+        // both are i32 here, so use an i64 label to make the order observable
+        let ordered = vec![Instruction::Block(
+            BlockType::SingleValue(ValueType::I64),
+            vec![
+                Instruction::I64Const(1),
+                Instruction::LocalGet(0),
+                Instruction::BrIf(0),
+            ],
+        )];
+        let reversed = vec![Instruction::Block(
+            BlockType::SingleValue(ValueType::I64),
+            vec![
+                Instruction::LocalGet(0),
+                Instruction::I64Const(1),
+                Instruction::BrIf(0),
+            ],
+        )];
+
+        assert!(validate_body(I32, I32, &[], swapped).is_ok());
+        assert!(validate_body(I32, I64, &[], ordered).is_ok());
+        assert!(validate_body(I32, I64, &[], reversed).is_err());
+    }
+
+    #[test]
+    fn code_after_br_if_is_still_reachable() {
+        // unlike br, a leftover value after br_if must still fail the block's
+        // end check
+        let body = vec![block_empty(vec![
+            Instruction::LocalGet(0),
+            Instruction::BrIf(0),
+            Instruction::I32Const(1),
+        ])];
+
+        assert!(validate_body(I32, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn return_with_function_results_is_valid() {
+        let body = vec![Instruction::I32Const(1), Instruction::Return];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn return_with_wrong_type_errors() {
+        let body = vec![Instruction::I64Const(1), Instruction::Return];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn return_from_nested_block_uses_function_results() {
+        // the i32 matches the function's result but not the block's i64, so
+        // this only validates if return checks the function frame
+        // rather than the innermost block
+        let body = vec![
+            Instruction::Block(
+                BlockType::SingleValue(ValueType::I64),
+                vec![Instruction::I32Const(1), Instruction::Return],
+            ),
+            Instruction::Drop,
+            Instruction::I32Const(2),
+        ];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn return_from_nested_block_with_block_typed_value_errors() {
+        // the i32 matches the block's result but not the function's i64
+        let body = vec![
+            block_i32(vec![Instruction::I32Const(1), Instruction::Return]),
+            Instruction::Drop,
+            Instruction::I64Const(0),
+        ];
+
+        assert!(validate_body(NONE, I64, &[], body).is_err());
+    }
+
+    #[test]
+    fn code_after_return_is_unreachable() {
+        // after return the stack is polymorphic, so i32.add can pop operands
+        // that were never pushed, and its i32 result satisfies the
+        // function's end check
+        let body = vec![
+            Instruction::I32Const(1),
+            Instruction::Return,
+            Instruction::I32Add,
+        ];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
     }
 }
