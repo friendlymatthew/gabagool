@@ -1541,8 +1541,9 @@ mod tests {
         assert!(validate_body_with_globals(&[], &[], NONE, body).is_err());
     }
 
-    // function index space is `imported` then `defined`; `defined[0]` runs `body`,
-    // the rest are `unreachable` so they validate under any signature
+    // function index space is `imported` then `defined`; `defined[0]` runs
+    // `body`, the rest are `unreachable` so they validate under any
+    // signature
     fn validate_with_funcs(
         imported: &[SubType],
         defined: &[SubType],
@@ -1705,9 +1706,10 @@ mod tests {
 
     #[test]
     fn block_cannot_pop_values_from_outside() {
-        // the outer i32 is below the block's floor, so the inner drop has nothing to pop.
-        // if the block could reach it, the drop would consume it and the function would
-        // validate, so this only errors because of the floor
+        // the outer i32 is below the block's floor, so the inner drop has
+        // nothing to pop. if the block could reach it, the drop would
+        // consume it and the function would validate, so this only
+        // errors because of the floor
         let body = vec![
             Instruction::I32Const(1),
             Instruction::Block(BlockType::Empty, vec![Instruction::Drop]),
@@ -1881,8 +1883,9 @@ mod tests {
 
     #[test]
     fn then_arm_cannot_pop_values_from_outside() {
-        // if the then arm could reach the outer i32, its drop would consume it and the
-        // function would validate, so this only errors because of the arm's floor
+        // if the then arm could reach the outer i32, its drop would consume it
+        // and the function would validate, so this only errors because
+        // of the arm's floor
         let body = vec![
             Instruction::I32Const(7),
             Instruction::LocalGet(0),
@@ -1894,7 +1897,8 @@ mod tests {
 
     #[test]
     fn else_arm_cannot_pop_values_from_outside() {
-        // same as above for the else arm, with a then arm that is valid on its own
+        // same as above for the else arm, with a then arm that is valid on its
+        // own
         let body = vec![
             Instruction::I32Const(7),
             Instruction::LocalGet(0),
