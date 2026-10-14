@@ -1,8 +1,8 @@
 #![allow(unused)]
 
 use crate::{
-    bail_validation, ensure_validation, Error, Function, Global, GlobalType, ImportDeclaration,
-    ImportDescription, Instruction, Mutability, ParsedModule, Result, ValueType,
+    bail_validation, ensure_validation, Error, Function, FunctionType, Global, GlobalType,
+    ImportDeclaration, ImportDescription, Instruction, Mutability, ParsedModule, Result, ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -37,12 +37,27 @@ impl<'a> Frame<'a> {
 
 pub struct Validator<'a> {
     module: &'a ParsedModule,
+    // type index of every function, imports first
+    funcs: Vec<u32>,
     globals: Vec<GlobalType>,
     ctx: FunctionContext<'a>,
 }
 
 impl<'a> Validator<'a> {
     pub fn new(module: &'a ParsedModule) -> Self {
+        let funcs = module
+            .import_declarations
+            .iter()
+            .filter_map(|i| {
+                if let ImportDescription::Func(type_idx) = i.description {
+                    Some(type_idx)
+                } else {
+                    None
+                }
+            })
+            .chain(module.functions.iter().map(|f| f.type_index))
+            .collect::<Vec<_>>();
+
         let globals = module
             .import_declarations
             .iter()
@@ -64,6 +79,7 @@ impl<'a> Validator<'a> {
 
         Self {
             module,
+            funcs,
             globals,
             ctx: FunctionContext::default(),
         }
@@ -78,13 +94,7 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_function(&mut self, f: &'a Function) -> Result<()> {
-        let ty = self
-            .module
-            .types
-            .get(f.type_index as usize)
-            .ok_or_else(|| Error::validation("oob"))?
-            .try_as_function_type()
-            .ok_or_else(|| Error::validation("does not have function type"))?;
+        let ty = self.func_type(f.type_index)?;
 
         let locals = {
             let mut out = Vec::with_capacity(ty.params.len() + f.locals.len());
@@ -292,10 +302,28 @@ impl<'a> Validator<'a> {
                 ensure_validation!(gt.mutability == Mutability::Var, "global is immutable");
                 self.ctx.apply(&[gt.value_type], &[])?;
             }
+            Instruction::Call(i) => {
+                let type_idx = *self
+                    .funcs
+                    .get(*i as usize)
+                    .ok_or_else(|| Error::validation(format!("unknown function {i}")))?;
+                let ft = self.func_type(type_idx)?;
+
+                self.ctx.apply(&ft.params, &ft.results)?;
+            }
             _ => unimplemented!(),
         }
 
         Ok(())
+    }
+
+    fn func_type(&self, i: u32) -> Result<&'a FunctionType> {
+        self.module
+            .types
+            .get(i as usize)
+            .ok_or_else(|| Error::validation("oob"))?
+            .try_as_function_type()
+            .ok_or_else(|| Error::validation("does not have function type"))
     }
 
     fn global_type(&self, i: u32) -> Result<GlobalType> {
@@ -1463,5 +1491,117 @@ mod tests {
         let body = vec![Instruction::I32Const(1), Instruction::GlobalSet(0)];
 
         assert!(validate_body_with_globals(&[], &[], NONE, body).is_err());
+    }
+
+    // function index space is `imported` then `defined`; `defined[0]` runs `body`,
+    // the rest are `unreachable` so they validate under any signature
+    fn validate_with_funcs(
+        imported: &[SubType],
+        defined: &[SubType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        let mut module = ParsedModule::default();
+
+        for st in imported {
+            module.import_declarations.push(ImportDeclaration {
+                module: "env".into(),
+                name: "f".into(),
+                description: ImportDescription::Func(module.types.len() as u32),
+            });
+            module.types.push(st.clone());
+        }
+
+        for (i, st) in defined.iter().enumerate() {
+            let body = if i == 0 {
+                body.clone()
+            } else {
+                vec![Instruction::Unreachable]
+            };
+
+            module
+                .functions
+                .push(function(module.types.len() as u32, &[], body));
+            module.types.push(st.clone());
+        }
+
+        Validator::new(&module).validate()
+    }
+
+    #[test]
+    fn call_pops_params_and_pushes_results() {
+        let caller = func_type(NONE, I64);
+        let callee = func_type(I32, I64);
+        let body = vec![Instruction::I32Const(1), Instruction::Call(1)];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_ok());
+    }
+
+    #[test]
+    fn call_result_has_the_callees_type() {
+        let caller = func_type(NONE, I32);
+        let callee = func_type(NONE, I64);
+
+        assert!(validate_with_funcs(&[], &[caller, callee], vec![Instruction::Call(1)]).is_err());
+    }
+
+    #[test]
+    fn call_with_wrong_argument_type_errors() {
+        let caller = func_type(NONE, NONE);
+        let callee = func_type(I32, NONE);
+        let body = vec![Instruction::I64Const(1), Instruction::Call(1)];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_err());
+    }
+
+    #[test]
+    fn call_with_too_few_arguments_errors() {
+        let caller = func_type(NONE, NONE);
+        let callee = func_type(I32_I64, NONE);
+        let body = vec![Instruction::I64Const(1), Instruction::Call(1)];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_err());
+    }
+
+    #[test]
+    fn call_checks_arguments_in_order() {
+        let caller = func_type(NONE, NONE);
+        let callee = func_type(I32_I64, NONE);
+        let swapped = vec![
+            Instruction::I64Const(1),
+            Instruction::I32Const(1),
+            Instruction::Call(1),
+        ];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], swapped).is_err());
+    }
+
+    #[test]
+    fn call_out_of_range_errors() {
+        let caller = func_type(NONE, NONE);
+
+        assert!(validate_with_funcs(&[], &[caller], vec![Instruction::Call(1)]).is_err());
+    }
+
+    #[test]
+    fn call_can_recurse() {
+        let caller = func_type(I32, I32);
+        let body = vec![Instruction::LocalGet(0), Instruction::Call(0)];
+
+        assert!(validate_with_funcs(&[], &[caller], body).is_ok());
+    }
+
+    #[test]
+    fn function_indices_are_imports_then_defined() {
+        let imported = func_type(NONE, I64);
+        let caller = func_type(NONE, I32);
+
+        // index 0 is the import, index 1 is the caller itself
+        assert!(validate_with_funcs(
+            &[imported.clone()],
+            &[func_type(NONE, I64)],
+            vec![Instruction::Call(0)]
+        )
+        .is_ok());
+        assert!(validate_with_funcs(&[imported], &[caller], vec![Instruction::Call(0)]).is_err());
     }
 }
