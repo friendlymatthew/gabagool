@@ -326,6 +326,26 @@ impl<'a> Validator<'a> {
                 self.ctx.pop_control()?;
                 self.ctx.push_values(results.iter().copied());
             }
+            Instruction::IfElse(bt, if_body, else_body) => {
+                let (params, results) = self.block_type(bt)?;
+
+                self.ctx.pop_value_expect(&ValueType::I32)?;
+                self.ctx.pop_values_expect(params)?;
+
+                self.ctx.push_control(params, results, false);
+                for instr in if_body {
+                    self.validate_instruction(instr)?;
+                }
+                self.ctx.pop_control()?;
+
+                self.ctx.push_control(params, results, false);
+                for instr in else_body {
+                    self.validate_instruction(instr)?;
+                }
+                self.ctx.pop_control()?;
+
+                self.ctx.push_values(results.iter().copied());
+            }
             _ => unimplemented!(),
         }
 
@@ -1757,5 +1777,134 @@ mod tests {
         )];
 
         assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    fn if_i32(then_body: Vec<Instruction>, else_body: Vec<Instruction>) -> Instruction {
+        Instruction::IfElse(BlockType::SingleValue(ValueType::I32), then_body, else_body)
+    }
+
+    #[test]
+    fn if_else_with_matching_arms_pushes_result() {
+        let body = vec![
+            Instruction::LocalGet(0),
+            if_i32(
+                vec![Instruction::I32Const(1)],
+                vec![Instruction::I32Const(2)],
+            ),
+        ];
+
+        assert!(validate_body(I32, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn if_without_condition_errors() {
+        let body = vec![if_i32(
+            vec![Instruction::I32Const(1)],
+            vec![Instruction::I32Const(2)],
+        )];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn if_with_non_i32_condition_errors() {
+        let body = vec![
+            Instruction::I64Const(1),
+            if_i32(
+                vec![Instruction::I32Const(1)],
+                vec![Instruction::I32Const(2)],
+            ),
+        ];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn if_with_wrong_then_result_errors() {
+        let body = vec![
+            Instruction::LocalGet(0),
+            if_i32(
+                vec![Instruction::I64Const(1)],
+                vec![Instruction::I32Const(2)],
+            ),
+        ];
+
+        assert!(validate_body(I32, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn if_with_wrong_else_result_errors() {
+        let body = vec![
+            Instruction::LocalGet(0),
+            if_i32(
+                vec![Instruction::I32Const(1)],
+                vec![Instruction::I64Const(2)],
+            ),
+        ];
+
+        assert!(validate_body(I32, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn if_with_result_and_no_else_errors() {
+        // a false condition would produce nothing
+        let body = vec![
+            Instruction::LocalGet(0),
+            if_i32(vec![Instruction::I32Const(1)], vec![]),
+        ];
+
+        assert!(validate_body(I32, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn if_with_no_types_and_no_else_is_valid() {
+        let body = vec![
+            Instruction::LocalGet(0),
+            Instruction::IfElse(BlockType::Empty, vec![Instruction::Nop], vec![]),
+        ];
+
+        assert!(validate_body(I32, NONE, &[], body).is_ok());
+    }
+
+    #[test]
+    fn if_pops_condition_before_params() {
+        let i64_to_i64 = func_type(I64, I64);
+        let if_ = || Instruction::IfElse(BlockType::TypeIndex(1), vec![], vec![]);
+
+        // the condition is on top of the param
+        let ordered = vec![Instruction::I64Const(1), Instruction::I32Const(1), if_()];
+        assert!(validate_body_with_types(&[i64_to_i64.clone()], NONE, I64, ordered).is_ok());
+
+        let swapped = vec![Instruction::I32Const(1), Instruction::I64Const(1), if_()];
+        assert!(validate_body_with_types(&[i64_to_i64], NONE, I64, swapped).is_err());
+    }
+
+    #[test]
+    fn then_arm_cannot_pop_values_from_outside() {
+        // if the then arm could reach the outer i32, its drop would consume it and the
+        // function would validate, so this only errors because of the arm's floor
+        let body = vec![
+            Instruction::I32Const(7),
+            Instruction::LocalGet(0),
+            Instruction::IfElse(BlockType::Empty, vec![Instruction::Drop], vec![]),
+        ];
+
+        assert!(validate_body(I32, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn else_arm_cannot_pop_values_from_outside() {
+        // same as above for the else arm, with a then arm that is valid on its own
+        let body = vec![
+            Instruction::I32Const(7),
+            Instruction::LocalGet(0),
+            Instruction::IfElse(
+                BlockType::Empty,
+                vec![Instruction::Nop],
+                vec![Instruction::Drop],
+            ),
+        ];
+
+        assert!(validate_body(I32, NONE, &[], body).is_err());
     }
 }
