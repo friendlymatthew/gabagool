@@ -1,8 +1,9 @@
 #![allow(unused)]
 
 use crate::{
-    bail_validation, ensure_validation, Error, Function, FunctionType, Global, GlobalType,
-    ImportDeclaration, ImportDescription, Instruction, Mutability, ParsedModule, Result, ValueType,
+    bail_validation, ensure_validation, BlockType, Error, Function, FunctionType, Global,
+    GlobalType, ImportDeclaration, ImportDescription, Instruction, Mutability, ParsedModule,
+    Result, ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -311,10 +312,37 @@ impl<'a> Validator<'a> {
 
                 self.ctx.apply(&ft.params, &ft.results)?;
             }
+            Instruction::Block(bt, body) | Instruction::Loop(bt, body) => {
+                let is_loop = matches!(instruction, Instruction::Loop(_, _));
+                let (params, results) = self.block_type(bt)?;
+
+                self.ctx.pop_values_expect(params)?;
+                self.ctx.push_control(params, results, is_loop);
+
+                for instr in body {
+                    self.validate_instruction(instr)?;
+                }
+
+                self.ctx.pop_control()?;
+                self.ctx.push_values(results.iter().copied());
+            }
             _ => unimplemented!(),
         }
 
         Ok(())
+    }
+
+    fn block_type(&self, bt: &'a BlockType) -> Result<(&'a [ValueType], &'a [ValueType])> {
+        match bt {
+            BlockType::Empty => Ok((&[], &[])),
+            BlockType::SingleValue(value_type) => Ok((&[], std::slice::from_ref(value_type))),
+            BlockType::TypeIndex(i) => {
+                let i = u32::try_from(*i).map_err(|_| Error::validation("invalid block index"))?;
+                let ft = self.func_type(i)?;
+
+                Ok((&ft.params, &ft.results))
+            }
+        }
     }
 
     fn func_type(&self, i: u32) -> Result<&'a FunctionType> {
@@ -1603,5 +1631,131 @@ mod tests {
         )
         .is_ok());
         assert!(validate_with_funcs(&[imported], &[caller], vec![Instruction::Call(0)]).is_err());
+    }
+
+    // `types[0]` is the function's own type, so `extra_types` start at index 1
+    fn validate_body_with_types(
+        extra_types: &[SubType],
+        params: &[ValueType],
+        results: &[ValueType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(params, results));
+        module.types.extend(extra_types.iter().cloned());
+        module.functions.push(function(0, &[], body));
+
+        Validator::new(&module).validate()
+    }
+
+    fn block_i32(body: Vec<Instruction>) -> Instruction {
+        Instruction::Block(BlockType::SingleValue(ValueType::I32), body)
+    }
+
+    #[test]
+    fn block_with_result_pushes_it() {
+        let body = vec![block_i32(vec![Instruction::I32Const(1)])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn block_with_wrong_result_type_errors() {
+        let body = vec![block_i32(vec![Instruction::I64Const(1)])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn block_with_missing_result_errors() {
+        let body = vec![block_i32(vec![])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn block_with_leftover_value_errors() {
+        let body = vec![Instruction::Block(
+            BlockType::Empty,
+            vec![Instruction::I32Const(1)],
+        )];
+
+        assert!(validate_body(NONE, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn block_cannot_pop_values_from_outside() {
+        // the outer i32 is below the block's floor, so the inner drop has nothing to pop.
+        // if the block could reach it, the drop would consume it and the function would
+        // validate, so this only errors because of the floor
+        let body = vec![
+            Instruction::I32Const(1),
+            Instruction::Block(BlockType::Empty, vec![Instruction::Drop]),
+        ];
+
+        assert!(validate_body(NONE, NONE, &[], body).is_err());
+    }
+
+    #[test]
+    fn block_with_type_index_consumes_params_and_pushes_results() {
+        let i32_to_i64 = func_type(I32, I64);
+        let body = vec![
+            Instruction::I32Const(1),
+            Instruction::Block(
+                BlockType::TypeIndex(1),
+                vec![Instruction::I64ExtendI32Signed],
+            ),
+        ];
+
+        assert!(validate_body_with_types(&[i32_to_i64], NONE, I64, body).is_ok());
+    }
+
+    #[test]
+    fn block_with_type_index_requires_its_params() {
+        let i32_to_i64 = func_type(I32, I64);
+        let body = vec![Instruction::Block(
+            BlockType::TypeIndex(1),
+            vec![Instruction::I64ExtendI32Signed],
+        )];
+
+        assert!(validate_body_with_types(&[i32_to_i64], NONE, I64, body).is_err());
+    }
+
+    #[test]
+    fn block_with_invalid_type_index_errors() {
+        let body = |i| vec![Instruction::Block(BlockType::TypeIndex(i), vec![])];
+
+        assert!(validate_body(NONE, NONE, &[], body(-1)).is_err());
+        assert!(validate_body(NONE, NONE, &[], body(1)).is_err());
+    }
+
+    #[test]
+    fn nested_block_result_feeds_outer_block() {
+        let body = vec![block_i32(vec![
+            block_i32(vec![Instruction::I32Const(1)]),
+            Instruction::I32EqZero,
+        ])];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn loop_with_result_pushes_it() {
+        let body = vec![Instruction::Loop(
+            BlockType::SingleValue(ValueType::I32),
+            vec![Instruction::I32Const(1)],
+        )];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn loop_with_wrong_result_type_errors() {
+        let body = vec![Instruction::Loop(
+            BlockType::SingleValue(ValueType::I32),
+            vec![Instruction::I64Const(1)],
+        )];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
     }
 }
