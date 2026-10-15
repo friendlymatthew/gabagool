@@ -1,9 +1,9 @@
 #![allow(unused)]
 
 use crate::{
-    bail_validation, ensure_validation, BlockType, Error, Function, FunctionType, Global,
-    GlobalType, ImportDeclaration, ImportDescription, Instruction, Mutability, ParsedModule,
-    Result, ValueType,
+    bail_validation, ensure_validation, AddrType, BlockType, Error, Function, FunctionType, Global,
+    GlobalType, ImportDeclaration, ImportDescription, Instruction, MemArg, MemoryType, Mutability,
+    ParsedModule, Result, ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,6 +41,8 @@ pub struct Validator<'a> {
     // type index of every function, imports first
     funcs: Vec<u32>,
     globals: Vec<GlobalType>,
+    // imports first
+    mems: Vec<MemoryType>,
     ctx: FunctionContext<'a>,
 }
 
@@ -78,10 +80,25 @@ impl<'a> Validator<'a> {
             .cloned()
             .collect::<Vec<_>>();
 
+        let mems = module
+            .import_declarations
+            .iter()
+            .filter_map(|i| {
+                if let ImportDescription::Mem(m) = &i.description {
+                    Some(m)
+                } else {
+                    None
+                }
+            })
+            .chain(module.mems.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+
         Self {
             module,
             funcs,
             globals,
+            mems,
             ctx: FunctionContext::default(),
         }
     }
@@ -368,6 +385,34 @@ impl<'a> Validator<'a> {
                 self.ctx.pop_values_expect(types)?;
                 self.ctx.mark_unreachable()?;
             }
+            Instruction::I32Load(m) => self.load(m, 2, ValueType::I32)?,
+            Instruction::I64Load(m) => self.load(m, 3, ValueType::I64)?,
+            Instruction::F32Load(m) => self.load(m, 2, ValueType::F32)?,
+            Instruction::F64Load(m) => self.load(m, 3, ValueType::F64)?,
+            Instruction::I32Load8Signed(m) | Instruction::I32Load8Unsigned(m) => {
+                self.load(m, 0, ValueType::I32)?
+            }
+            Instruction::I32Load16Signed(m) | Instruction::I32Load16Unsigned(m) => {
+                self.load(m, 1, ValueType::I32)?
+            }
+            Instruction::I64Load8Signed(m) | Instruction::I64Load8Unsigned(m) => {
+                self.load(m, 0, ValueType::I64)?
+            }
+            Instruction::I64Load16Signed(m) | Instruction::I64Load16Unsigned(m) => {
+                self.load(m, 1, ValueType::I64)?
+            }
+            Instruction::I64Load32Signed(m) | Instruction::I64Load32Unsigned(m) => {
+                self.load(m, 2, ValueType::I64)?
+            }
+            Instruction::I32Store(m) => self.store(m, 2, ValueType::I32)?,
+            Instruction::I64Store(m) => self.store(m, 3, ValueType::I64)?,
+            Instruction::F32Store(m) => self.store(m, 2, ValueType::F32)?,
+            Instruction::F64Store(m) => self.store(m, 3, ValueType::F64)?,
+            Instruction::I32Store8(m) => self.store(m, 0, ValueType::I32)?,
+            Instruction::I32Store16(m) => self.store(m, 1, ValueType::I32)?,
+            Instruction::I64Store8(m) => self.store(m, 0, ValueType::I64)?,
+            Instruction::I64Store16(m) => self.store(m, 1, ValueType::I64)?,
+            Instruction::I64Store32(m) => self.store(m, 2, ValueType::I64)?,
             _ => unimplemented!(),
         }
 
@@ -385,6 +430,38 @@ impl<'a> Validator<'a> {
                 Ok((&ft.params, &ft.results))
             }
         }
+    }
+
+    // `max_align` is log2 of the access width in bytes
+    fn load(&mut self, m: &MemArg, max_align: u32, t: ValueType) -> Result<()> {
+        let at = self.memarg(m, max_align)?;
+        self.ctx.apply(&[at], &[t])
+    }
+
+    fn store(&mut self, m: &MemArg, max_align: u32, t: ValueType) -> Result<()> {
+        let at = self.memarg(m, max_align)?;
+        self.ctx.apply(&[at, t], &[])
+    }
+
+    // checks the memory exists and the memarg fits it; returns the address type to pop
+    fn memarg(&self, m: &MemArg, max_align: u32) -> Result<ValueType> {
+        let mem = self
+            .mems
+            .get(m.memory as usize)
+            .ok_or_else(|| Error::validation(format!("unknown memory {}", m.memory)))?;
+
+        ensure_validation!(
+            m.align <= max_align,
+            "alignment must not be larger than natural"
+        );
+
+        Ok(match mem.addr_type {
+            AddrType::I32 => {
+                ensure_validation!(m.offset <= u64::from(u32::MAX), "offset out of range");
+                ValueType::I32
+            }
+            AddrType::I64 => ValueType::I64,
+        })
     }
 
     fn func_type(&self, i: u32) -> Result<&'a FunctionType> {
@@ -571,7 +648,7 @@ impl<'a> FunctionContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CompositeType, FunctionType, SubType};
+    use crate::{CompositeType, FunctionType, Limit, SubType};
 
     use super::*;
 
@@ -1679,7 +1756,7 @@ mod tests {
 
         // index 0 is the import, index 1 is the caller itself
         assert!(validate_with_funcs(
-            &[imported.clone()],
+            std::slice::from_ref(&imported),
             &[func_type(NONE, I64)],
             vec![Instruction::Call(0)]
         )
@@ -1908,7 +1985,9 @@ mod tests {
 
         // the condition is on top of the param
         let ordered = vec![Instruction::I64Const(1), Instruction::I32Const(1), if_()];
-        assert!(validate_body_with_types(&[i64_to_i64.clone()], NONE, I64, ordered).is_ok());
+        assert!(
+            validate_body_with_types(std::slice::from_ref(&i64_to_i64), NONE, I64, ordered).is_ok()
+        );
 
         let swapped = vec![Instruction::I32Const(1), Instruction::I64Const(1), if_()];
         assert!(validate_body_with_types(&[i64_to_i64], NONE, I64, swapped).is_err());
@@ -2013,7 +2092,9 @@ mod tests {
                 vec![Instruction::I32Const(2), Instruction::Br(0)],
             ),
         ];
-        assert!(validate_body_with_types(&[i32_to_none.clone()], NONE, NONE, ok).is_ok());
+        assert!(
+            validate_body_with_types(std::slice::from_ref(&i32_to_none), NONE, NONE, ok).is_ok()
+        );
 
         let missing = vec![
             Instruction::I32Const(1),
@@ -2197,5 +2278,220 @@ mod tests {
         ];
 
         assert!(validate_body(NONE, I32, &[], body).is_ok());
+    }
+
+    fn mem(addr_type: AddrType) -> MemoryType {
+        MemoryType {
+            addr_type,
+            limit: Limit { min: 1, max: 1 },
+        }
+    }
+
+    const fn memarg(align: u32, offset: u64) -> MemArg {
+        MemArg {
+            align,
+            offset,
+            memory: 0,
+        }
+    }
+
+    fn validate_body_with_mems(
+        imported: &[MemoryType],
+        defined: &[MemoryType],
+        params: &[ValueType],
+        results: &[ValueType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(params, results));
+        module.functions.push(function(0, &[], body));
+
+        for m in imported {
+            module.import_declarations.push(ImportDeclaration {
+                module: "env".into(),
+                name: "m".into(),
+                description: ImportDescription::Mem(m.clone()),
+            });
+        }
+        module.mems.extend(defined.iter().cloned());
+
+        Validator::new(&module).validate()
+    }
+
+    fn validate_with_mem32(
+        params: &[ValueType],
+        results: &[ValueType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        validate_body_with_mems(&[], &[mem(AddrType::I32)], params, results, body)
+    }
+
+    #[test]
+    fn load_pops_address_and_pushes_value() {
+        let body = vec![Instruction::I32Const(0), Instruction::I64Load(memarg(3, 0))];
+
+        assert!(validate_with_mem32(NONE, I64, body).is_ok());
+    }
+
+    #[test]
+    fn load_result_has_the_instructions_type() {
+        let body = vec![Instruction::I32Const(0), Instruction::I64Load(memarg(3, 0))];
+
+        assert!(validate_with_mem32(NONE, I32, body).is_err());
+    }
+
+    #[test]
+    fn load_without_address_errors() {
+        assert!(validate_with_mem32(NONE, I32, vec![Instruction::I32Load(memarg(2, 0))]).is_err());
+    }
+
+    #[test]
+    fn load_with_wrong_address_type_errors() {
+        let body = vec![Instruction::I64Const(0), Instruction::I32Load(memarg(2, 0))];
+
+        assert!(validate_with_mem32(NONE, I32, body).is_err());
+    }
+
+    #[test]
+    fn load_without_memory_errors() {
+        let body = vec![Instruction::I32Const(0), Instruction::I32Load(memarg(2, 0))];
+
+        let err = validate_body_with_mems(&[], &[], NONE, I32, body).unwrap_err();
+        assert!(err.to_string().contains("unknown memory"), "{err}");
+    }
+
+    #[test]
+    fn store_pops_address_then_value() {
+        let ordered = vec![
+            Instruction::I32Const(0),
+            Instruction::F64Const(1.0),
+            Instruction::F64Store(memarg(3, 0)),
+        ];
+        let swapped = vec![
+            Instruction::F64Const(1.0),
+            Instruction::I32Const(0),
+            Instruction::F64Store(memarg(3, 0)),
+        ];
+
+        assert!(validate_with_mem32(NONE, NONE, ordered).is_ok());
+        assert!(validate_with_mem32(NONE, NONE, swapped).is_err());
+    }
+
+    #[test]
+    fn store_with_wrong_value_type_errors() {
+        let body = vec![
+            Instruction::I32Const(0),
+            Instruction::I64Const(1),
+            Instruction::I32Store(memarg(2, 0)),
+        ];
+
+        assert!(validate_with_mem32(NONE, NONE, body).is_err());
+    }
+
+    #[test]
+    fn alignment_up_to_natural_is_valid() {
+        for align in 0..=2 {
+            let body = vec![
+                Instruction::I32Const(0),
+                Instruction::I32Load(memarg(align, 0)),
+            ];
+
+            assert!(
+                validate_with_mem32(NONE, I32, body).is_ok(),
+                "align {align}"
+            );
+        }
+    }
+
+    #[test]
+    fn alignment_larger_than_natural_errors() {
+        // (instruction, smallest invalid align)
+        let cases = [
+            (Instruction::I32Load8Unsigned(memarg(1, 0)), I32),
+            (Instruction::I32Load16Signed(memarg(2, 0)), I32),
+            (Instruction::I32Load(memarg(3, 0)), I32),
+            (Instruction::I64Load32Unsigned(memarg(3, 0)), I64),
+            (Instruction::I64Load(memarg(4, 0)), I64),
+        ];
+
+        for (load, result) in cases {
+            let body = vec![Instruction::I32Const(0), load.clone()];
+            let err = validate_with_mem32(NONE, result, body).unwrap_err();
+            assert!(err.to_string().contains("alignment"), "{load:?}: {err}");
+        }
+
+        let store = vec![
+            Instruction::I32Const(0),
+            Instruction::I64Const(1),
+            Instruction::I64Store8(memarg(1, 0)),
+        ];
+        assert!(validate_with_mem32(NONE, NONE, store).is_err());
+    }
+
+    #[test]
+    fn huge_alignment_errors_without_overflow() {
+        let body = vec![
+            Instruction::I32Const(0),
+            Instruction::I32Load(memarg(u32::MAX, 0)),
+        ];
+
+        assert!(validate_with_mem32(NONE, I32, body).is_err());
+    }
+
+    #[test]
+    fn offset_must_fit_in_32_bits_for_i32_memory() {
+        let load = |offset| {
+            vec![
+                Instruction::I32Const(0),
+                Instruction::I32Load(memarg(2, offset)),
+            ]
+        };
+
+        assert!(validate_with_mem32(NONE, I32, load(u64::from(u32::MAX))).is_ok());
+        assert!(validate_with_mem32(NONE, I32, load(u64::from(u32::MAX) + 1)).is_err());
+    }
+
+    #[test]
+    fn i64_memory_uses_i64_addresses_and_offsets() {
+        let mem64 = [mem(AddrType::I64)];
+        let load = |addr| {
+            vec![
+                addr,
+                Instruction::I32Load(memarg(2, u64::from(u32::MAX) + 1)),
+            ]
+        };
+
+        assert!(
+            validate_body_with_mems(&[], &mem64, NONE, I32, load(Instruction::I64Const(0))).is_ok()
+        );
+        assert!(
+            validate_body_with_mems(&[], &mem64, NONE, I32, load(Instruction::I32Const(0)))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn memory_indices_are_imports_then_defined() {
+        // memory 0 is the imported i64 memory, so it needs an i64 address
+        let imported = [mem(AddrType::I64)];
+        let defined = [mem(AddrType::I32)];
+        let load = |addr| vec![addr, Instruction::I32Load(memarg(2, 0))];
+
+        assert!(validate_body_with_mems(
+            &imported,
+            &defined,
+            NONE,
+            I32,
+            load(Instruction::I64Const(0))
+        )
+        .is_ok());
+        assert!(validate_body_with_mems(
+            &imported,
+            &defined,
+            NONE,
+            I32,
+            load(Instruction::I32Const(0))
+        )
+        .is_err());
     }
 }
