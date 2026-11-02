@@ -464,6 +464,23 @@ impl<'a> Validator<'a> {
 
                 self.ctx.apply(&[at_d, at_s, at_len], &[])?;
             }
+            Instruction::BrTable(labels, default) => {
+                self.ctx.pop_value_expect(&ValueType::I32)?;
+
+                let default_types = self.ctx.label_types(*default)?;
+                let arity = default_types.len();
+
+                for l in labels {
+                    let types = self.ctx.label_types(*l)?;
+                    ensure_validation!(types.len() == arity, "type mismatch");
+
+                    let popped = self.ctx.pop_values_expect_returning(types)?;
+                    self.ctx.push_values(popped);
+                }
+
+                self.ctx.pop_values_expect(default_types)?;
+                self.ctx.mark_unreachable()?;
+            }
             _ => unimplemented!(),
         }
 
@@ -656,6 +673,18 @@ impl<'a> FunctionContext<'a> {
         }
 
         Ok(())
+    }
+
+    fn pop_values_expect_returning(&mut self, expected: &[ValueType]) -> Result<Vec<StackType>> {
+        let mut out = Vec::with_capacity(expected.len());
+
+        for e in expected.iter().rev() {
+            out.push(self.pop_value_expect(e)?);
+        }
+
+        out.reverse();
+
+        Ok(out)
     }
 
     fn mark_unreachable(&mut self) -> Result<()> {
