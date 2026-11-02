@@ -436,6 +436,30 @@ impl<'a> Validator<'a> {
                 let t = types[0];
                 self.ctx.apply(&[t, t, ValueType::I32], &[t])?;
             }
+            Instruction::MemorySize(x) => {
+                let address_type = self.mem_addr_type(*x)?;
+                self.ctx.apply(&[], &[address_type])?;
+            }
+            Instruction::MemoryGrow(x) => {
+                let address_type = self.mem_addr_type(*x)?;
+                self.ctx.apply(&[address_type], &[address_type])?;
+            }
+            Instruction::MemoryFill(x) => {
+                let address_type = self.mem_addr_type(*x)?;
+                self.ctx
+                    .apply(&[address_type, ValueType::I32, address_type], &[])?;
+            }
+            Instruction::MemoryCopy(d, s) => {
+                let at_d = self.mem_addr_type(*d)?;
+                let at_s = self.mem_addr_type(*s)?;
+
+                let at_len = match (at_d, at_s) {
+                    (ValueType::I64, ValueType::I64) => ValueType::I64,
+                    _ => ValueType::I32,
+                };
+
+                self.ctx.apply(&[at_d, at_s, at_len], &[])?;
+            }
             _ => unimplemented!(),
         }
 
@@ -466,26 +490,36 @@ impl<'a> Validator<'a> {
         self.ctx.apply(&[at, t], &[])
     }
 
+    // returns the address type of memory `x`
+    fn mem_addr_type(&self, x: u32) -> Result<ValueType> {
+        let mem = self
+            .mems
+            .get(x as usize)
+            .ok_or_else(|| Error::validation(format!("unknown memory {x}")))?;
+
+        let out = match mem.addr_type {
+            AddrType::I32 => ValueType::I32,
+            AddrType::I64 => ValueType::I64,
+        };
+
+        Ok(out)
+    }
+
     // checks the memory exists and the memarg fits it; returns the address type
     // to pop
     fn memarg(&self, m: &MemArg, max_align: u32) -> Result<ValueType> {
-        let mem = self
-            .mems
-            .get(m.memory as usize)
-            .ok_or_else(|| Error::validation(format!("unknown memory {}", m.memory)))?;
+        let address_type = self.mem_addr_type(m.memory)?;
 
         ensure_validation!(
             m.align <= max_align,
             "alignment must not be larger than natural"
         );
 
-        Ok(match mem.addr_type {
-            AddrType::I32 => {
-                ensure_validation!(m.offset <= u64::from(u32::MAX), "offset out of range");
-                ValueType::I32
-            }
-            AddrType::I64 => ValueType::I64,
-        })
+        if address_type == ValueType::I32 {
+            ensure_validation!(m.offset <= u64::from(u32::MAX), "offset out of range");
+        }
+
+        Ok(address_type)
     }
 
     fn func_type(&self, i: u32) -> Result<&'a FunctionType> {
@@ -2517,5 +2551,210 @@ mod tests {
             load(Instruction::I32Const(0))
         )
         .is_err());
+    }
+
+    fn validate_with_mems(
+        mems: &[MemoryType],
+        results: &[ValueType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        validate_body_with_mems(&[], mems, NONE, results, body)
+    }
+
+    #[test]
+    fn memory_size_pushes_the_address_type() {
+        let body = || vec![Instruction::MemorySize(0)];
+
+        assert!(validate_with_mems(&[mem(AddrType::I32)], I32, body()).is_ok());
+        assert!(validate_with_mems(&[mem(AddrType::I32)], I64, body()).is_err());
+        assert!(validate_with_mems(&[mem(AddrType::I64)], I64, body()).is_ok());
+        assert!(validate_with_mems(&[mem(AddrType::I64)], I32, body()).is_err());
+    }
+
+    #[test]
+    fn memory_grow_takes_and_returns_the_address_type() {
+        let grow = |delta| vec![delta, Instruction::MemoryGrow(0)];
+
+        assert!(
+            validate_with_mems(&[mem(AddrType::I32)], I32, grow(Instruction::I32Const(1))).is_ok()
+        );
+        assert!(
+            validate_with_mems(&[mem(AddrType::I32)], I32, grow(Instruction::I64Const(1))).is_err()
+        );
+        assert!(
+            validate_with_mems(&[mem(AddrType::I64)], I64, grow(Instruction::I64Const(1))).is_ok()
+        );
+        assert!(
+            validate_with_mems(&[mem(AddrType::I64)], I64, grow(Instruction::I32Const(1))).is_err()
+        );
+    }
+
+    #[test]
+    fn memory_grow_without_operand_errors() {
+        assert!(
+            validate_with_mems(&[mem(AddrType::I32)], I32, vec![Instruction::MemoryGrow(0)])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn memory_fill_pops_address_value_and_length() {
+        let body = vec![
+            Instruction::I32Const(0),
+            Instruction::I32Const(0xff),
+            Instruction::I32Const(16),
+            Instruction::MemoryFill(0),
+        ];
+
+        assert!(validate_with_mems(&[mem(AddrType::I32)], NONE, body).is_ok());
+    }
+
+    #[test]
+    fn memory_fill_value_is_i32_even_on_i64_memory() {
+        let fill = |value| {
+            vec![
+                Instruction::I64Const(0),
+                value,
+                Instruction::I64Const(16),
+                Instruction::MemoryFill(0),
+            ]
+        };
+
+        assert!(
+            validate_with_mems(&[mem(AddrType::I64)], NONE, fill(Instruction::I32Const(0))).is_ok()
+        );
+        assert!(
+            validate_with_mems(&[mem(AddrType::I64)], NONE, fill(Instruction::I64Const(0)))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn memory_fill_with_too_few_operands_errors() {
+        let body = vec![
+            Instruction::I32Const(0xff),
+            Instruction::I32Const(16),
+            Instruction::MemoryFill(0),
+        ];
+
+        assert!(validate_with_mems(&[mem(AddrType::I32)], NONE, body).is_err());
+    }
+
+    #[test]
+    fn memory_copy_within_one_memory() {
+        let body = vec![
+            Instruction::I32Const(0),
+            Instruction::I32Const(64),
+            Instruction::I32Const(16),
+            Instruction::MemoryCopy(0, 0),
+        ];
+
+        assert!(validate_with_mems(&[mem(AddrType::I32)], NONE, body).is_ok());
+    }
+
+    #[test]
+    fn memory_copy_uses_each_memorys_address_type() {
+        // memory 0 is i32 (destination), memory 1 is i64 (source)
+        let mems = [mem(AddrType::I32), mem(AddrType::I64)];
+        let copy = |dst, src| {
+            vec![
+                dst,
+                src,
+                Instruction::I32Const(16),
+                Instruction::MemoryCopy(0, 1),
+            ]
+        };
+
+        assert!(validate_with_mems(
+            &mems,
+            NONE,
+            copy(Instruction::I32Const(0), Instruction::I64Const(0))
+        )
+        .is_ok());
+        assert!(validate_with_mems(
+            &mems,
+            NONE,
+            copy(Instruction::I64Const(0), Instruction::I32Const(0))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn memory_copy_length_is_i64_only_when_both_memories_are() {
+        let mixed = [mem(AddrType::I32), mem(AddrType::I64)];
+        let mixed_copy = |len| {
+            vec![
+                Instruction::I32Const(0),
+                Instruction::I64Const(0),
+                len,
+                Instruction::MemoryCopy(0, 1),
+            ]
+        };
+        assert!(validate_with_mems(&mixed, NONE, mixed_copy(Instruction::I32Const(16))).is_ok());
+        assert!(validate_with_mems(&mixed, NONE, mixed_copy(Instruction::I64Const(16))).is_err());
+
+        let both64 = [mem(AddrType::I64)];
+        let copy64 = |len| {
+            vec![
+                Instruction::I64Const(0),
+                Instruction::I64Const(0),
+                len,
+                Instruction::MemoryCopy(0, 0),
+            ]
+        };
+        assert!(validate_with_mems(&both64, NONE, copy64(Instruction::I64Const(16))).is_ok());
+        assert!(validate_with_mems(&both64, NONE, copy64(Instruction::I32Const(16))).is_err());
+    }
+
+    #[test]
+    fn memory_instructions_without_memory_error() {
+        let cases = [
+            (vec![Instruction::MemorySize(0)], I32),
+            (
+                vec![Instruction::I32Const(1), Instruction::MemoryGrow(0)],
+                I32,
+            ),
+            (
+                vec![
+                    Instruction::I32Const(0),
+                    Instruction::I32Const(0),
+                    Instruction::I32Const(0),
+                    Instruction::MemoryFill(0),
+                ],
+                NONE,
+            ),
+            (
+                vec![
+                    Instruction::I32Const(0),
+                    Instruction::I32Const(0),
+                    Instruction::I32Const(0),
+                    Instruction::MemoryCopy(0, 0),
+                ],
+                NONE,
+            ),
+        ];
+
+        for (body, results) in cases {
+            let err = validate_with_mems(&[], results, body).unwrap_err();
+            assert!(err.to_string().contains("unknown memory"), "{err}");
+        }
+    }
+
+    #[test]
+    fn memory_copy_checks_both_memory_indices() {
+        let copy = |dst, src| {
+            vec![
+                Instruction::I32Const(0),
+                Instruction::I32Const(0),
+                Instruction::I32Const(0),
+                Instruction::MemoryCopy(dst, src),
+            ]
+        };
+
+        let err = validate_with_mems(&[mem(AddrType::I32)], NONE, copy(0, 1)).unwrap_err();
+        assert!(err.to_string().contains("unknown memory 1"), "{err}");
+
+        let err = validate_with_mems(&[mem(AddrType::I32)], NONE, copy(1, 0)).unwrap_err();
+        assert!(err.to_string().contains("unknown memory 1"), "{err}");
     }
 }
