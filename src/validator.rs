@@ -104,6 +104,10 @@ impl<'a> Validator<'a> {
     }
 
     pub fn validate(&mut self) -> Result<()> {
+        for &type_idx in &self.funcs {
+            self.func_type(type_idx)?;
+        }
+
         for function in &self.module.functions {
             self.validate_function(function)?;
         }
@@ -526,7 +530,7 @@ impl<'a> Validator<'a> {
         self.module
             .types
             .get(i as usize)
-            .ok_or_else(|| Error::validation("oob"))?
+            .ok_or_else(|| Error::Validation(format!("unknown type {i}")))?
             .try_as_function_type()
             .ok_or_else(|| Error::validation("does not have function type"))
     }
