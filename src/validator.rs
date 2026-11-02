@@ -413,6 +413,29 @@ impl<'a> Validator<'a> {
             Instruction::I64Store8(m) => self.store(m, 0, ValueType::I64)?,
             Instruction::I64Store16(m) => self.store(m, 1, ValueType::I64)?,
             Instruction::I64Store32(m) => self.store(m, 2, ValueType::I64)?,
+            Instruction::Select(types) if types.is_empty() => {
+                self.ctx.pop_value_expect(&ValueType::I32)?;
+                let t1 = self.ctx.pop_value()?;
+                let t2 = self.ctx.pop_value()?;
+
+                let result = match (t1, t2) {
+                    (StackType::Known(ValueType::Ref(_)), _)
+                    | (_, StackType::Known(ValueType::Ref(_))) => bail_validation!("type mismatch"),
+                    (StackType::Bot, t) | (t, StackType::Bot) => t,
+                    (StackType::Known(a), StackType::Known(b)) => {
+                        ensure_validation!(a == b, "type mismatch");
+                        StackType::Known(a)
+                    }
+                };
+
+                self.ctx.push_value(result);
+            }
+            Instruction::Select(types) => {
+                ensure_validation!(types.len() == 1, "invalid result arity");
+
+                let t = types[0];
+                self.ctx.apply(&[t, t, ValueType::I32], &[t])?;
+            }
             _ => unimplemented!(),
         }
 
