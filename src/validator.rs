@@ -466,7 +466,8 @@ impl<'a> Validator<'a> {
         self.ctx.apply(&[at, t], &[])
     }
 
-    // checks the memory exists and the memarg fits it; returns the address type to pop
+    // checks the memory exists and the memarg fits it; returns the address type
+    // to pop
     fn memarg(&self, m: &MemArg, max_align: u32) -> Result<ValueType> {
         let mem = self
             .mems
