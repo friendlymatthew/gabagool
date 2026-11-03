@@ -1,9 +1,9 @@
 #![allow(unused)]
 
 use crate::{
-    bail_validation, ensure_validation, AddrType, BlockType, Error, Function, FunctionType, Global,
-    GlobalType, HeapType, ImportDeclaration, ImportDescription, Instruction, MemArg, MemoryType,
-    Mutability, ParsedModule, RefType, Result, TableType, ValueType,
+    bail_validation, ensure_validation, AddrType, BlockType, CompositeType, Error, Function,
+    FunctionType, Global, GlobalType, HeapType, ImportDeclaration, ImportDescription, Instruction,
+    MemArg, MemoryType, Mutability, ParsedModule, RefType, Result, TableType, ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -561,8 +561,8 @@ impl<'a> Validator<'a> {
                 let x_at = xt.addr_type;
                 let y_at = yt.addr_type;
 
-                // todo: fix me
-                ensure_validation!(x_rt == y_rt, "ref types are not equal");
+                // the source's elements must fit in the destination
+                ensure_validation!(self.ref_subtype(y_rt, x_rt), "type mismatch");
 
                 self.ctx.apply(
                     &[
@@ -613,6 +613,59 @@ impl<'a> Validator<'a> {
         Ok(addr_value_type(mem.addr_type))
     }
 
+    fn ref_subtype(&self, a: RefType, b: RefType) -> bool {
+        let (a_nullable, a_heap) = normalize_ref(a);
+        let (b_nullable, b_heap) = normalize_ref(b);
+
+        (!a_nullable || b_nullable) && self.heap_subtype(a_heap, b_heap)
+    }
+
+    fn heap_subtype(&self, a: HeapType, b: HeapType) -> bool {
+        use HeapType as H;
+
+        if a == b {
+            return true;
+        }
+
+        match (a, b) {
+            (H::NoFunc, b) => {
+                b == H::Func || self.is_composite(b, |c| matches!(c, CompositeType::Func(_)))
+            }
+            (H::NoExtern, H::Extern) | (H::NoExn, H::Exn) => true,
+            (H::None, b) => {
+                matches!(b, H::Any | H::Eq | H::I31 | H::Struct | H::Array)
+                    || self.is_composite(b, |c| !matches!(c, CompositeType::Func(_)))
+            }
+            (H::I31 | H::Struct | H::Array | H::Eq, H::Any) => true,
+            (H::I31 | H::Struct | H::Array, H::Eq) => true,
+            (H::TypeIndex(_), H::Func) => {
+                self.is_composite(a, |c| matches!(c, CompositeType::Func(_)))
+            }
+            (H::TypeIndex(_), H::Struct) => {
+                self.is_composite(a, |c| matches!(c, CompositeType::Struct(_)))
+            }
+            (H::TypeIndex(_), H::Array) => {
+                self.is_composite(a, |c| matches!(c, CompositeType::Array(_)))
+            }
+            (H::TypeIndex(_), H::Eq | H::Any) => {
+                self.is_composite(a, |c| !matches!(c, CompositeType::Func(_)))
+            }
+            // todo: follow declared supertypes between type indices (gc)
+            _ => false,
+        }
+    }
+
+    fn is_composite(&self, ht: HeapType, pred: impl Fn(&CompositeType) -> bool) -> bool {
+        let HeapType::TypeIndex(i) = ht else {
+            return false;
+        };
+
+        self.module
+            .types
+            .get(i as usize)
+            .is_some_and(|st| pred(&st.composite_type))
+    }
+
     fn table_type(&self, x: u32) -> Result<TableType> {
         self.tables
             .get(x as usize)
@@ -651,6 +704,17 @@ impl<'a> Validator<'a> {
             .get(i as usize)
             .cloned()
             .ok_or_else(|| Error::validation("unknown globals"))
+    }
+}
+
+const fn normalize_ref(rt: RefType) -> (bool, HeapType) {
+    match rt {
+        RefType::FuncRef => (true, HeapType::Func),
+        RefType::ExternRef => (true, HeapType::Extern),
+        RefType::Ref {
+            nullable,
+            heap_type,
+        } => (nullable, heap_type),
     }
 }
 
@@ -840,7 +904,7 @@ impl<'a> FunctionContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CompositeType, FunctionType, Limit, SubType, TableDef};
+    use crate::{CompositeType, FunctionType, Limit, StructType, SubType, TableDef};
 
     use super::*;
 
@@ -3085,5 +3149,148 @@ mod tests {
             );
             assert_eq!(result.is_ok(), valid, "{result:?}");
         }
+    }
+
+    fn rref(nullable: bool, heap_type: HeapType) -> RefType {
+        RefType::Ref {
+            nullable,
+            heap_type,
+        }
+    }
+
+    // types[0] is a function type, types[1] a struct type
+    fn module_with_func_and_struct_types() -> ParsedModule {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(NONE, NONE));
+        module.types.push(SubType {
+            is_final: true,
+            supertypes: vec![],
+            composite_type: CompositeType::Struct(StructType { fields: vec![] }),
+        });
+
+        module
+    }
+
+    #[test]
+    fn funcref_shorthand_matches_ref_null_func_both_ways() {
+        let module = ParsedModule::default();
+        let v = Validator::new(&module);
+        let long = rref(true, HeapType::Func);
+
+        assert!(v.ref_subtype(RefType::FuncRef, long));
+        assert!(v.ref_subtype(long, RefType::FuncRef));
+        assert!(v.ref_subtype(RefType::ExternRef, rref(true, HeapType::Extern)));
+        assert!(v.ref_subtype(rref(true, HeapType::Extern), RefType::ExternRef));
+    }
+
+    #[test]
+    fn non_null_ref_fits_nullable_but_not_the_reverse() {
+        let module = ParsedModule::default();
+        let v = Validator::new(&module);
+
+        assert!(v.ref_subtype(rref(false, HeapType::Func), RefType::FuncRef));
+        assert!(!v.ref_subtype(RefType::FuncRef, rref(false, HeapType::Func)));
+    }
+
+    #[test]
+    fn func_and_extern_are_unrelated() {
+        let module = ParsedModule::default();
+        let v = Validator::new(&module);
+
+        assert!(!v.ref_subtype(RefType::ExternRef, RefType::FuncRef));
+        assert!(!v.ref_subtype(RefType::FuncRef, RefType::ExternRef));
+    }
+
+    #[test]
+    fn bottom_heap_types_fit_their_hierarchy() {
+        let module = module_with_func_and_struct_types();
+        let v = Validator::new(&module);
+
+        assert!(v.heap_subtype(HeapType::NoFunc, HeapType::Func));
+        assert!(v.heap_subtype(HeapType::NoFunc, HeapType::TypeIndex(0)));
+        assert!(!v.heap_subtype(HeapType::NoFunc, HeapType::Extern));
+        assert!(v.heap_subtype(HeapType::NoExtern, HeapType::Extern));
+        assert!(!v.heap_subtype(HeapType::NoExtern, HeapType::Func));
+        assert!(v.heap_subtype(HeapType::None, HeapType::Any));
+        assert!(v.heap_subtype(HeapType::None, HeapType::TypeIndex(1)));
+        assert!(!v.heap_subtype(HeapType::None, HeapType::TypeIndex(0)));
+        assert!(!v.heap_subtype(HeapType::None, HeapType::Func));
+    }
+
+    #[test]
+    fn type_indices_fit_their_abstract_supertypes() {
+        let module = module_with_func_and_struct_types();
+        let v = Validator::new(&module);
+
+        assert!(v.heap_subtype(HeapType::TypeIndex(0), HeapType::Func));
+        assert!(!v.heap_subtype(HeapType::TypeIndex(0), HeapType::Any));
+        assert!(v.heap_subtype(HeapType::TypeIndex(1), HeapType::Struct));
+        assert!(v.heap_subtype(HeapType::TypeIndex(1), HeapType::Eq));
+        assert!(v.heap_subtype(HeapType::TypeIndex(1), HeapType::Any));
+        assert!(!v.heap_subtype(HeapType::TypeIndex(1), HeapType::Func));
+        assert!(!v.heap_subtype(HeapType::TypeIndex(1), HeapType::Array));
+        // unknown type index fits nothing but itself
+        assert!(!v.heap_subtype(HeapType::TypeIndex(9), HeapType::Func));
+    }
+
+    #[test]
+    fn abstract_gc_hierarchy() {
+        let module = ParsedModule::default();
+        let v = Validator::new(&module);
+
+        assert!(v.heap_subtype(HeapType::I31, HeapType::Eq));
+        assert!(v.heap_subtype(HeapType::Struct, HeapType::Any));
+        assert!(v.heap_subtype(HeapType::Eq, HeapType::Any));
+        assert!(!v.heap_subtype(HeapType::Any, HeapType::Eq));
+        assert!(!v.heap_subtype(HeapType::Func, HeapType::Any));
+    }
+
+    fn table_copy(x: u32, y: u32) -> Vec<Instruction> {
+        vec![
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::TableCopy(x, y),
+        ]
+    }
+
+    #[test]
+    fn table_copy_between_same_element_types_is_valid() {
+        let tables = [funcref_table(), funcref_table()];
+
+        assert!(validate_body_with_tables(&[], &tables, &[], NONE, table_copy(0, 1)).is_ok());
+    }
+
+    #[test]
+    fn table_copy_accepts_both_funcref_spellings() {
+        let tables = [
+            funcref_table(),
+            table(rref(true, HeapType::Func), AddrType::I32),
+        ];
+
+        assert!(validate_body_with_tables(&[], &tables, &[], NONE, table_copy(0, 1)).is_ok());
+        assert!(validate_body_with_tables(&[], &tables, &[], NONE, table_copy(1, 0)).is_ok());
+    }
+
+    #[test]
+    fn table_copy_source_must_fit_destination() {
+        // table 0: funcref, table 1: (ref func)
+        let tables = [
+            funcref_table(),
+            table(rref(false, HeapType::Func), AddrType::I32),
+        ];
+
+        // non-null source into nullable destination is fine
+        assert!(validate_body_with_tables(&[], &tables, &[], NONE, table_copy(0, 1)).is_ok());
+        // nullable source into non-null destination is not
+        assert!(validate_body_with_tables(&[], &tables, &[], NONE, table_copy(1, 0)).is_err());
+    }
+
+    #[test]
+    fn table_copy_between_unrelated_element_types_errors() {
+        let tables = [funcref_table(), table(RefType::ExternRef, AddrType::I32)];
+
+        let err = validate_body_with_tables(&[], &tables, &[], NONE, table_copy(0, 1)).unwrap_err();
+        assert!(err.to_string().contains("type mismatch"), "{err}");
     }
 }
