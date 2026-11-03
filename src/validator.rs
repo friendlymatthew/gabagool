@@ -364,8 +364,7 @@ impl<'a> Validator<'a> {
                 let ft = self.func_type(*type_idx)?;
 
                 // the table index is on top of the call's arguments
-                self.ctx
-                    .pop_value_expect(&addr_value_type(table.addr_type))?;
+                self.ctx.pop_value_expect(&table.addr_type.into())?;
                 self.ctx.apply(&ft.params, &ft.results)?;
             }
             Instruction::Block(bt, body) | Instruction::Loop(bt, body) => {
@@ -518,35 +517,35 @@ impl<'a> Validator<'a> {
             }
             Instruction::TableGet(x) => {
                 let t = self.table_type(*x)?;
-                let at = addr_value_type(t.addr_type);
+                let at = t.addr_type;
                 let rt = t.element_reference_type;
 
-                self.ctx.apply(&[at], &[rt.into()])?;
+                self.ctx.apply(&[at.into()], &[rt.into()])?;
             }
             Instruction::TableSet(x) => {
                 let t = self.table_type(*x)?;
-                let at = addr_value_type(t.addr_type);
+                let at = t.addr_type;
                 let rt = t.element_reference_type;
 
-                self.ctx.apply(&[at, rt.into()], &[])?;
+                self.ctx.apply(&[at.into(), rt.into()], &[])?;
             }
 
             Instruction::TableSize(x) => {
                 let t = self.table_type(*x)?;
-                let at = addr_value_type(t.addr_type);
+                let at = t.addr_type;
 
-                self.ctx.apply(&[], &[at]);
+                self.ctx.apply(&[], &[at.into()]);
             }
             Instruction::TableGrow(x) => {
                 let t = self.table_type(*x)?;
-                let at = addr_value_type(t.addr_type);
+                let at = t.addr_type.into();
                 let rt = t.element_reference_type;
 
                 self.ctx.apply(&[rt.into(), at], &[at])?;
             }
             Instruction::TableFill(x) => {
                 let t = self.table_type(*x)?;
-                let at = addr_value_type(t.addr_type);
+                let at = t.addr_type.into();
                 let rt = t.element_reference_type;
 
                 self.ctx.apply(&[at, rt.into(), at], &[])?;
@@ -563,14 +562,8 @@ impl<'a> Validator<'a> {
 
                 ensure_validation!(self.ref_subtype(y_rt, x_rt), "type mismatch");
 
-                self.ctx.apply(
-                    &[
-                        addr_value_type(x_at),
-                        addr_value_type(y_at),
-                        addr_value_type(x_at.min(y_at)),
-                    ],
-                    &[],
-                )?;
+                self.ctx
+                    .apply(&[x_at.into(), y_at.into(), (x_at.min(y_at)).into()], &[])?;
             }
             Instruction::TableInit(x, y) => {
                 let xt = self.table_type(*x)?;
@@ -624,7 +617,7 @@ impl<'a> Validator<'a> {
             .get(x as usize)
             .ok_or_else(|| Error::validation(format!("unknown memory {x}")))?;
 
-        Ok(addr_value_type(mem.addr_type))
+        Ok(mem.addr_type.into())
     }
 
     fn ref_subtype(&self, a: RefType, b: RefType) -> bool {
@@ -737,13 +730,6 @@ const fn normalize_ref(rt: RefType) -> (bool, HeapType) {
             nullable,
             heap_type,
         } => (nullable, heap_type),
-    }
-}
-
-const fn addr_value_type(at: AddrType) -> ValueType {
-    match at {
-        AddrType::I32 => ValueType::I32,
-        AddrType::I64 => ValueType::I64,
     }
 }
 
