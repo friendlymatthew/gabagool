@@ -3020,7 +3020,8 @@ mod tests {
 
     #[test]
     fn call_indirect_pops_table_index_before_params() {
-        // [i64 arg, i32 index] is right; swapped puts the i64 where the index belongs
+        // [i64 arg, i32 index] is right; swapped puts the i64 where the index
+        // belongs
         let callee = func_type(I64, NONE);
         let call = |a, b| vec![a, b, Instruction::CallIndirect(1, 0)];
 
@@ -3109,7 +3110,8 @@ mod tests {
 
     #[test]
     fn call_indirect_does_not_swap_type_and_table_indices() {
-        // type 1 exists and table 1 does not; swapping the operands would look up table 1
+        // type 1 exists and table 1 does not; swapping the operands would look
+        // up table 1
         let callee = func_type(NONE, NONE);
         let tables = [funcref_table()];
 

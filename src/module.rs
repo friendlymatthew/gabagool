@@ -139,8 +139,8 @@ pub enum AddrType {
 impl Ord for AddrType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (AddrType::I64, AddrType::I32) => std::cmp::Ordering::Greater,
-            (AddrType::I32, AddrType::I64) => std::cmp::Ordering::Less,
+            (Self::I64, Self::I32) => std::cmp::Ordering::Greater,
+            (Self::I32, Self::I64) => std::cmp::Ordering::Less,
             _ => std::cmp::Ordering::Equal,
         }
     }
