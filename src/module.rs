@@ -136,11 +136,33 @@ pub enum AddrType {
     I64,
 }
 
+impl Ord for AddrType {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (AddrType::I64, AddrType::I32) => std::cmp::Ordering::Greater,
+            (AddrType::I32, AddrType::I64) => std::cmp::Ordering::Less,
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+impl std::cmp::PartialOrd for AddrType {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum RefType {
     FuncRef,
     ExternRef,
     Ref { nullable: bool, heap_type: HeapType },
+}
+
+impl From<RefType> for ValueType {
+    fn from(val: RefType) -> Self {
+        Self::Ref(val)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

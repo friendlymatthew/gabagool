@@ -516,6 +516,63 @@ impl<'a> Validator<'a> {
                 self.ctx.pop_values_expect(default_types)?;
                 self.ctx.mark_unreachable()?;
             }
+            Instruction::TableGet(x) => {
+                let t = self.table_type(*x)?;
+                let at = addr_value_type(t.addr_type);
+                let rt = t.element_reference_type;
+
+                self.ctx.apply(&[at], &[rt.into()])?;
+            }
+            Instruction::TableSet(x) => {
+                let t = self.table_type(*x)?;
+                let at = addr_value_type(t.addr_type);
+                let rt = t.element_reference_type;
+
+                self.ctx.apply(&[at, rt.into()], &[])?;
+            }
+
+            Instruction::TableSize(x) => {
+                let t = self.table_type(*x)?;
+                let at = addr_value_type(t.addr_type);
+
+                self.ctx.apply(&[], &[at]);
+            }
+            Instruction::TableGrow(x) => {
+                let t = self.table_type(*x)?;
+                let at = addr_value_type(t.addr_type);
+                let rt = t.element_reference_type;
+
+                self.ctx.apply(&[rt.into(), at], &[at])?;
+            }
+            Instruction::TableFill(x) => {
+                let t = self.table_type(*x)?;
+                let at = addr_value_type(t.addr_type);
+                let rt = t.element_reference_type;
+
+                self.ctx.apply(&[at, rt.into(), at], &[])?;
+            }
+            Instruction::TableCopy(x, y) => {
+                let xt = self.table_type(*x)?;
+                let yt = self.table_type(*y)?;
+
+                let x_rt = xt.element_reference_type;
+                let y_rt = yt.element_reference_type;
+
+                let x_at = xt.addr_type;
+                let y_at = yt.addr_type;
+
+                // todo: fix me
+                ensure_validation!(x_rt == y_rt, "ref types are not equal");
+
+                self.ctx.apply(
+                    &[
+                        addr_value_type(x_at),
+                        addr_value_type(y_at),
+                        addr_value_type(x_at.min(y_at)),
+                    ],
+                    &[],
+                )?;
+            }
             _ => unimplemented!(),
         }
 
