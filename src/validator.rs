@@ -2,8 +2,8 @@
 
 use crate::{
     bail_validation, ensure_validation, AddrType, BlockType, Error, Function, FunctionType, Global,
-    GlobalType, ImportDeclaration, ImportDescription, Instruction, MemArg, MemoryType, Mutability,
-    ParsedModule, Result, ValueType,
+    GlobalType, HeapType, ImportDeclaration, ImportDescription, Instruction, MemArg, MemoryType,
+    Mutability, ParsedModule, RefType, Result, TableType, ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,6 +43,8 @@ pub struct Validator<'a> {
     globals: Vec<GlobalType>,
     // imports first
     mems: Vec<MemoryType>,
+    // imports first
+    tables: Vec<TableType>,
     ctx: FunctionContext<'a>,
 }
 
@@ -94,11 +96,25 @@ impl<'a> Validator<'a> {
             .cloned()
             .collect::<Vec<_>>();
 
+        let tables = module
+            .import_declarations
+            .iter()
+            .filter_map(|i| {
+                if let ImportDescription::Table(t) = i.description {
+                    Some(t)
+                } else {
+                    None
+                }
+            })
+            .chain(module.tables.iter().map(|t| t.table_type))
+            .collect::<Vec<_>>();
+
         Self {
             module,
             funcs,
             globals,
             mems,
+            tables,
             ctx: FunctionContext::default(),
         }
     }
@@ -333,6 +349,25 @@ impl<'a> Validator<'a> {
 
                 self.ctx.apply(&ft.params, &ft.results)?;
             }
+            Instruction::CallIndirect(type_idx, table_idx) => {
+                let table = self.table_type(*table_idx)?;
+                let holds_funcs = matches!(
+                    table.element_reference_type,
+                    RefType::FuncRef
+                        | RefType::Ref {
+                            heap_type: HeapType::Func,
+                            ..
+                        }
+                );
+                ensure_validation!(holds_funcs, "type mismatch");
+
+                let ft = self.func_type(*type_idx)?;
+
+                // the table index is on top of the call's arguments
+                self.ctx
+                    .pop_value_expect(&addr_value_type(table.addr_type))?;
+                self.ctx.apply(&ft.params, &ft.results)?;
+            }
             Instruction::Block(bt, body) | Instruction::Loop(bt, body) => {
                 let is_loop = matches!(instruction, Instruction::Loop(_, _));
                 let (params, results) = self.block_type(bt)?;
@@ -518,12 +553,14 @@ impl<'a> Validator<'a> {
             .get(x as usize)
             .ok_or_else(|| Error::validation(format!("unknown memory {x}")))?;
 
-        let out = match mem.addr_type {
-            AddrType::I32 => ValueType::I32,
-            AddrType::I64 => ValueType::I64,
-        };
+        Ok(addr_value_type(mem.addr_type))
+    }
 
-        Ok(out)
+    fn table_type(&self, x: u32) -> Result<TableType> {
+        self.tables
+            .get(x as usize)
+            .copied()
+            .ok_or_else(|| Error::validation(format!("unknown table {x}")))
     }
 
     // checks the memory exists and the memarg fits it; returns the address type
@@ -557,6 +594,13 @@ impl<'a> Validator<'a> {
             .get(i as usize)
             .cloned()
             .ok_or_else(|| Error::validation("unknown globals"))
+    }
+}
+
+const fn addr_value_type(at: AddrType) -> ValueType {
+    match at {
+        AddrType::I32 => ValueType::I32,
+        AddrType::I64 => ValueType::I64,
     }
 }
 
@@ -739,7 +783,7 @@ impl<'a> FunctionContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CompositeType, FunctionType, Limit, SubType};
+    use crate::{CompositeType, FunctionType, Limit, SubType, TableDef};
 
     use super::*;
 
@@ -2789,5 +2833,200 @@ mod tests {
 
         let err = validate_with_mems(&[mem(AddrType::I32)], NONE, copy(1, 0)).unwrap_err();
         assert!(err.to_string().contains("unknown memory 1"), "{err}");
+    }
+
+    fn table(element_reference_type: RefType, addr_type: AddrType) -> TableType {
+        TableType {
+            element_reference_type,
+            addr_type,
+            limit: Limit { min: 1, max: 1 },
+        }
+    }
+
+    fn funcref_table() -> TableType {
+        table(RefType::FuncRef, AddrType::I32)
+    }
+
+    // `types[0]` is the caller's own type, so `callee_types` start at index 1
+    fn validate_body_with_tables(
+        imported: &[TableType],
+        defined: &[TableType],
+        callee_types: &[SubType],
+        results: &[ValueType],
+        body: Vec<Instruction>,
+    ) -> Result<()> {
+        let mut module = ParsedModule::default();
+        module.types.push(func_type(NONE, results));
+        module.types.extend(callee_types.iter().cloned());
+        module.functions.push(function(0, &[], body));
+
+        for t in imported {
+            module.import_declarations.push(ImportDeclaration {
+                module: "env".into(),
+                name: "t".into(),
+                description: ImportDescription::Table(*t),
+            });
+        }
+        for t in defined {
+            module.tables.push(TableDef {
+                table_type: *t,
+                init: vec![],
+            });
+        }
+
+        Validator::new(&module).validate()
+    }
+
+    #[test]
+    fn call_indirect_pops_index_and_params_and_pushes_results() {
+        let callee = func_type(I32, I64);
+        let body = vec![
+            Instruction::I32Const(7),
+            Instruction::I32Const(0),
+            Instruction::CallIndirect(1, 0),
+        ];
+
+        assert!(validate_body_with_tables(&[], &[funcref_table()], &[callee], I64, body).is_ok());
+    }
+
+    #[test]
+    fn call_indirect_result_has_the_types_type() {
+        let callee = func_type(NONE, I64);
+        let body = vec![Instruction::I32Const(0), Instruction::CallIndirect(1, 0)];
+
+        assert!(validate_body_with_tables(&[], &[funcref_table()], &[callee], I32, body).is_err());
+    }
+
+    #[test]
+    fn call_indirect_pops_table_index_before_params() {
+        // [i64 arg, i32 index] is right; swapped puts the i64 where the index belongs
+        let callee = func_type(I64, NONE);
+        let call = |a, b| vec![a, b, Instruction::CallIndirect(1, 0)];
+
+        let ordered = call(Instruction::I64Const(7), Instruction::I32Const(0));
+        assert!(validate_body_with_tables(
+            &[],
+            &[funcref_table()],
+            std::slice::from_ref(&callee),
+            NONE,
+            ordered
+        )
+        .is_ok());
+
+        let swapped = call(Instruction::I32Const(0), Instruction::I64Const(7));
+        assert!(
+            validate_body_with_tables(&[], &[funcref_table()], &[callee], NONE, swapped).is_err()
+        );
+    }
+
+    #[test]
+    fn call_indirect_with_wrong_argument_type_errors() {
+        let callee = func_type(I32, NONE);
+        let body = vec![
+            Instruction::I64Const(7),
+            Instruction::I32Const(0),
+            Instruction::CallIndirect(1, 0),
+        ];
+
+        assert!(validate_body_with_tables(&[], &[funcref_table()], &[callee], NONE, body).is_err());
+    }
+
+    #[test]
+    fn call_indirect_without_table_index_errors() {
+        let callee = func_type(NONE, NONE);
+
+        assert!(validate_body_with_tables(
+            &[],
+            &[funcref_table()],
+            &[callee],
+            NONE,
+            vec![Instruction::CallIndirect(1, 0)]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn call_indirect_without_table_errors() {
+        let callee = func_type(NONE, NONE);
+        let body = vec![Instruction::I32Const(0), Instruction::CallIndirect(1, 0)];
+
+        let err = validate_body_with_tables(&[], &[], &[callee], NONE, body).unwrap_err();
+        assert!(err.to_string().contains("unknown table 0"), "{err}");
+    }
+
+    #[test]
+    fn call_indirect_through_non_func_table_errors() {
+        let callee = func_type(NONE, NONE);
+        let externs = table(RefType::ExternRef, AddrType::I32);
+        let body = vec![Instruction::I32Const(0), Instruction::CallIndirect(1, 0)];
+
+        assert!(validate_body_with_tables(&[], &[externs], &[callee], NONE, body).is_err());
+    }
+
+    #[test]
+    fn call_indirect_through_typed_func_ref_table_is_valid() {
+        let callee = func_type(NONE, NONE);
+        let funcs = table(
+            RefType::Ref {
+                nullable: true,
+                heap_type: HeapType::Func,
+            },
+            AddrType::I32,
+        );
+        let body = vec![Instruction::I32Const(0), Instruction::CallIndirect(1, 0)];
+
+        assert!(validate_body_with_tables(&[], &[funcs], &[callee], NONE, body).is_ok());
+    }
+
+    #[test]
+    fn call_indirect_with_unknown_type_errors() {
+        let body = vec![Instruction::I32Const(0), Instruction::CallIndirect(5, 0)];
+
+        let err = validate_body_with_tables(&[], &[funcref_table()], &[], NONE, body).unwrap_err();
+        assert!(err.to_string().contains("unknown type"), "{err}");
+    }
+
+    #[test]
+    fn call_indirect_does_not_swap_type_and_table_indices() {
+        // type 1 exists and table 1 does not; swapping the operands would look up table 1
+        let callee = func_type(NONE, NONE);
+        let tables = [funcref_table()];
+
+        let ok = vec![Instruction::I32Const(0), Instruction::CallIndirect(1, 0)];
+        assert!(
+            validate_body_with_tables(&[], &tables, std::slice::from_ref(&callee), NONE, ok)
+                .is_ok()
+        );
+
+        let swapped = vec![Instruction::I32Const(0), Instruction::CallIndirect(0, 1)];
+        let err = validate_body_with_tables(&[], &tables, &[callee], NONE, swapped).unwrap_err();
+        assert!(err.to_string().contains("unknown table 1"), "{err}");
+    }
+
+    #[test]
+    fn table_indices_are_imports_then_defined() {
+        // table 0 is the imported i64 table, so it needs an i64 index
+        let callee = func_type(NONE, NONE);
+        let imported = [table(RefType::FuncRef, AddrType::I64)];
+        let defined = [funcref_table()];
+        let call = |index, table_idx| vec![index, Instruction::CallIndirect(1, table_idx)];
+
+        let cases = [
+            (call(Instruction::I64Const(0), 0), true),
+            (call(Instruction::I32Const(0), 0), false),
+            (call(Instruction::I32Const(0), 1), true),
+            (call(Instruction::I64Const(0), 1), false),
+        ];
+
+        for (body, valid) in cases {
+            let result = validate_body_with_tables(
+                &imported,
+                &defined,
+                std::slice::from_ref(&callee),
+                NONE,
+                body,
+            );
+            assert_eq!(result.is_ok(), valid, "{result:?}");
+        }
     }
 }
