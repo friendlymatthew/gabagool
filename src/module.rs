@@ -136,6 +136,15 @@ pub enum AddrType {
     I64,
 }
 
+impl From<AddrType> for ValueType {
+    fn from(value: AddrType) -> Self {
+        match value {
+            AddrType::I32 => Self::I32,
+            AddrType::I64 => Self::I64,
+        }
+    }
+}
+
 impl Ord for AddrType {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {

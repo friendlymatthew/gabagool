@@ -561,7 +561,6 @@ impl<'a> Validator<'a> {
                 let x_at = xt.addr_type;
                 let y_at = yt.addr_type;
 
-                // the source's elements must fit in the destination
                 ensure_validation!(self.ref_subtype(y_rt, x_rt), "type mismatch");
 
                 self.ctx.apply(
@@ -572,6 +571,21 @@ impl<'a> Validator<'a> {
                     ],
                     &[],
                 )?;
+            }
+            Instruction::TableInit(x, y) => {
+                let xt = self.table_type(*x)?;
+                let elem = self.elem_type(*y)?;
+
+                ensure_validation!(
+                    self.ref_subtype(elem, xt.element_reference_type),
+                    "type mismatch"
+                );
+
+                self.ctx
+                    .apply(&[xt.addr_type.into(), ValueType::I32, ValueType::I32], &[])?;
+            }
+            Instruction::ElemDrop(x) => {
+                self.elem_type(*x)?;
             }
             _ => unimplemented!(),
         }
@@ -704,6 +718,14 @@ impl<'a> Validator<'a> {
             .get(i as usize)
             .cloned()
             .ok_or_else(|| Error::validation("unknown globals"))
+    }
+
+    fn elem_type(&self, y: u32) -> Result<RefType> {
+        self.module
+            .element_segments
+            .get(y as usize)
+            .map(|e| e.ref_type)
+            .ok_or_else(|| Error::validation(format!("unknown elem segment {y}")))
     }
 }
 
