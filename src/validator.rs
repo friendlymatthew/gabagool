@@ -1,9 +1,10 @@
 #![allow(unused)]
 
 use crate::{
-    bail_validation, ensure_validation, AddrType, BlockType, CompositeType, Error, Function,
-    FunctionType, Global, GlobalType, HeapType, ImportDeclaration, ImportDescription, Instruction,
-    MemArg, MemoryType, Mutability, ParsedModule, RefType, Result, TableType, ValueType,
+    bail_validation, ensure_validation, AddrType, BlockType, CompositeType, DataSegment, Error,
+    Function, FunctionType, Global, GlobalType, HeapType, ImportDeclaration, ImportDescription,
+    Instruction, MemArg, MemoryType, Mutability, ParsedModule, RefType, Result, TableType,
+    ValueType,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -580,6 +581,15 @@ impl<'a> Validator<'a> {
             Instruction::ElemDrop(x) => {
                 self.elem_type(*x)?;
             }
+            Instruction::MemoryInit(y, x) => {
+                let m = self.mem_addr_type(*x)?;
+                self.data_segment(*y)?;
+
+                self.ctx.apply(&[m, ValueType::I32, ValueType::I32], &[])?;
+            }
+            Instruction::DataDrop(y) => {
+                self.data_segment(*y)?;
+            }
             _ => unimplemented!(),
         }
 
@@ -719,6 +729,13 @@ impl<'a> Validator<'a> {
             .get(y as usize)
             .map(|e| e.ref_type)
             .ok_or_else(|| Error::validation(format!("unknown elem segment {y}")))
+    }
+
+    fn data_segment(&self, y: u32) -> Result<&'a DataSegment> {
+        self.module
+            .data_segments
+            .get(y as usize)
+            .ok_or_else(|| Error::validation(format!("unknown data segment {y}")))
     }
 }
 
