@@ -27,7 +27,13 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
             params: vec![ValueType::I32],
             results: vec![ValueType::I32],
         },
-        |_caller, args| Ok(vec![RawValue::from(args[0].as_i32() + 1)]),
+        |mut caller, args| {
+            // an example of how you can update the caller's inner data from the host
+            let d = caller.data_mut();
+            *d += 1;
+
+            Ok(vec![RawValue::from(args[0].as_i32() + 1)])
+        },
     )?;
 
     let instance = linker.instantiate(&mut store, &module)?;
@@ -38,7 +44,11 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
         .invoke_no_args(&mut store, &mut data, instance, "run")?
         .into_completed()?;
 
-    println!("wasm returned: {}", result[0].as_i32());
+    assert_eq!(
+        data, 1,
+        "by now, data should have been incremented in the host callback fn"
+    );
+    assert_eq!(result[0].as_i32(), 67);
 
     Ok(())
 }
