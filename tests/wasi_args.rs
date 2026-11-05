@@ -1,27 +1,35 @@
 use gabagool::{wasi, ExternalValue, Linker, Module, Store};
 
 fn run(arguments: &[&str], argv: i32, buffer: i32) -> (i32, Vec<u8>) {
-    let wasm = wat::parse_str(
-        r#"(module
-          (import "wasi_snapshot_preview1" "args_get"
+    run_list(arguments, argv, buffer, false)
+}
+
+fn run_list(strings: &[&str], argv: i32, buffer: i32, environment: bool) -> (i32, Vec<u8>) {
+    let prefix = if environment { "environ" } else { "args" };
+    let source = r#"(module
+          (import "wasi_snapshot_preview1" "LIST_get"
             (func $args_get (param i32 i32) (result i32)))
-          (import "wasi_snapshot_preview1" "args_sizes_get"
+          (import "wasi_snapshot_preview1" "LIST_sizes_get"
             (func $sizes (param i32 i32) (result i32)))
           (memory (export "memory") 1)
           (func (export "sizes") (result i32)
             i32.const 16 i32.const 20 call $sizes)
           (func (export "get") (param i32 i32) (result i32)
-            local.get 0 local.get 1 call $args_get))"#,
-    )
-    .unwrap();
+            local.get 0 local.get 1 call $args_get))"#
+        .replace("LIST", prefix);
+    let wasm = wat::parse_str(source).unwrap();
     let module = Module::try_new(&wasm).unwrap();
     let mut store = Store::new();
     let mut linker = Linker::new();
     wasi::add_wasip1_to_linker(&mut linker).unwrap();
     let instance = linker.instantiate(&mut store, &module).unwrap();
     let mut ctx: wasi::WasiCtx = wasi::WasiCtx::default();
-    ctx.args_mut()
-        .extend(arguments.iter().map(|arg| (*arg).to_owned()));
+    let list = if environment {
+        ctx.environment_mut()
+    } else {
+        ctx.args_mut()
+    };
+    list.extend(strings.iter().map(|string| (*string).to_owned()));
     let sizes = linker
         .invoke_no_args(&mut store, &mut ctx, instance, "sizes")
         .unwrap()
@@ -89,4 +97,25 @@ fn invalid_regions_return_fault_before_copying() {
         assert_eq!(&memory[..8], &[0; 8]);
         assert_eq!(&memory[100..108], &[0; 8]);
     }
+}
+
+#[test]
+fn environment_uses_its_own_entries() {
+    let (errno, memory) = run_list(&["A=1", "B=2"], 0, 100, true);
+    assert_eq!(errno, 0);
+    assert_eq!(u32_at(&memory, 0), 100);
+    assert_eq!(u32_at(&memory, 4), 104);
+    assert_eq!(&memory[100..108], b"A=1\0B=2\0");
+    assert_eq!(u32_at(&memory, 16), 2);
+    assert_eq!(u32_at(&memory, 20), 8);
+}
+
+#[test]
+fn empty_environment_and_invalid_regions() {
+    let (errno, memory) = run_list(&[], 0, 100, true);
+    assert_eq!(errno, 0);
+    assert_eq!(u32_at(&memory, 16), 0);
+    assert_eq!(u32_at(&memory, 20), 0);
+    let (errno, _) = run_list(&["A=1"], 0, -1, true);
+    assert_eq!(errno, 21);
 }
