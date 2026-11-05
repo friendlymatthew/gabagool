@@ -45,6 +45,7 @@ pub enum ExecutionState<V = RawValue> {
         func_name: String,
         args: Vec<RawValue>,
     },
+    Exited(u32),
 }
 
 impl<V> ExecutionState<V> {
@@ -54,6 +55,9 @@ impl<V> ExecutionState<V> {
             Self::FuelExhausted => bail_instantiation!("execution paused: fuel exhausted"),
             Self::Suspended { func_name, .. } => {
                 bail_instantiation!("execution suspended on host function: {}", func_name)
+            }
+            Self::Exited(code) => {
+                bail_instantiation!("executed exited with code: {code}")
             }
         }
     }
@@ -1010,6 +1014,7 @@ impl Store {
                     args,
                 }
             }
+            ExecutionState::Exited(code) => ExecutionState::Exited(code),
         })
     }
 
@@ -1558,6 +1563,7 @@ impl Store {
                 func_name,
                 args,
             },
+            ExecutionState::Exited(code) => ExecutionState::Exited(code),
         })
     }
 

@@ -1,6 +1,6 @@
 use std::error::Error as StdError;
 
-use gabagool::{FunctionType, Linker, Module, RawValue, Store, ValueType};
+use gabagool::{FunctionType, HostOutcome, Linker, Module, RawValue, Store, ValueType};
 
 const WAT: &str = r#"
 (module
@@ -32,7 +32,9 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
             let d = caller.data_mut();
             *d += 1;
 
-            Ok(vec![RawValue::from(args[0].as_i32() + 1)])
+            Ok(HostOutcome::Return(vec![RawValue::from(
+                args[0].as_i32() + 1,
+            )]))
         },
     )?;
 
@@ -49,6 +51,9 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
         "by now, data should have been incremented in the host callback fn"
     );
     assert_eq!(result[0].as_i32(), 67);
+
+    println!("data: {data}");
+    println!("result: {}", result[0].as_i32());
 
     Ok(())
 }

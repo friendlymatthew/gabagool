@@ -7,7 +7,12 @@ use crate::{
     Store,
 };
 
-type HostCallback<T> = dyn for<'a> Fn(Caller<'a, T>, &[RawValue]) -> Result<Vec<RawValue>>;
+pub enum HostOutcome {
+    Return(Vec<RawValue>),
+    Exit(u32),
+}
+
+type HostCallback<T> = dyn for<'a> Fn(Caller<'a, T>, &[RawValue]) -> Result<HostOutcome>;
 
 struct HostFunc<T> {
     function_type: FunctionType,
@@ -46,7 +51,7 @@ impl<T> Linker<T> {
         callback: F,
     ) -> Result<&mut Self>
     where
-        F: for<'a> Fn(Caller<'a, T>, &[RawValue]) -> Result<Vec<RawValue>> + 'static,
+        F: for<'a> Fn(Caller<'a, T>, &[RawValue]) -> Result<HostOutcome> + 'static,
     {
         let module_funcs = self.funcs.entry(module.to_string()).or_default();
         if !self.allow_shadowing && module_funcs.contains_key(name) {
@@ -143,14 +148,19 @@ impl<T> Linker<T> {
                     };
                     let results = (func.callback)(caller, &args)?;
 
-                    if results.len() != expected_results {
-                        return Err(Error::Instantiation(format!(
-                            "host function {module_name}.{func_name} returned {} values, expected {expected_results}",
-                            results.len()
-                        )));
-                    }
+                    match results {
+                        HostOutcome::Exit(code) => return Ok(ExecutionState::Exited(code)),
+                        HostOutcome::Return(results) => {
+                            if results.len() != expected_results {
+                                return Err(Error::Instantiation(format!(
+                                    "host function {module_name}.{func_name} returned {} values, expected {expected_results}",
+                                    results.len()
+                                )));
+                            }
 
-                    state = store.resume_with(&results)?;
+                            state = store.resume_with(&results)?;
+                        }
+                    }
                 }
                 state => return Ok(state),
             }
