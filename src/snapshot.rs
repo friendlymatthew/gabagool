@@ -16,8 +16,8 @@ use crate::module::{
 };
 use crate::runtime::{
     DataInstance, ElementInstance, ExportInstance, ExternalValue, FunctionInstance, GlobalInstance,
-    GuestMemory, InstantiatedModule, MemoryInstance, RawValue, Ref, Store, TableInstance,
-    TagInstance, ValueStack,
+    InstantiatedModule, MemoryInstance, RawValue, Ref, Store, TableInstance, TagInstance,
+    ValueStack,
 };
 use crate::CallFrame;
 
@@ -1261,7 +1261,7 @@ impl Snapshot for Store {
 
             memories.push(MemoryInstance {
                 memory_type,
-                data: GuestMemory::from_vec(data),
+                data: data.into(),
             });
         }
 

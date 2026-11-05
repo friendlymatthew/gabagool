@@ -118,10 +118,10 @@ macro_rules! local_get_load {
         let ea = base
             .checked_add($offset as u64)
             .and_then(|v| usize::try_from(v).ok());
-        let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
+        let Some(ea) = ea else {
             bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
-        let $bytes: [u8; $width] = mem.data.read_fixed::<$width>(ea);
+        let $bytes: [u8; $width] = mem.data.read(ea)?;
         $self.stack.push($convert);
     }};
 }
@@ -137,11 +137,11 @@ macro_rules! local_get_store {
             .checked_add($offset as u64)
             .and_then(|v| usize::try_from(v).ok());
         let mem = &mut $self.memories[mem_addr];
-        let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
+        let Some(ea) = ea else {
             bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
         let bytes: [u8; $width] = $to_bytes(val);
-        mem.data.write_bytes(ea, &bytes);
+        mem.data.write(ea, bytes)?;
     }};
 }
 
@@ -170,10 +170,10 @@ macro_rules! mem_load_c {
         let ea = base
             .checked_add($offset as u64)
             .and_then(|v| usize::try_from(v).ok());
-        let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
+        let Some(ea) = ea else {
             bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
-        let $bytes: [u8; $width] = mem.data.read_fixed::<$width>(ea);
+        let $bytes: [u8; $width] = mem.data.read(ea)?;
 
         $self.stack.push($convert);
     }};
@@ -189,11 +189,11 @@ macro_rules! mem_store_c {
             .checked_add($offset as u64)
             .and_then(|v| usize::try_from(v).ok());
         let mem = &mut $self.memories[mem_addr];
-        let Some(ea) = ea.filter(|&ea| ea.saturating_add($width) <= mem.data.len()) else {
+        let Some(ea) = ea else {
             bail_trap!(Trap::OutOfBoundsMemoryAccess);
         };
         let bytes: [u8; $width] = $to_bytes;
-        mem.data.write_bytes(ea, &bytes);
+        mem.data.write(ea, bytes)?;
     }};
 }
 
@@ -984,11 +984,10 @@ impl Store {
 
                     (0..flat_result_count)
                         .map(|n| {
-                            let offset = ptr + n * 4;
-                            let bytes = mem.data.read_fixed::<4>(offset);
-                            RawValue::from(i32::from_le_bytes(bytes))
+                            let bytes = mem.data.read(ptr + n * 4)?;
+                            Ok(RawValue::from(i32::from_le_bytes(bytes)))
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Result<Vec<_>>>()?
                 } else {
                     raw_values
                 };
@@ -1100,7 +1099,7 @@ impl Store {
                 let ptr = self.call_realloc(realloc_addr, 0, 0, 1, len as i32)?;
 
                 let mem = &mut self.memories[mem_addr];
-                mem.data.write_bytes(ptr as usize, bytes);
+                mem.data.write_bytes(ptr as usize, bytes)?;
 
                 flat.push(RawValue::from(ptr));
                 flat.push(RawValue::from(len as i32));
@@ -1129,37 +1128,20 @@ impl Store {
                     self.call_realloc(realloc_addr, 0, 0, elem_size as i32, byte_len as i32)?;
 
                 let dest = ptr as usize;
+                let mem = &mut self.memories[mem_addr].data;
                 for (i, elem) in elements.iter().enumerate() {
                     let off = dest + i * elem_size;
                     match elem {
-                        ComponentValue::U8(v) => self.memories[mem_addr].data.write_u8(off, *v),
-                        ComponentValue::S8(v) => {
-                            self.memories[mem_addr].data.write_u8(off, *v as u8)
-                        }
-                        ComponentValue::U16(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::S16(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::U32(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::S32(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::U64(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::S64(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::F32(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
-                        ComponentValue::F64(v) => self.memories[mem_addr]
-                            .data
-                            .write_bytes(off, &v.to_le_bytes()),
+                        ComponentValue::U8(v) => mem.write(off, [*v])?,
+                        ComponentValue::S8(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::U16(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::S16(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::U32(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::S32(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::U64(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::S64(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::F32(v) => mem.write(off, v.to_le_bytes())?,
+                        ComponentValue::F64(v) => mem.write(off, v.to_le_bytes())?,
                         _ => todo!("lower list element {:?}", elem),
                     }
                 }
@@ -1358,7 +1340,7 @@ impl Store {
                             Error::Instantiation("canon lift missing memory".into())
                         })?;
 
-                        let bytes = self.memories[mem_addr].data.read_bytes(ptr, len);
+                        let bytes = self.memories[mem_addr].data.read_bytes(ptr, len)?;
                         let s = core::str::from_utf8(bytes)
                             .map_err(|e| Error::Instantiation(format!("{e}")))?;
 
@@ -1413,9 +1395,9 @@ impl Store {
                         _ => todo!("lift list element {:?}", elem_prim),
                     };
 
-                    let elements = (0..len)
-                        .map(|j| read_elem(mem.data.as_slice(), ptr + j * size))
-                        .collect();
+                    let byte_len = len.checked_mul(size).ok_or(Trap::OutOfBoundsMemoryAccess)?;
+                    let bytes = mem.data.read_bytes(ptr, byte_len)?;
+                    let elements = (0..len).map(|j| read_elem(bytes, j * size)).collect();
 
                     Ok(ComponentValue::List(elements))
                 }
@@ -2355,14 +2337,8 @@ impl Store {
                         bail_trap!(Trap::OutOfBoundsMemoryAccess);
                     }
 
-                    if d.saturating_add(n) > self.memories[ma].data.len() {
-                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
-                    }
-
-                    if n > 0 {
-                        let src = self.data_segments[da].data[s..s + n].to_vec();
-                        self.memories[ma].data.write_bytes(d, &src);
-                    }
+                    let src = &self.data_segments[da].data[s..s + n];
+                    self.memories[ma].data.write_bytes(d, src)?;
                 }
                 Op::DataDrop { data_i } => {
                     let da = self.instances[mi].data_addrs[data_i as usize];
@@ -2380,21 +2356,11 @@ impl Store {
                     let i2 = self.stack.pop_address(at);
                     let i1 = self.stack.pop_address(at);
 
-                    if i1.saturating_add(n) > self.memories[m1].data.len() {
-                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
-                    }
-
-                    if i2.saturating_add(n) > self.memories[m2].data.len() {
-                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
-                    }
-
-                    if n > 0 {
-                        if m1 == m2 {
-                            self.memories[m1].data.copy_within(i2, i2 + n, i1);
-                        } else {
-                            let src = self.memories[m2].data.read_bytes(i2, n).to_vec();
-                            self.memories[m1].data.write_bytes(i1, &src);
-                        }
+                    if m1 == m2 {
+                        self.memories[m1].data.copy_within(i2, i1, n)?;
+                    } else {
+                        let src = self.memories[m2].data.read_bytes(i2, n)?.to_vec();
+                        self.memories[m1].data.write_bytes(i1, &src)?;
                     }
                 }
                 Op::MemoryFill { memory_i } => {
@@ -2404,13 +2370,7 @@ impl Store {
                     let val = pop_val!(self, I32);
                     let i = self.stack.pop_address(at);
 
-                    if i.saturating_add(n) > self.memories[ma].data.len() {
-                        bail_trap!(Trap::OutOfBoundsMemoryAccess);
-                    }
-
-                    if n > 0 {
-                        self.memories[ma].data.fill(i, n, val as u8);
-                    }
+                    self.memories[ma].data.fill(i, n, val as u8)?;
                 }
                 Op::I32EqZero => {
                     let a = pop_val!(self, I32);

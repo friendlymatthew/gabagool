@@ -22,7 +22,9 @@ fn call_i32(store: &mut Store, instance: Instance, name: &str) -> gabagool::Resu
 
 fn read_framebuf(store: &Store, ptr: usize, len: usize) -> &[u32] {
     let data = &store.memories[0].data;
-    let bytes = data.read_bytes(ptr, len * 4);
+    let bytes = data
+        .read_bytes(ptr, len * 4)
+        .expect("framebuffer out of bounds");
     unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, len) }
 }
 
