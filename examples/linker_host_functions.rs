@@ -35,11 +35,7 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
             params: vec![ValueType::I32],
             results: vec![ValueType::I32],
         },
-        |mut caller, args| {
-            // an example of how you can update the caller's inner data from the host
-            let d = caller.data_mut();
-            *d += 1;
-
+        |_, args| {
             Ok(HostOutcome::Return(vec![RawValue::from(
                 args[0].as_i32() + 1,
             )]))
@@ -50,23 +46,18 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
 
     let instance = linker.instantiate(&mut store, &module)?;
 
-    let mut data = 0;
+    let mut data: wasi::WasiCtx = wasi::WasiCtx::default();
 
     let result = linker
         .invoke_no_args(&mut store, &mut data, instance, "run")?
         .into_completed()?;
 
-    assert_eq!(
-        data, 1,
-        "by now, data should have been incremented in the host callback fn"
-    );
     assert_eq!(result[0].as_i32(), 67);
 
-    println!("data: {data}");
     println!("result: {}", result[0].as_i32());
 
     let result = linker.invoke_no_args(&mut store, &mut data, instance, "_start")?;
-    matches!(result, ExecutionState::Exited(42));
+    assert!(matches!(result, ExecutionState::Exited(42)));
 
     Ok(())
 }

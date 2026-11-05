@@ -271,6 +271,10 @@ impl<'a, T> Caller<'a, T> {
 
         Ok(&mut self.store.memories[addr])
     }
+
+    pub fn parts_mut(&mut self) -> (&mut Store, Instance, &mut T) {
+        (self.store, self.instance, self.data)
+    }
 }
 
 fn memory_addr(store: &Store, instance: Instance, name: &str) -> Result<usize> {
