@@ -68,7 +68,7 @@ impl RawValue {
         (self.0 as i128) << 64 | lo.0 as i128
     }
 
-    pub(crate) fn as_pointer(self) -> usize {
+    pub(crate) const fn as_pointer(self) -> usize {
         self.as_i32() as u32 as usize
     }
 }

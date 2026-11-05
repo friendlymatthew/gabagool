@@ -564,6 +564,9 @@ fn invoke_and_resume(
             gabagool::ExecutionState::FuelExhausted => {
                 return Err(gabagool::Error::Instantiation("fuel exhausted".into()));
             }
+            gabagool::ExecutionState::Exited(code) => {
+                return Err(gabagool::Error::Instantiation("exited with code".into()))
+            }
         }
     }
 }
