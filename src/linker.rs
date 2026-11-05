@@ -7,25 +7,25 @@ use crate::{
     Store,
 };
 
-type HostCallback = dyn for<'a> Fn(Caller<'a>, &[RawValue]) -> Result<Vec<RawValue>>;
+type HostCallback<T> = dyn for<'a> Fn(Caller<'a, T>, &[RawValue]) -> Result<Vec<RawValue>>;
 
-struct HostFunc {
+struct HostFunc<T> {
     function_type: FunctionType,
-    callback: Box<HostCallback>,
+    callback: Box<HostCallback<T>>,
 }
 
-pub struct Linker {
-    funcs: BTreeMap<String, BTreeMap<String, HostFunc>>,
+pub struct Linker<T> {
+    funcs: BTreeMap<String, BTreeMap<String, HostFunc<T>>>,
     allow_shadowing: bool,
 }
 
-impl Default for Linker {
+impl<T> Default for Linker<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Linker {
+impl<T> Linker<T> {
     pub const fn new() -> Self {
         Self {
             funcs: BTreeMap::new(),
@@ -46,7 +46,7 @@ impl Linker {
         callback: F,
     ) -> Result<&mut Self>
     where
-        F: for<'a> Fn(Caller<'a>, &[RawValue]) -> Result<Vec<RawValue>> + 'static,
+        F: for<'a> Fn(Caller<'a, T>, &[RawValue]) -> Result<Vec<RawValue>> + 'static,
     {
         let module_funcs = self.funcs.entry(module.to_string()).or_default();
         if !self.allow_shadowing && module_funcs.contains_key(name) {
@@ -94,6 +94,7 @@ impl Linker {
     pub fn invoke<I>(
         &self,
         store: &mut Store,
+        data: &mut T,
         instance: Instance,
         name: &str,
         args: I,
@@ -104,21 +105,23 @@ impl Linker {
     {
         let state = store.invoke(instance, name, args)?;
 
-        self.dispatch(store, instance, state)
+        self.dispatch(store, data, instance, state)
     }
 
     pub fn invoke_no_args(
         &self,
         store: &mut Store,
+        data: &mut T,
         instance: Instance,
         name: &str,
     ) -> Result<ExecutionState> {
-        self.invoke(store, instance, name, core::iter::empty::<RawValue>())
+        self.invoke(store, data, instance, name, core::iter::empty::<RawValue>())
     }
 
     pub fn dispatch(
         &self,
         store: &mut Store,
+        data: &mut T,
         instance: Instance,
         mut state: ExecutionState,
     ) -> Result<ExecutionState> {
@@ -133,7 +136,11 @@ impl Linker {
                     self.validate_arg_count(func, &module_name, &func_name, args.len())?;
 
                     let expected_results = func.function_type.results.len();
-                    let caller = Caller { store, instance };
+                    let caller = Caller {
+                        store,
+                        instance,
+                        data,
+                    };
                     let results = (func.callback)(caller, &args)?;
 
                     if results.len() != expected_results {
@@ -195,7 +202,7 @@ impl Linker {
         Ok((import.module.clone(), import.name.clone(), expected))
     }
 
-    fn get_func(&self, module: &str, name: &str) -> Result<&HostFunc> {
+    fn get_func(&self, module: &str, name: &str) -> Result<&HostFunc<T>> {
         self.funcs
             .get(module)
             .and_then(|module_funcs| module_funcs.get(name))
@@ -204,7 +211,7 @@ impl Linker {
 
     fn validate_arg_count(
         &self,
-        func: &HostFunc,
+        func: &HostFunc<T>,
         module: &str,
         name: &str,
         actual: usize,
@@ -220,18 +227,27 @@ impl Linker {
     }
 }
 
-pub struct Caller<'a> {
+pub struct Caller<'a, T> {
     store: &'a mut Store,
     instance: Instance,
+    data: &'a mut T,
 }
 
-impl<'a> Caller<'a> {
+impl<'a, T> Caller<'a, T> {
     pub const fn store(&self) -> &Store {
         self.store
     }
 
     pub const fn store_mut(&mut self) -> &mut Store {
         self.store
+    }
+
+    pub const fn data(&self) -> &T {
+        self.data
+    }
+
+    pub const fn data_mut(&mut self) -> &mut T {
+        self.data
     }
 
     pub fn memory(&self, name: &str) -> Result<&MemoryInstance> {

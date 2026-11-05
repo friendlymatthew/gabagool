@@ -8,3 +8,4 @@ tests/spec/
 tests/components/
 game-of-life*.gabagool
 examples/python/lib/
+.zed

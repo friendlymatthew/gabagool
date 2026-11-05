@@ -15,14 +15,14 @@ const SNAPSHOT_FILE: &str = "game-of-life.gabagool";
 // const PALETTE_NAMES: &[&str] = &["amber", "green", "blue", "pink", "white"];
 
 fn call_i32(store: &mut Store, instance: Instance, name: &str) -> gabagool::Result<i32> {
-    let result = store.invoke(instance, name, vec![])?;
+    let result = store.invoke_no_args(instance, name)?;
     let v = result.into_completed()?[0].as_i32();
     Ok(v)
 }
 
 fn read_framebuf(store: &Store, ptr: usize, len: usize) -> &[u32] {
     let data = &store.memories[0].data;
-    let bytes = &data[ptr..ptr + len * 4];
+    let bytes = data.read_bytes(ptr, len * 4);
     unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, len) }
 }
 
@@ -191,7 +191,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 if !self.paused {
-                    let _ = self.store.invoke(self.instance, "step", vec![]);
+                    let _ = self.store.invoke_no_args(self.instance, "step");
 
                     if let Ok(gen) = call_i32(&mut self.store, self.instance, "get_generation") {
                         if let Some(w) = &self.window {
@@ -233,7 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let module = Module::try_new(wasm_bytes)?;
         let mut store = Store::new();
         let instance = store.instantiate(&module, vec![])?;
-        store.invoke(instance, "init", vec![])?;
+        store.invoke_no_args(instance, "init")?;
         (store, instance)
     };
 
@@ -241,7 +241,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let win_size = grid_size * CELL_PX;
     let framebuf_ptr = call_i32(&mut store, instance, "get_framebuf_ptr")? as usize;
 
-    store.invoke(instance, "render", vec![])?;
+    store.invoke_no_args(instance, "render")?;
 
     let mut app = App {
         store,

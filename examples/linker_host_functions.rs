@@ -1,6 +1,6 @@
 use std::error::Error as StdError;
 
-use gabagool::{FunctionType, Linker, Module, RawValue, ResultType, Store, ValueType};
+use gabagool::{FunctionType, Linker, Module, RawValue, Store, ValueType};
 
 const WAT: &str = r#"
 (module
@@ -23,20 +23,22 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
     linker.func_new(
         "host",
         "add_one",
-        func_type(vec![ValueType::I32], vec![ValueType::I32]),
+        FunctionType {
+            params: vec![ValueType::I32],
+            results: vec![ValueType::I32],
+        },
         |_caller, args| Ok(vec![RawValue::from(args[0].as_i32() + 1)]),
     )?;
 
     let instance = linker.instantiate(&mut store, &module)?;
+
+    let mut data = 0;
+
     let result = linker
-        .invoke_no_args(&mut store, instance, "run")?
+        .invoke_no_args(&mut store, &mut data, instance, "run")?
         .into_completed()?;
 
     println!("wasm returned: {}", result[0].as_i32());
 
     Ok(())
-}
-
-fn func_type(params: Vec<ValueType>, results: Vec<ValueType>) -> FunctionType {
-    FunctionType(ResultType(params), ResultType(results))
 }
