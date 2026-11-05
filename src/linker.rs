@@ -272,7 +272,7 @@ impl<'a, T> Caller<'a, T> {
         Ok(&mut self.store.memories[addr])
     }
 
-    pub fn parts_mut(&mut self) -> (&mut Store, Instance, &mut T) {
+    pub const fn parts_mut(&mut self) -> (&mut Store, Instance, &mut T) {
         (self.store, self.instance, self.data)
     }
 }

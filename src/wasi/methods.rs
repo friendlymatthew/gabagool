@@ -14,6 +14,63 @@ fn errno(code: i32) -> HostOutcome {
     HostOutcome::Return(vec![RawValue::from(code)])
 }
 
+pub(super) fn args_sizes_get<O: WasiOutput>(
+    mut caller: Caller<'_, WasiCtx<O>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let num_args_guest_address = args[0].as_i32() as u32 as usize;
+    let total_string_buffer_guest_address = args[1].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let Some(addr) = store.exports(instance).iter().find_map(|export| {
+        if export.name == "memory" {
+            if let ExternalValue::Memory { addr } = export.value {
+                return Some(addr);
+            }
+        }
+        None
+    }) else {
+        return errno(FAULT);
+    };
+
+    let args = ctx.args();
+    let num_args = u32::try_from(args.len());
+
+    let Ok(num_args) = num_args else {
+        return errno(OVERFLOW);
+    };
+
+    let total_string_output = args.iter().try_fold(0u32, |total, arg| {
+        let len = u32::try_from(arg.len()).ok()?;
+        total.checked_add(len)?.checked_add(1)
+    });
+
+    let Some(total_string_output) = total_string_output else {
+        return errno(OVERFLOW);
+    };
+
+    let memory = &mut store.memories[addr].data;
+
+    if memory
+        .write(num_args_guest_address, num_args.to_le_bytes())
+        .is_err()
+    {
+        return errno(FAULT);
+    }
+
+    if memory
+        .write(
+            total_string_buffer_guest_address,
+            total_string_output.to_le_bytes(),
+        )
+        .is_err()
+    {
+        return errno(FAULT);
+    }
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_write<O: WasiOutput>(
     mut caller: Caller<'_, WasiCtx<O>>,
     args: &[RawValue],
@@ -38,6 +95,7 @@ pub(super) fn fd_write<O: WasiOutput>(
     }) else {
         return errno(FAULT);
     };
+
     let memory = &mut store.memories[addr].data;
 
     // Validate all buffers before output, then borrow their bytes directly.

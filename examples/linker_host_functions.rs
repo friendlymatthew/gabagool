@@ -42,7 +42,7 @@ fn main() -> std::result::Result<(), Box<dyn StdError>> {
         },
     )?;
 
-    wasi::add_to_linker(&mut linker)?;
+    wasi::add_wasip1_to_linker(&mut linker)?;
 
     let instance = linker.instantiate(&mut store, &module)?;
 
