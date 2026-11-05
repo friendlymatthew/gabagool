@@ -16,6 +16,8 @@ pub mod runtime;
 pub mod snapshot;
 mod validator;
 
+pub mod wasi;
+
 #[cfg(feature = "jit")]
 mod jit;
 
@@ -29,7 +31,3 @@ pub use runtime::{
     TableInstance, TagInstance,
 };
 pub use snapshot::StoreSnapshot;
-
-pub mod value_stack {
-    pub use crate::runtime::ValueStack;
-}
