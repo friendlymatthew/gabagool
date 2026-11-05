@@ -34,6 +34,52 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn environ_get<O: WasiOutput>(
+    mut caller: Caller<'_, WasiCtx<O>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let environ_ptr = args[0].as_pointer();
+    let mut environ_buf_ptr = args[1].as_i32() as u32;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let envs = ctx.environment();
+
+    let table_len = wasi_some!(envs.len().checked_mul(4), OVERFLOW);
+    let buffer_len = envs.iter().try_fold(0u32, |total, env| {
+        let len = u32::try_from(env.len()).ok()?;
+        total.checked_add(len)?.checked_add(1)
+    });
+    let buffer_len = wasi_some!(buffer_len, OVERFLOW);
+
+    wasi_try!(memory.read_bytes(environ_ptr, table_len), FAULT);
+
+    wasi_try!(
+        memory.read_bytes(environ_buf_ptr as usize, buffer_len as usize),
+        FAULT
+    );
+
+    wasi_some!(environ_buf_ptr.checked_add(buffer_len), OVERFLOW);
+
+    for (index, env) in envs.iter().enumerate() {
+        wasi_try!(
+            memory.write(environ_ptr + index * 4, environ_buf_ptr.to_le_bytes()),
+            FAULT
+        );
+        wasi_try!(
+            memory.write_bytes(environ_buf_ptr as usize, env.as_bytes()),
+            FAULT
+        );
+
+        let nul_ptr = environ_buf_ptr + env.len() as u32;
+        wasi_try!(memory.write(nul_ptr as usize, [0]), FAULT);
+        environ_buf_ptr = nul_ptr + 1;
+    }
+
+    errno(SUCCESS)
+}
+
 pub(super) fn environ_sizes_get<O: WasiOutput>(
     mut caller: Caller<'_, WasiCtx<O>>,
     args: &[RawValue],
