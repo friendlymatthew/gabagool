@@ -367,31 +367,20 @@ impl<'a> Validator<'a> {
                 self.ctx.apply(&[gt.value_type], &[])?;
             }
             Instruction::Call(i) => {
-                let type_idx = *self
-                    .funcs
-                    .get(*i as usize)
-                    .ok_or_else(|| Error::validation(format!("unknown function {i}")))?;
-                let ft = self.func_type(type_idx)?;
-
+                let ft = self.callee_type(*i)?;
                 self.ctx.apply(&ft.params, &ft.results)?;
             }
             Instruction::CallIndirect(type_idx, table_idx) => {
-                let table = self.table_type(*table_idx)?;
-                let holds_funcs = matches!(
-                    table.element_reference_type,
-                    RefType::FuncRef
-                        | RefType::Ref {
-                            heap_type: HeapType::Func,
-                            ..
-                        }
-                );
-                ensure_validation!(holds_funcs, "type mismatch");
-
-                let ft = self.func_type(*type_idx)?;
-
-                // the table index is on top of the call's arguments
-                self.ctx.pop_value_expect(&table.addr_type.into())?;
+                let ft = self.call_indirect_type(*type_idx, *table_idx)?;
                 self.ctx.apply(&ft.params, &ft.results)?;
+            }
+            Instruction::ReturnCall(i) => {
+                let ft = self.callee_type(*i)?;
+                self.ctx.return_call(ft)?;
+            }
+            Instruction::ReturnCallIndirect(type_idx, table_idx) => {
+                let ft = self.call_indirect_type(*type_idx, *table_idx)?;
+                self.ctx.return_call(ft)?;
             }
             Instruction::Block(bt, body) | Instruction::Loop(bt, body) => {
                 let is_loop = matches!(instruction, Instruction::Loop(_, _));
@@ -439,13 +428,7 @@ impl<'a> Validator<'a> {
                 self.ctx.push_values(types.iter().copied());
             }
             Instruction::Return => {
-                let types = self
-                    .ctx
-                    .control_stack
-                    .first()
-                    .ok_or_else(|| Error::validation("return outside of function"))?
-                    .end_types;
-
+                let types = self.ctx.return_types()?;
                 self.ctx.pop_values_expect(types)?;
                 self.ctx.mark_unreachable()?;
             }
@@ -735,6 +718,34 @@ impl<'a> Validator<'a> {
         Ok(address_type)
     }
 
+    fn callee_type(&self, i: u32) -> Result<&'a FunctionType> {
+        let type_idx = *self
+            .funcs
+            .get(i as usize)
+            .ok_or_else(|| Error::validation(format!("unknown function {i}")))?;
+
+        self.func_type(type_idx)
+    }
+
+    fn call_indirect_type(&mut self, type_idx: u32, table_idx: u32) -> Result<&'a FunctionType> {
+        let table = self.table_type(table_idx)?;
+        let holds_funcs = matches!(
+            table.element_reference_type,
+            RefType::FuncRef
+                | RefType::Ref {
+                    heap_type: HeapType::Func,
+                    ..
+                }
+        );
+        ensure_validation!(holds_funcs, "type mismatch");
+
+        let ft = self.func_type(type_idx)?;
+
+        self.ctx.pop_value_expect(&table.addr_type.into())?;
+
+        Ok(ft)
+    }
+
     fn func_type(&self, i: u32) -> Result<&'a FunctionType> {
         self.module
             .types
@@ -977,6 +988,30 @@ impl<'a> FunctionContext<'a> {
         out.reverse();
 
         Ok(out)
+    }
+
+    fn return_types(&self) -> Result<&'a [ValueType]> {
+        Ok(self
+            .control_stack
+            .first()
+            .ok_or_else(|| Error::validation("return outside of function"))?
+            .end_types)
+    }
+
+    // the callee's results become the caller's, so they must fit its return
+    // type
+    fn return_call(&mut self, ft: &FunctionType) -> Result<()> {
+        let returns = self.return_types()?;
+        let fits = ft.results.len() == returns.len()
+            && ft
+                .results
+                .iter()
+                .zip(returns)
+                .all(|(&a, &b)| self.types.value_subtype(a, b));
+        ensure_validation!(fits, "type mismatch");
+
+        self.pop_values_expect(&ft.params)?;
+        self.mark_unreachable()
     }
 
     fn mark_unreachable(&mut self) -> Result<()> {
@@ -2136,6 +2171,97 @@ mod tests {
     }
 
     #[test]
+    fn return_call_pops_params() {
+        let caller = func_type(NONE, I64);
+        let callee = func_type(I32, I64);
+        let body = vec![Instruction::I32Const(1), Instruction::ReturnCall(1)];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_ok());
+    }
+
+    #[test]
+    fn return_call_with_wrong_argument_type_errors() {
+        let caller = func_type(NONE, NONE);
+        let callee = func_type(I32, NONE);
+        let body = vec![Instruction::I64Const(1), Instruction::ReturnCall(1)];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_err());
+    }
+
+    #[test]
+    fn return_call_results_must_match_the_callers() {
+        let caller = func_type(NONE, I32);
+        let callee = func_type(NONE, I64);
+
+        let err = validate_with_funcs(&[], &[caller, callee], vec![Instruction::ReturnCall(1)])
+            .unwrap_err();
+        assert!(err.to_string().contains("type mismatch"), "{err}");
+    }
+
+    #[test]
+    fn return_call_results_must_not_be_fewer_than_the_callers() {
+        // a plain call would leave nothing for the caller to return
+        let caller = func_type(NONE, I32);
+        let callee = func_type(NONE, NONE);
+        let body = vec![Instruction::I32Const(1), Instruction::ReturnCall(1)];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_err());
+    }
+
+    #[test]
+    fn return_call_result_can_be_a_subtype_of_the_callers() {
+        let callee_narrow = func_type(NONE, &[REF_FUNC]);
+        let caller_wide = func_type(NONE, &[FUNCREF]);
+        let body = vec![Instruction::ReturnCall(1)];
+
+        assert!(validate_with_funcs(
+            &[],
+            &[caller_wide.clone(), callee_narrow.clone()],
+            body.clone()
+        )
+        .is_ok());
+        assert!(validate_with_funcs(&[], &[callee_narrow, caller_wide], body).is_err());
+    }
+
+    #[test]
+    fn return_call_checks_the_function_results_not_the_blocks() {
+        let caller = func_type(NONE, I64);
+        // the block yields nothing, but the call inside it returns the
+        // function's i64
+        let callee = func_type(NONE, I64);
+        let body = vec![
+            Instruction::Block(BlockType::Empty, vec![Instruction::ReturnCall(1)]),
+            Instruction::I64Const(1),
+        ];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_ok());
+    }
+
+    #[test]
+    fn return_call_makes_the_rest_unreachable() {
+        // leftover values below the arguments are discarded, and the stack
+        // after the call is polymorphic
+        let caller = func_type(NONE, I32);
+        let callee = func_type(NONE, I32);
+        let body = vec![
+            Instruction::F64Const(1.0),
+            Instruction::ReturnCall(1),
+            Instruction::Drop,
+        ];
+
+        assert!(validate_with_funcs(&[], &[caller, callee], body).is_ok());
+    }
+
+    #[test]
+    fn return_call_out_of_range_errors() {
+        let caller = func_type(NONE, NONE);
+
+        let err =
+            validate_with_funcs(&[], &[caller], vec![Instruction::ReturnCall(1)]).unwrap_err();
+        assert!(err.to_string().contains("unknown function 1"), "{err}");
+    }
+
+    #[test]
     fn function_indices_are_imports_then_defined() {
         let imported = func_type(NONE, I64);
         let caller = func_type(NONE, I32);
@@ -3254,6 +3380,57 @@ mod tests {
         let swapped = vec![Instruction::I32Const(0), Instruction::CallIndirect(0, 1)];
         let err = validate_body_with_tables(&[], &tables, &[callee], NONE, swapped).unwrap_err();
         assert!(err.to_string().contains("unknown table 1"), "{err}");
+    }
+
+    #[test]
+    fn return_call_indirect_pops_index_and_params() {
+        let callee = func_type(I32, I64);
+        let body = vec![
+            Instruction::I32Const(7),
+            Instruction::I32Const(0),
+            Instruction::ReturnCallIndirect(1, 0),
+        ];
+
+        assert!(validate_body_with_tables(&[], &[funcref_table()], &[callee], I64, body).is_ok());
+    }
+
+    #[test]
+    fn return_call_indirect_results_must_match_the_callers() {
+        let callee = func_type(NONE, I64);
+        let body = vec![
+            Instruction::I32Const(0),
+            Instruction::ReturnCallIndirect(1, 0),
+        ];
+
+        let err =
+            validate_body_with_tables(&[], &[funcref_table()], &[callee], I32, body).unwrap_err();
+        assert!(err.to_string().contains("type mismatch"), "{err}");
+    }
+
+    #[test]
+    fn return_call_indirect_without_table_index_errors() {
+        let callee = func_type(NONE, NONE);
+
+        assert!(validate_body_with_tables(
+            &[],
+            &[funcref_table()],
+            &[callee],
+            NONE,
+            vec![Instruction::ReturnCallIndirect(1, 0)]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn return_call_indirect_through_non_func_table_errors() {
+        let callee = func_type(NONE, NONE);
+        let externs = table(RefType::ExternRef, AddrType::I32);
+        let body = vec![
+            Instruction::I32Const(0),
+            Instruction::ReturnCallIndirect(1, 0),
+        ];
+
+        assert!(validate_body_with_tables(&[], &[externs], &[callee], NONE, body).is_err());
     }
 
     #[test]
