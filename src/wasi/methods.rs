@@ -14,6 +14,15 @@ fn errno(code: i32) -> HostOutcome {
     HostOutcome::Return(vec![RawValue::from(code)])
 }
 
+macro_rules! wasi_try {
+    ($expr:expr, $errno:expr $(,)?) => {
+        match $expr {
+            Ok(value) => value,
+            Err(_) => return $crate::wasi::methods::errno($errno),
+        }
+    };
+}
+
 pub(super) fn args_sizes_get<O: WasiOutput>(
     mut caller: Caller<'_, WasiCtx<O>>,
     args: &[RawValue],
@@ -34,39 +43,29 @@ pub(super) fn args_sizes_get<O: WasiOutput>(
     };
 
     let args = ctx.args();
-    let num_args = u32::try_from(args.len());
-
-    let Ok(num_args) = num_args else {
-        return errno(OVERFLOW);
-    };
+    let num_args = wasi_try!(u32::try_from(args.len()), OVERFLOW);
 
     let total_string_output = args.iter().try_fold(0u32, |total, arg| {
         let len = u32::try_from(arg.len()).ok()?;
         total.checked_add(len)?.checked_add(1)
     });
 
-    let Some(total_string_output) = total_string_output else {
-        return errno(OVERFLOW);
-    };
+    let total_string_output = wasi_try!(total_string_output.ok_or(()), OVERFLOW);
 
     let memory = &mut store.memories[addr].data;
 
-    if memory
-        .write(num_args_guest_address, num_args.to_le_bytes())
-        .is_err()
-    {
-        return errno(FAULT);
-    }
+    wasi_try!(
+        memory.write(num_args_guest_address, num_args.to_le_bytes()),
+        FAULT
+    );
 
-    if memory
-        .write(
+    wasi_try!(
+        memory.write(
             total_string_buffer_guest_address,
             total_string_output.to_le_bytes(),
-        )
-        .is_err()
-    {
-        return errno(FAULT);
-    }
+        ),
+        FAULT
+    );
 
     errno(SUCCESS)
 }
@@ -103,16 +102,10 @@ pub(super) fn fd_write<O: WasiOutput>(
     let mut buffers = Vec::new();
 
     {
-        let Some(table_len) = iovs_len.checked_mul(8) else {
-            return errno(FAULT);
-        };
-        let Ok(table) = memory.read_bytes(iovs_ptr, table_len) else {
-            return errno(FAULT);
-        };
+        let table_len = wasi_try!(iovs_len.checked_mul(8).ok_or(()), FAULT);
+        let table = wasi_try!(memory.read_bytes(iovs_ptr, table_len), FAULT);
 
-        if memory.read_bytes(nwritten_ptr, 4).is_err() {
-            return errno(FAULT);
-        }
+        wasi_try!(memory.read_bytes(nwritten_ptr, 4), FAULT);
 
         let mut total = 0u32;
 
@@ -126,15 +119,9 @@ pub(super) fn fd_write<O: WasiOutput>(
                 continue;
             }
 
-            let Some(next_total) = total.checked_add(len) else {
-                return errno(OVERFLOW);
-            };
+            total = wasi_try!(total.checked_add(len).ok_or(()), OVERFLOW);
 
-            total = next_total;
-
-            let Ok(bs) = memory.read_bytes(ptr, len as usize) else {
-                return errno(FAULT);
-            };
+            let bs = wasi_try!(memory.read_bytes(ptr, len as usize), FAULT);
 
             buffers.push(bs);
         }
@@ -163,9 +150,7 @@ pub(super) fn fd_write<O: WasiOutput>(
         }
     }
 
-    if memory.write(nwritten_ptr, written.to_le_bytes()).is_err() {
-        return errno(FAULT);
-    }
+    wasi_try!(memory.write(nwritten_ptr, written.to_le_bytes()), FAULT);
 
     errno(SUCCESS)
 }
