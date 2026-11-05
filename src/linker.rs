@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::{
     CompositeType, Error, ExecutionState, ExternalValue, FunctionInstance, FunctionType,
@@ -14,7 +14,7 @@ struct HostFunc {
 }
 
 pub struct Linker {
-    funcs: HashMap<String, HashMap<String, HostFunc>>,
+    funcs: BTreeMap<String, BTreeMap<String, HostFunc>>,
     allow_shadowing: bool,
 }
 
@@ -25,9 +25,9 @@ impl Default for Linker {
 }
 
 impl Linker {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            funcs: HashMap::new(),
+            funcs: BTreeMap::new(),
             allow_shadowing: false,
         }
     }

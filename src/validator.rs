@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use crate::{
     bail_validation, ensure_validation, AddrType, BlockType, CompositeType, DataSegment, Error,
@@ -49,7 +49,7 @@ pub struct Validator<'a> {
     // imports first
     tables: Vec<TableType>,
     types: Types<'a>,
-    refs: HashSet<u32>,
+    refs: BTreeSet<u32>,
     ctx: FunctionContext<'a>,
 }
 

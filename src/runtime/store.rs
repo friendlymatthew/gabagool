@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::ops::Neg;
 use std::sync::Arc;
@@ -859,7 +859,7 @@ impl Store {
         let mut core_funcs = Vec::new();
         let mut core_memories = Vec::new();
         let mut component_funcs = Vec::new();
-        let mut component_exports = HashMap::new();
+        let mut component_exports = BTreeMap::new();
 
         for init in &flattened.initializers {
             match init {

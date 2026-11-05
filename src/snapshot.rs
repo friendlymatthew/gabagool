@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::{mem, slice};
 
@@ -209,7 +209,7 @@ pub fn encode_slice<T: Snapshot>(slice: &[T], buf: &mut Vec<u8>) {
     }
 }
 
-impl<K: Snapshot + Eq + std::hash::Hash, V: Snapshot> Snapshot for HashMap<K, V> {
+impl<K: Snapshot + std::cmp::Ord, V: Snapshot> Snapshot for BTreeMap<K, V> {
     fn encode(&self, buf: &mut Vec<u8>) {
         (self.len() as u32).encode(buf);
 
@@ -221,13 +221,7 @@ impl<K: Snapshot + Eq + std::hash::Hash, V: Snapshot> Snapshot for HashMap<K, V>
 
     fn decode(buf: &mut &[u8]) -> Self {
         let len = u32::decode(buf) as usize;
-        let mut map = Self::with_capacity(len);
-
-        for _ in 0..len {
-            map.insert(K::decode(buf), V::decode(buf));
-        }
-
-        map
+        (0..len).map(|_| (K::decode(buf), V::decode(buf))).collect()
     }
 }
 
@@ -1093,7 +1087,7 @@ impl Snapshot for InstantiatedComponent {
 
     fn decode(buf: &mut &[u8]) -> Self {
         Self {
-            exports: HashMap::decode(buf),
+            exports: BTreeMap::decode(buf),
             types: Vec::decode(buf),
             may_leave: bool::decode(buf),
         }

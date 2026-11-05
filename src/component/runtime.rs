@@ -1,5 +1,5 @@
 use crate::{ComponentFuncKind, ComponentTypeDef, StringEncoding};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::result::Result as StdResult;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,7 +199,7 @@ pub struct LiftedFunc {
 
 #[derive(Debug)]
 pub struct InstantiatedComponent {
-    pub exports: HashMap<String, LiftedFunc>,
+    pub exports: BTreeMap<String, LiftedFunc>,
     pub types: Vec<ComponentTypeDef>,
     pub may_leave: bool,
 }
