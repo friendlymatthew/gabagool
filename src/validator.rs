@@ -654,6 +654,13 @@ impl<'a> Validator<'a> {
 
                 self.ctx.push_value(result);
             }
+            Instruction::RefEq => {
+                let eqref = ValueType::Ref(RefType::Ref {
+                    nullable: true,
+                    heap_type: HeapType::Eq,
+                });
+                self.ctx.apply(&[eqref, eqref], &[ValueType::I32])?;
+            }
             _ => unimplemented!(),
         }
 
@@ -3707,8 +3714,6 @@ mod tests {
         assert!(validate_body(&[REF_FUNC], &[FUNCREF], &[], body).is_ok());
     }
 
-    // --- ref.null ---
-
     #[test]
     fn ref_null_func_is_a_funcref() {
         let body = vec![Instruction::RefNull(HeapType::Func)];
@@ -3745,8 +3750,6 @@ mod tests {
         let err = validate_body(NONE, NONE, &[], unknown).unwrap_err();
         assert!(err.to_string().contains("unknown type 7"), "{err}");
     }
-
-    // --- ref.is_null ---
 
     #[test]
     fn ref_is_null_takes_any_ref_and_returns_i32() {
@@ -3790,8 +3793,6 @@ mod tests {
 
         assert!(validate_body(NONE, I32, &[], body).is_ok());
     }
-
-    // --- ref.as_non_null ---
 
     #[test]
     fn ref_as_non_null_drops_nullability() {
@@ -3838,8 +3839,6 @@ mod tests {
 
         assert!(validate_body(NONE, &[REF_FUNC], &[], body).is_ok());
     }
-
-    // --- ref.func ---
 
     // two functions sharing type 0, so function index 1 and type index 0
     // differ; function 0 runs `body`, function 1 is the one referenced
@@ -3957,5 +3956,74 @@ mod tests {
         export_func(&mut module, 1);
 
         assert!(Validator::new(&module).validate().is_err());
+    }
+
+    fn ref_eq(a: HeapType, b: HeapType) -> Vec<Instruction> {
+        vec![
+            Instruction::RefNull(a),
+            Instruction::RefNull(b),
+            Instruction::RefEq,
+        ]
+    }
+
+    #[test]
+    fn ref_eq_takes_two_eqrefs_and_returns_i32() {
+        assert!(validate_body(NONE, I32, &[], ref_eq(HeapType::Eq, HeapType::Eq)).is_ok());
+        assert!(validate_body(NONE, I64, &[], ref_eq(HeapType::Eq, HeapType::Eq)).is_err());
+    }
+
+    #[test]
+    fn ref_eq_accepts_subtypes_of_eq() {
+        assert!(validate_body(NONE, I32, &[], ref_eq(HeapType::I31, HeapType::Struct)).is_ok());
+        assert!(validate_body(NONE, I32, &[], ref_eq(HeapType::Array, HeapType::None)).is_ok());
+    }
+
+    #[test]
+    fn ref_eq_accepts_non_null_refs() {
+        let ref_eq_type = ValueType::Ref(RefType::Ref {
+            nullable: false,
+            heap_type: HeapType::Eq,
+        });
+        let body = vec![
+            Instruction::LocalGet(0),
+            Instruction::LocalGet(0),
+            Instruction::RefEq,
+        ];
+
+        assert!(validate_body(&[ref_eq_type], I32, &[], body).is_ok());
+    }
+
+    #[test]
+    fn ref_eq_rejects_refs_outside_eq() {
+        // func, extern and any are not subtypes of eq
+        for ht in [HeapType::Func, HeapType::Extern, HeapType::Any] {
+            assert!(validate_body(NONE, I32, &[], ref_eq(HeapType::Eq, ht)).is_err());
+            assert!(validate_body(NONE, I32, &[], ref_eq(ht, HeapType::Eq)).is_err());
+        }
+    }
+
+    #[test]
+    fn ref_eq_rejects_non_refs() {
+        let body = vec![
+            Instruction::RefNull(HeapType::Eq),
+            Instruction::I32Const(0),
+            Instruction::RefEq,
+        ];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn ref_eq_with_one_operand_errors() {
+        let body = vec![Instruction::RefNull(HeapType::Eq), Instruction::RefEq];
+
+        assert!(validate_body(NONE, I32, &[], body).is_err());
+    }
+
+    #[test]
+    fn ref_eq_in_unreachable_code() {
+        let body = vec![Instruction::Unreachable, Instruction::RefEq];
+
+        assert!(validate_body(NONE, I32, &[], body).is_ok());
     }
 }
