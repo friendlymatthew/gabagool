@@ -7,4 +7,3 @@ pub use ctx::WasiCtx;
 pub use linker::*;
 pub use traits::{OutputError, WasiOutput};
 
-use methods::*;

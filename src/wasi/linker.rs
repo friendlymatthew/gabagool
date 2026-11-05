@@ -1,54 +1,29 @@
 use crate::prelude::*;
-use crate::wasi::{args_get, args_sizes_get, fd_write, WasiCtx, WasiOutput};
-use crate::ValueType;
-use crate::{FunctionType, HostOutcome, Linker, Result};
+use crate::{FunctionType, Linker, Result, ValueType};
 
-static WASI_MODULE_NAME: &str = "wasi_snapshot_preview1";
+use super::{WasiCtx, WasiOutput};
+
+const WASI_MODULE_NAME: &str = "wasi_snapshot_preview1";
+
+macro_rules! register_wasi {
+    ($linker:expr, $method:ident, [$($param:ident),* $(,)?], [$($result:ident),* $(,)?] $(,)?) => {
+        $linker.func_new(
+            WASI_MODULE_NAME,
+            stringify!($method),
+            FunctionType {
+                params: vec![$(ValueType::$param),*],
+                results: vec![$(ValueType::$result),*],
+            },
+            |caller, args| Ok(super::methods::$method(caller, args)),
+        )?;
+    };
+}
 
 pub fn add_wasip1_to_linker<O: WasiOutput + 'static>(l: &mut Linker<WasiCtx<O>>) -> Result<()> {
-    l.func_new(
-        WASI_MODULE_NAME,
-        "proc_exit",
-        FunctionType {
-            params: vec![ValueType::I32],
-            results: vec![],
-        },
-        |_, args| {
-            let code = args[0].as_i32();
-
-            Ok(HostOutcome::Exit(code as u32))
-        },
-    )?;
-
-    l.func_new(
-        WASI_MODULE_NAME,
-        "fd_write",
-        FunctionType {
-            params: vec![ValueType::I32; 4],
-            results: vec![ValueType::I32],
-        },
-        |caller, args| Ok(fd_write(caller, args)),
-    )?;
-
-    l.func_new(
-        WASI_MODULE_NAME,
-        "args_sizes_get",
-        FunctionType {
-            params: vec![ValueType::I32; 2],
-            results: vec![ValueType::I32],
-        },
-        |caller, args| Ok(args_sizes_get(caller, args)),
-    )?;
-
-    l.func_new(
-        WASI_MODULE_NAME,
-        "args_get",
-        FunctionType {
-            params: vec![ValueType::I32; 2],
-            results: vec![ValueType::I32],
-        },
-        |caller, args| Ok(args_get(caller, args)),
-    )?;
+    register_wasi!(l, proc_exit, [I32], []);
+    register_wasi!(l, fd_write, [I32, I32, I32, I32], [I32]);
+    register_wasi!(l, args_sizes_get, [I32, I32], [I32]);
+    register_wasi!(l, args_get, [I32, I32], [I32]);
 
     Ok(())
 }

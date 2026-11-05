@@ -34,6 +34,13 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn proc_exit<O: WasiOutput>(
+    _: Caller<'_, WasiCtx<O>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    HostOutcome::Exit(args[0].as_i32() as u32)
+}
+
 pub(super) fn args_get<O: WasiOutput>(
     mut caller: Caller<'_, WasiCtx<O>>,
     args: &[RawValue],
