@@ -1,4 +1,6 @@
-use crate::{prelude::*, Caller, ExternalValue, HostOutcome, RawValue};
+use crate::{
+    prelude::*, Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
+};
 
 use super::{OutputError, WasiCtx, WasiOutput};
 
@@ -14,6 +16,15 @@ fn errno(code: i32) -> HostOutcome {
     HostOutcome::Return(vec![RawValue::from(code)])
 }
 
+macro_rules! wasi_some {
+    ($expr:expr, $errno:expr $(,)?) => {
+        match $expr {
+            Some(value) => value,
+            None => return $crate::wasi::methods::errno($errno),
+        }
+    };
+}
+
 macro_rules! wasi_try {
     ($expr:expr, $errno:expr $(,)?) => {
         match $expr {
@@ -21,6 +32,52 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn args_get<O: WasiOutput>(
+    mut caller: Caller<'_, WasiCtx<O>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let argv_ptr = args[0].as_pointer();
+    let mut argv_buf_ptr = args[1].as_i32() as u32;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let args = ctx.args();
+
+    let table_len = wasi_some!(args.len().checked_mul(4), OVERFLOW);
+    let buffer_len = args.iter().try_fold(0u32, |total, arg| {
+        let len = u32::try_from(arg.len()).ok()?;
+        total.checked_add(len)?.checked_add(1)
+    });
+    let buffer_len = wasi_some!(buffer_len, OVERFLOW);
+
+    wasi_try!(memory.read_bytes(argv_ptr, table_len), FAULT);
+
+    wasi_try!(
+        memory.read_bytes(argv_buf_ptr as usize, buffer_len as usize),
+        FAULT
+    );
+
+    wasi_some!(argv_buf_ptr.checked_add(buffer_len), OVERFLOW);
+
+    for (index, arg) in args.iter().enumerate() {
+        wasi_try!(
+            memory.write(argv_ptr + index * 4, argv_buf_ptr.to_le_bytes()),
+            FAULT
+        );
+        wasi_try!(
+            memory.write_bytes(argv_buf_ptr as usize, arg.as_bytes()),
+            FAULT
+        );
+
+        let nul_ptr = argv_buf_ptr + arg.len() as u32;
+        wasi_try!(memory.write(nul_ptr as usize, [0]), FAULT);
+        argv_buf_ptr = nul_ptr + 1;
+    }
+
+    errno(SUCCESS)
 }
 
 pub(super) fn args_sizes_get<O: WasiOutput>(
@@ -31,16 +88,7 @@ pub(super) fn args_sizes_get<O: WasiOutput>(
     let total_string_buffer_guest_address = args[1].as_pointer();
 
     let (store, instance, ctx) = caller.parts_mut();
-    let Some(addr) = store.exports(instance).iter().find_map(|export| {
-        if export.name == "memory" {
-            if let ExternalValue::Memory { addr } = export.value {
-                return Some(addr);
-            }
-        }
-        None
-    }) else {
-        return errno(FAULT);
-    };
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
 
     let args = ctx.args();
     let num_args = wasi_try!(u32::try_from(args.len()), OVERFLOW);
@@ -50,9 +98,7 @@ pub(super) fn args_sizes_get<O: WasiOutput>(
         total.checked_add(len)?.checked_add(1)
     });
 
-    let total_string_output = wasi_try!(total_string_output.ok_or(()), OVERFLOW);
-
-    let memory = &mut store.memories[addr].data;
+    let total_string_output = wasi_some!(total_string_output, OVERFLOW);
 
     wasi_try!(
         memory.write(num_args_guest_address, num_args.to_le_bytes()),
@@ -84,25 +130,14 @@ pub(super) fn fd_write<O: WasiOutput>(
     }
 
     let (store, instance, ctx) = caller.parts_mut();
-    let Some(addr) = store.exports(instance).iter().find_map(|export| {
-        if export.name == "memory" {
-            if let ExternalValue::Memory { addr } = export.value {
-                return Some(addr);
-            }
-        }
-        None
-    }) else {
-        return errno(FAULT);
-    };
-
-    let memory = &mut store.memories[addr].data;
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
 
     // Validate all buffers before output, then borrow their bytes directly.
     // The output context is borrowed independently from guest memory.
     let mut buffers = Vec::new();
 
     {
-        let table_len = wasi_try!(iovs_len.checked_mul(8).ok_or(()), FAULT);
+        let table_len = wasi_some!(iovs_len.checked_mul(8), FAULT);
         let table = wasi_try!(memory.read_bytes(iovs_ptr, table_len), FAULT);
 
         wasi_try!(memory.read_bytes(nwritten_ptr, 4), FAULT);
@@ -119,7 +154,7 @@ pub(super) fn fd_write<O: WasiOutput>(
                 continue;
             }
 
-            total = wasi_try!(total.checked_add(len).ok_or(()), OVERFLOW);
+            total = wasi_some!(total.checked_add(len), OVERFLOW);
 
             let bs = wasi_try!(memory.read_bytes(ptr, len as usize), FAULT);
 
@@ -153,4 +188,19 @@ pub(super) fn fd_write<O: WasiOutput>(
     wasi_try!(memory.write(nwritten_ptr, written.to_le_bytes()), FAULT);
 
     errno(SUCCESS)
+}
+
+fn guest_memory(store: &mut Store, instance: Instance) -> Option<&mut GuestMemory> {
+    store
+        .exports(instance)
+        .iter()
+        .find_map(|export| {
+            if export.name == "memory" {
+                if let ExternalValue::Memory { addr } = export.value {
+                    return Some(addr);
+                }
+            }
+            None
+        })
+        .map(|addr| &mut store.memories[addr].data)
 }

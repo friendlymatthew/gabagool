@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::wasi::{args_sizes_get, fd_write, WasiCtx, WasiOutput};
+use crate::wasi::{args_get, args_sizes_get, fd_write, WasiCtx, WasiOutput};
 use crate::ValueType;
 use crate::{FunctionType, HostOutcome, Linker, Result};
 
@@ -38,6 +38,16 @@ pub fn add_wasip1_to_linker<O: WasiOutput + 'static>(l: &mut Linker<WasiCtx<O>>)
             results: vec![ValueType::I32],
         },
         |caller, args| Ok(args_sizes_get(caller, args)),
+    )?;
+
+    l.func_new(
+        WASI_MODULE_NAME,
+        "args_get",
+        FunctionType {
+            params: vec![ValueType::I32; 2],
+            results: vec![ValueType::I32],
+        },
+        |caller, args| Ok(args_get(caller, args)),
     )?;
 
     Ok(())
