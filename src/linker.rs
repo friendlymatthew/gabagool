@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use crate::prelude::*;
+use alloc::collections::BTreeMap;
 
 use crate::{
     CompositeType, Error, ExecutionState, ExternalValue, FunctionInstance, FunctionType,
@@ -112,7 +113,7 @@ impl Linker {
         instance: Instance,
         name: &str,
     ) -> Result<ExecutionState> {
-        self.invoke(store, instance, name, std::iter::empty::<RawValue>())
+        self.invoke(store, instance, name, core::iter::empty::<RawValue>())
     }
 
     pub fn dispatch(

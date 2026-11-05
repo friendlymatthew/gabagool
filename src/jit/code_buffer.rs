@@ -1,4 +1,4 @@
-use std::ptr::{self, NonNull};
+use core::ptr::{self, NonNull};
 
 extern "C" {
     fn sys_icache_invalidate(start: *mut libc::c_void, size: libc::size_t);

@@ -1,4 +1,5 @@
 use crate::module::MemoryType;
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub struct MemoryInstance {

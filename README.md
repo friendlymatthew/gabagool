@@ -6,7 +6,8 @@
 
 A WebAssembly interpreter written from scratch.
 
-This project aims to build a **serious**, fully spec-compliant, performant WASM interpreter whose entire execution state can be serialized, suspended, and restored.
+This project aims to build a **serious**, fully spec-compliant, performant WASM interpreter whose entire execution state can be serialized, suspended, and restored. `gabagool` is `no_std`, so it never touches the host OS.
+
 <br>
 
 <details open>
@@ -23,7 +24,7 @@ As a pure interpreter, it is safe to assume `gabagool` is spec compliant. `gabag
 
 `gabagool` is not focused on performance optimization. No serious profiling/benchmarking has been done (yet!). That said, the goal is to make `gabagool` performant while preserving its snapshot friendly execution model. `gabagool` already lowers WASM instructions into a compact, serializable intermediate representation. The most interesting direction now is an experimental JIT compiler based on copy and patch compilation.
 
-**Current work** focuses on how gabagool interacts with its host environment. This includes a minimal, virtualized WASI Preview 1 implementation whose state can be snapshotted and restored alongside the interpreter.
+**Current work** focuses on how gabagool interacts with its host environment. This includes a robust, virtualized WASI Preview 1 implementation whose state can be snapshotted and restored alongside the interpreter.
 
 # Usage
 

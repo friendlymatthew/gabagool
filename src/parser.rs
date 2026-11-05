@@ -1,6 +1,7 @@
-use std::cmp::min;
-use std::collections::VecDeque;
-use std::iter::RepeatN;
+use crate::prelude::*;
+use alloc::collections::VecDeque;
+use core::cmp::min;
+use core::iter::RepeatN;
 
 use crate::error::{Error, Result};
 use crate::{
@@ -896,7 +897,7 @@ impl<'a> Parser<'a> {
         let n = self.read_u32()?;
         let slice = self.read_slice(n as usize)?;
 
-        Ok(std::str::from_utf8(slice)?.to_owned())
+        Ok(core::str::from_utf8(slice)?.to_owned())
     }
 
     // 5.3: Types
@@ -2164,7 +2165,7 @@ impl<'a> Parser<'a> {
         let count = self.read_u32()?;
         let vt = self.parse_value_type()?;
 
-        Ok(std::iter::repeat_n(vt, count as usize))
+        Ok(core::iter::repeat_n(vt, count as usize))
     }
 
     fn parse_code(&mut self) -> Result<Function> {

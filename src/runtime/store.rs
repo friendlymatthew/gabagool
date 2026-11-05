@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::ops::Neg;
-use std::sync::Arc;
+use crate::prelude::*;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use core::fmt::Debug;
+use core::ops::Neg;
 
 use crate::compiler::ModuleCode;
 use crate::component::flatten::Initializer;
@@ -293,7 +294,7 @@ impl Default for Store {
 }
 
 impl Debug for Store {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Store")
             .field("functions", &self.functions.len())
             .field("tables", &self.tables.len())
@@ -925,7 +926,7 @@ impl Store {
     }
 
     pub fn invoke_no_args(&mut self, instance: Instance, name: &str) -> Result<ExecutionState> {
-        self.invoke(instance, name, std::iter::empty::<RawValue>())
+        self.invoke(instance, name, core::iter::empty::<RawValue>())
     }
 
     pub fn invoke_component<I>(
@@ -1202,7 +1203,7 @@ impl Store {
 
                 let written = flat.len() - before - 1;
                 let padding = max_payload - written;
-                flat.extend(std::iter::repeat_n(RawValue::from(i32::MAX), padding));
+                flat.extend(core::iter::repeat_n(RawValue::from(i32::MAX), padding));
             }
             ComponentValue::Enum(case_name) => {
                 let defined = resolve_defined_type(param_ty, types);
@@ -1230,12 +1231,9 @@ impl Store {
 
                 match opt {
                     None => {
-                        flat.extend(
-                            std::iter::once(RawValue::from(0i32)).chain(std::iter::repeat_n(
-                                RawValue::from(i32::MAX),
-                                payload_count,
-                            )),
-                        );
+                        flat.extend(core::iter::once(RawValue::from(0i32)).chain(
+                            core::iter::repeat_n(RawValue::from(i32::MAX), payload_count),
+                        ));
                     }
                     Some(value) => {
                         flat.push(RawValue::from(1i32));
@@ -1275,7 +1273,7 @@ impl Store {
 
                 let written = flat.len() - before - 1;
                 let padding = max_payload - written;
-                flat.extend(std::iter::repeat_n(RawValue::from(i32::MAX), padding));
+                flat.extend(core::iter::repeat_n(RawValue::from(i32::MAX), padding));
             }
             ComponentValue::Flags(set_flags) => {
                 let all_flags = match resolve_defined_type(param_ty, types) {
@@ -1361,7 +1359,7 @@ impl Store {
                         })?;
 
                         let bytes = self.memories[mem_addr].data.read_bytes(ptr, len);
-                        let s = std::str::from_utf8(bytes)
+                        let s = core::str::from_utf8(bytes)
                             .map_err(|e| Error::Instantiation(format!("{e}")))?;
 
                         ComponentValue::String(s.to_string())
@@ -1763,9 +1761,9 @@ impl Store {
                 stack: self.stack.as_mut_ptr() as *mut u64,
                 stack_pointer: self.stack.len() as u64,
                 locals: self.call_stack[depth].locals.as_mut_ptr() as *mut u64,
-                mem_base: std::ptr::null_mut(),
+                mem_base: core::ptr::null_mut(),
                 mem_len: 0,
-                globals: std::ptr::null_mut(),
+                globals: core::ptr::null_mut(),
                 imm_table: jit_function.imm_table.as_ptr(),
                 fn_table: jit_function.fn_table.as_ptr(),
                 pc: pc as u32,
@@ -2572,23 +2570,23 @@ impl Store {
                 }
                 Op::F32Ceil => {
                     let a = pop_val!(self, F32);
-                    self.stack.push(a.ceil());
+                    self.stack.push(libm::ceilf(a));
                 }
                 Op::F32Floor => {
                     let a = pop_val!(self, F32);
-                    self.stack.push(a.floor());
+                    self.stack.push(libm::floorf(a));
                 }
                 Op::F32Trunc => {
                     let a = pop_val!(self, F32);
-                    self.stack.push(a.trunc());
+                    self.stack.push(libm::truncf(a));
                 }
                 Op::F32Nearest => {
                     let a = pop_val!(self, F32);
-                    self.stack.push(a.round_ties_even());
+                    self.stack.push(libm::roundevenf(a));
                 }
                 Op::F32Sqrt => {
                     let a = pop_val!(self, F32);
-                    self.stack.push(a.sqrt());
+                    self.stack.push(libm::sqrtf(a));
                 }
                 Op::F32Add => binop!(self, F32, |b, a| b + a),
                 Op::F32Sub => binop!(self, F32, |b, a| b - a),
@@ -2635,23 +2633,23 @@ impl Store {
                 }
                 Op::F64Ceil => {
                     let a = pop_val!(self, F64);
-                    self.stack.push(a.ceil());
+                    self.stack.push(libm::ceil(a));
                 }
                 Op::F64Floor => {
                     let a = pop_val!(self, F64);
-                    self.stack.push(a.floor());
+                    self.stack.push(libm::floor(a));
                 }
                 Op::F64Trunc => {
                     let a = pop_val!(self, F64);
-                    self.stack.push(a.trunc());
+                    self.stack.push(libm::trunc(a));
                 }
                 Op::F64Nearest => {
                     let a = pop_val!(self, F64);
-                    self.stack.push(a.round_ties_even());
+                    self.stack.push(libm::roundeven(a));
                 }
                 Op::F64Sqrt => {
                     let a = pop_val!(self, F64);
-                    self.stack.push(a.sqrt());
+                    self.stack.push(libm::sqrt(a));
                 }
                 Op::F64Add => binop!(self, F64, |b, a| b + a),
                 Op::F64Sub => binop!(self, F64, |b, a| b - a),
@@ -2689,7 +2687,7 @@ impl Store {
                 Op::I32TruncF32Signed => {
                     let a = pop_val!(self, F32);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::truncf(a);
                     ensure_trap!(
                         t >= i32::MIN as f32 && t < i32::MAX as f32,
                         Trap::IntegerOverflow
@@ -2699,14 +2697,14 @@ impl Store {
                 Op::I32TruncF32Unsigned => {
                     let a = pop_val!(self, F32);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::truncf(a);
                     ensure_trap!(t >= 0.0 && t < u32::MAX as f32, Trap::IntegerOverflow);
                     self.stack.push(t as u32 as i32);
                 }
                 Op::I32TruncF64Signed => {
                     let a = pop_val!(self, F64);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::trunc(a);
                     ensure_trap!(
                         t >= i32::MIN as f64 && t <= i32::MAX as f64,
                         Trap::IntegerOverflow
@@ -2716,7 +2714,7 @@ impl Store {
                 Op::I32TruncF64Unsigned => {
                     let a = pop_val!(self, F64);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::trunc(a);
                     ensure_trap!(t >= 0.0 && t <= u32::MAX as f64, Trap::IntegerOverflow);
                     self.stack.push(t as u32 as i32);
                 }
@@ -2731,7 +2729,7 @@ impl Store {
                 Op::I64TruncF32Signed => {
                     let a = pop_val!(self, F32);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::truncf(a);
                     ensure_trap!(
                         t >= i64::MIN as f32 && t < i64::MAX as f32,
                         Trap::IntegerOverflow
@@ -2741,14 +2739,14 @@ impl Store {
                 Op::I64TruncF32Unsigned => {
                     let a = pop_val!(self, F32);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::truncf(a);
                     ensure_trap!(t >= 0.0 && t < u64::MAX as f32, Trap::IntegerOverflow);
                     self.stack.push(t as u64 as i64);
                 }
                 Op::I64TruncF64Signed => {
                     let a = pop_val!(self, F64);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::trunc(a);
                     ensure_trap!(
                         t >= i64::MIN as f64 && t < i64::MAX as f64,
                         Trap::IntegerOverflow
@@ -2758,7 +2756,7 @@ impl Store {
                 Op::I64TruncF64Unsigned => {
                     let a = pop_val!(self, F64);
                     ensure_trap!(!a.is_nan(), Trap::InvalidConversionToInteger);
-                    let t = a.trunc();
+                    let t = libm::trunc(a);
                     ensure_trap!(t >= 0.0 && t < u64::MAX as f64, Trap::IntegerOverflow);
                     self.stack.push(t as u64 as i64);
                 }
@@ -3501,6 +3499,7 @@ fn const_pop_i64(stack: &mut Vec<RawValue>) -> Result<i64> {
 mod tests {
     use super::{Instruction, Module, Store};
     use crate::parser::Parser;
+    use crate::prelude::*;
     use crate::ExternalValue;
 
     #[test]

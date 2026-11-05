@@ -1,4 +1,5 @@
 use crate::module::ParsedModule;
+use crate::prelude::*;
 use crate::Result;
 
 use super::model::{

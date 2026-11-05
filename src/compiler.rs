@@ -2,6 +2,7 @@ use crate::ir::{CatchKind, CompiledCatchClause, CompiledFunction, JumpTableEntry
 use crate::module::{
     BlockType, CatchClause, CompositeType, Function, Instruction, ParsedModule, SubType,
 };
+use crate::prelude::*;
 use crate::{FunctionType, ImportDescription};
 
 const UNREACHABLE_DEPTH: i32 = i32::MIN;
@@ -132,10 +133,10 @@ pub fn compile(module: &ParsedModule) -> ModuleCode {
                 next_label: 0,
                 jump_table_base: 0,
                 catch_handler_base: 0,
-                v128_constants: std::mem::take(&mut v128_constants),
-                jump_tables: std::mem::take(&mut jump_tables),
-                shuffle_masks: std::mem::take(&mut shuffle_masks),
-                catch_handlers: std::mem::take(&mut catch_handlers),
+                v128_constants: core::mem::take(&mut v128_constants),
+                jump_tables: core::mem::take(&mut jump_tables),
+                shuffle_masks: core::mem::take(&mut shuffle_masks),
+                catch_handlers: core::mem::take(&mut catch_handlers),
             };
 
             let cf = compiler.compile_function(f);
@@ -1166,7 +1167,7 @@ impl<'a> Compiler<'a> {
                 let keep = self.block_stack[default_i].branch_arity as u16;
 
                 let mut entries = Vec::with_capacity(labels.len() + 1);
-                for label in labels.iter().chain(std::iter::once(default)) {
+                for label in labels.iter().chain(core::iter::once(default)) {
                     let i = self.block_stack.len() - 1 - *label as usize;
                     let ctx = &self.block_stack[i];
                     let drop = (self.stack_height - ctx.entry_stack_height - keep as i32) as u16;

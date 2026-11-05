@@ -1,5 +1,6 @@
-use std::ops::Range;
-use std::ptr;
+use crate::prelude::*;
+use core::ops::Range;
+use core::ptr;
 
 use crate::module::AddrType;
 use crate::runtime::RawValue;

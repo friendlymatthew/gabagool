@@ -1,6 +1,7 @@
+use crate::prelude::*;
 use crate::{ComponentFuncKind, ComponentTypeDef, StringEncoding};
-use std::collections::BTreeMap;
-use std::result::Result as StdResult;
+use alloc::collections::BTreeMap;
+use core::result::Result as StdResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComponentValue {

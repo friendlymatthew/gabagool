@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::prelude::*;
 use crate::{bail_parse, ensure_parse};
 
 /// The maximum length of a leb128-encoded 32-bit integer

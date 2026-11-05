@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::{mem, slice};
+use crate::prelude::*;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use core::{mem, slice};
 
 use crate::compiler::ModuleCode;
 use crate::component::model::{
@@ -40,7 +41,7 @@ pub fn decode_bulk<T: Copy>(buf: &mut &[u8]) -> Vec<T> {
     let byte_len = len * mem::size_of::<T>();
     let mut vec = Vec::with_capacity(len);
     unsafe {
-        std::ptr::copy_nonoverlapping(buf.as_ptr(), vec.as_mut_ptr() as *mut u8, byte_len);
+        core::ptr::copy_nonoverlapping(buf.as_ptr(), vec.as_mut_ptr() as *mut u8, byte_len);
         vec.set_len(len);
     }
     *buf = &buf[byte_len..];
@@ -185,7 +186,7 @@ impl Snapshot for String {
 
     fn decode(buf: &mut &[u8]) -> Self {
         let len = u32::decode(buf) as usize;
-        let s = std::str::from_utf8(&buf[..len]).unwrap().to_owned();
+        let s = core::str::from_utf8(&buf[..len]).unwrap().to_owned();
         *buf = &buf[len..];
         s
     }
@@ -209,7 +210,7 @@ pub fn encode_slice<T: Snapshot>(slice: &[T], buf: &mut Vec<u8>) {
     }
 }
 
-impl<K: Snapshot + std::cmp::Ord, V: Snapshot> Snapshot for BTreeMap<K, V> {
+impl<K: Snapshot + core::cmp::Ord, V: Snapshot> Snapshot for BTreeMap<K, V> {
     fn encode(&self, buf: &mut Vec<u8>) {
         (self.len() as u32).encode(buf);
 

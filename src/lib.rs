@@ -1,4 +1,7 @@
+#![no_std]
 #![warn(clippy::nursery)]
+
+extern crate alloc;
 
 pub mod compiler;
 pub mod component;
@@ -8,6 +11,7 @@ pub mod leb128;
 mod linker;
 mod module;
 pub mod parser;
+mod prelude;
 pub mod runtime;
 pub mod snapshot;
 mod validator;

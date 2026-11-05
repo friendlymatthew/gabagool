@@ -1,6 +1,7 @@
 #![allow(unused)]
+use crate::prelude::*;
 
-use std::collections::BTreeSet;
+use alloc::collections::BTreeSet;
 
 use crate::{
     bail_validation, ensure_validation, AddrType, BlockType, CompositeType, DataSegment, Error,
@@ -670,7 +671,7 @@ impl<'a> Validator<'a> {
     fn block_type(&self, bt: &'a BlockType) -> Result<(&'a [ValueType], &'a [ValueType])> {
         match bt {
             BlockType::Empty => Ok((&[], &[])),
-            BlockType::SingleValue(value_type) => Ok((&[], std::slice::from_ref(value_type))),
+            BlockType::SingleValue(value_type) => Ok((&[], core::slice::from_ref(value_type))),
             BlockType::TypeIndex(i) => {
                 let i = u32::try_from(*i).map_err(|_| Error::validation("invalid block index"))?;
                 let ft = self.func_type(i)?;
@@ -2275,7 +2276,7 @@ mod tests {
 
         // index 0 is the import, index 1 is the caller itself
         assert!(validate_with_funcs(
-            std::slice::from_ref(&imported),
+            core::slice::from_ref(&imported),
             &[func_type(NONE, I64)],
             vec![Instruction::Call(0)]
         )
@@ -2505,7 +2506,8 @@ mod tests {
         // the condition is on top of the param
         let ordered = vec![Instruction::I64Const(1), Instruction::I32Const(1), if_()];
         assert!(
-            validate_body_with_types(std::slice::from_ref(&i64_to_i64), NONE, I64, ordered).is_ok()
+            validate_body_with_types(core::slice::from_ref(&i64_to_i64), NONE, I64, ordered)
+                .is_ok()
         );
 
         let swapped = vec![Instruction::I32Const(1), Instruction::I64Const(1), if_()];
@@ -2612,7 +2614,7 @@ mod tests {
             ),
         ];
         assert!(
-            validate_body_with_types(std::slice::from_ref(&i32_to_none), NONE, NONE, ok).is_ok()
+            validate_body_with_types(core::slice::from_ref(&i32_to_none), NONE, NONE, ok).is_ok()
         );
 
         let missing = vec![
@@ -3292,7 +3294,7 @@ mod tests {
         assert!(validate_body_with_tables(
             &[],
             &[funcref_table()],
-            std::slice::from_ref(&callee),
+            core::slice::from_ref(&callee),
             NONE,
             ordered
         )
@@ -3380,7 +3382,7 @@ mod tests {
 
         let ok = vec![Instruction::I32Const(0), Instruction::CallIndirect(1, 0)];
         assert!(
-            validate_body_with_tables(&[], &tables, std::slice::from_ref(&callee), NONE, ok)
+            validate_body_with_tables(&[], &tables, core::slice::from_ref(&callee), NONE, ok)
                 .is_ok()
         );
 
@@ -3459,7 +3461,7 @@ mod tests {
             let result = validate_body_with_tables(
                 &imported,
                 &defined,
-                std::slice::from_ref(&callee),
+                core::slice::from_ref(&callee),
                 NONE,
                 body,
             );

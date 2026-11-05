@@ -1,4 +1,5 @@
 use crate::module::{FunctionType, GlobalType, RefType, TableType};
+use crate::prelude::*;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

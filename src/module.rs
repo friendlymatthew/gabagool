@@ -1,4 +1,5 @@
 use crate::component::ParsedComponent;
+use crate::prelude::*;
 // use crate::validator::Validator;
 use crate::{
     bail_parse,
@@ -6,7 +7,7 @@ use crate::{
     parser::Parser,
     Result,
 };
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 /// A parsed and compiled WASM module ready to be instantiated
 #[derive(Debug)]
@@ -146,17 +147,17 @@ impl From<AddrType> for ValueType {
 }
 
 impl Ord for AddrType {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         match (self, other) {
-            (Self::I64, Self::I32) => std::cmp::Ordering::Greater,
-            (Self::I32, Self::I64) => std::cmp::Ordering::Less,
-            _ => std::cmp::Ordering::Equal,
+            (Self::I64, Self::I32) => core::cmp::Ordering::Greater,
+            (Self::I32, Self::I64) => core::cmp::Ordering::Less,
+            _ => core::cmp::Ordering::Equal,
         }
     }
 }
 
-impl std::cmp::PartialOrd for AddrType {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+impl core::cmp::PartialOrd for AddrType {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }

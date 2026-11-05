@@ -1,8 +1,9 @@
-use std::{array::TryFromSliceError, fmt, str::Utf8Error};
+use crate::prelude::*;
+use core::{array::TryFromSliceError, fmt, str::Utf8Error};
 
 use crate::runtime::RawValue;
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trap {
@@ -83,7 +84,7 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 impl From<Trap> for Error {
     fn from(trap: Trap) -> Self {

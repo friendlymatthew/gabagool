@@ -1,5 +1,6 @@
 use crate::module::{ImportDeclaration, ImportDescription, ParsedModule, SubType};
 use crate::parser::Parser;
+use crate::prelude::*;
 use crate::{bail_parse, flatten, Error, Result};
 
 #[derive(Debug)]

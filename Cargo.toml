@@ -8,6 +8,7 @@ authors = ["friendlymatthew"]
 license = "Apache-2.0"
 
 [dependencies]
+libm = "0.2.16"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.183"

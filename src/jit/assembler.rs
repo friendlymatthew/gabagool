@@ -1,4 +1,5 @@
-use std::mem;
+use crate::prelude::*;
+use core::mem;
 
 use crate::{
     ir::Op,

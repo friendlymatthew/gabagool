@@ -287,6 +287,7 @@ dependencies = [
  "criterion",
  "insta",
  "libc",
+ "libm",
  "object",
  "wasmi",
  "wast 245.0.1",

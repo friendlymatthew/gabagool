@@ -1,6 +1,7 @@
 use crate::module::{HeapType, ValueType};
+use crate::prelude::*;
 
-const _: () = assert!(std::mem::size_of::<Op>() <= 16);
+const _: () = assert!(core::mem::size_of::<Op>() <= 16);
 
 #[derive(Debug, Clone, Copy)]
 pub struct JumpTableEntry {
