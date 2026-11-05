@@ -27,8 +27,8 @@ pub(super) fn args_sizes_get<O: WasiOutput>(
     mut caller: Caller<'_, WasiCtx<O>>,
     args: &[RawValue],
 ) -> HostOutcome {
-    let num_args_guest_address = args[0].as_i32() as u32 as usize;
-    let total_string_buffer_guest_address = args[1].as_i32() as u32 as usize;
+    let num_args_guest_address = args[0].as_pointer();
+    let total_string_buffer_guest_address = args[1].as_pointer();
 
     let (store, instance, ctx) = caller.parts_mut();
     let Some(addr) = store.exports(instance).iter().find_map(|export| {
@@ -75,9 +75,9 @@ pub(super) fn fd_write<O: WasiOutput>(
     args: &[RawValue],
 ) -> HostOutcome {
     let fd = args[0].as_i32() as u32;
-    let iovs_ptr = args[1].as_i32() as u32 as usize;
-    let iovs_len = args[2].as_i32() as u32 as usize;
-    let nwritten_ptr = args[3].as_i32() as u32 as usize;
+    let iovs_ptr = args[1].as_pointer();
+    let iovs_len = args[2].as_pointer();
+    let nwritten_ptr = args[3].as_pointer();
 
     if fd != 1 {
         return errno(BADF);
