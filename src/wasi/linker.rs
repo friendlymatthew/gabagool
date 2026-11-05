@@ -24,6 +24,7 @@ pub fn add_wasip1_to_linker<O: WasiOutput + 'static>(l: &mut Linker<WasiCtx<O>>)
     register_wasi!(l, fd_write, [I32, I32, I32, I32], [I32]);
     register_wasi!(l, args_sizes_get, [I32, I32], [I32]);
     register_wasi!(l, args_get, [I32, I32], [I32]);
+    register_wasi!(l, environ_sizes_get, [I32, I32], [I32]);
 
     Ok(())
 }

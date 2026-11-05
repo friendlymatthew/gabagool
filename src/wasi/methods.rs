@@ -34,7 +34,43 @@ macro_rules! wasi_try {
     };
 }
 
-pub(super) fn proc_exit<O: WasiOutput>(
+pub(super) fn environ_sizes_get<O: WasiOutput>(
+    mut caller: Caller<'_, WasiCtx<O>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let num_envs_guest_address = args[0].as_pointer();
+    let total_string_buffer_guest_address = args[1].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let envs = ctx.environment();
+    let num_envs = wasi_try!(u32::try_from(envs.len()), OVERFLOW);
+
+    let total_string_output = envs.iter().try_fold(0u32, |total, env| {
+        let len = u32::try_from(env.len()).ok()?;
+        total.checked_add(len)?.checked_add(1)
+    });
+
+    let total_string_output = wasi_some!(total_string_output, OVERFLOW);
+
+    wasi_try!(
+        memory.write(num_envs_guest_address, num_envs.to_le_bytes()),
+        FAULT
+    );
+
+    wasi_try!(
+        memory.write(
+            total_string_buffer_guest_address,
+            total_string_output.to_le_bytes(),
+        ),
+        FAULT
+    );
+
+    errno(SUCCESS)
+}
+
+pub(super) const fn proc_exit<O: WasiOutput>(
     _: Caller<'_, WasiCtx<O>>,
     args: &[RawValue],
 ) -> HostOutcome {
