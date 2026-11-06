@@ -9,6 +9,7 @@ use crate::{
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 pub const RIGHTS_FD_READ: u64 = 1 << 1;
 pub const RIGHTS_FD_ADVISE: u64 = 1 << 7;
+pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
 
 pub const STDIN_FD: u32 = 0;
 pub const STDOUT_FD: u32 = 1;
@@ -179,6 +180,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_advise(&self) -> bool {
         self.rights_base & RIGHTS_FD_ADVISE != 0
+    }
+
+    pub const fn can_datasync(&self) -> bool {
+        self.rights_base & RIGHTS_FD_DATASYNC != 0
     }
 }
 

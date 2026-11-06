@@ -10,6 +10,7 @@ pub enum WasiIOError {
     Io,
     Interrupted,
     WouldBlock,
+    Unsupported,
 }
 
 impl WasiOutput for Vec<u8> {
@@ -21,6 +22,10 @@ impl WasiOutput for Vec<u8> {
 
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
+
+    fn datasync(&mut self) -> Result<(), WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
 
     fn output_mut(&mut self) -> Option<&mut dyn WasiOutput> {
         None
