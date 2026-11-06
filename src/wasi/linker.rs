@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use crate::{FunctionType, Linker, Result, ValueType};
 
-use super::{WasiCtx, WasiOutput};
+use super::{WasiCtx, WasiResource};
 
 const WASI_MODULE_NAME: &str = "wasi_snapshot_preview1";
 
@@ -19,13 +19,14 @@ macro_rules! register_wasi {
     };
 }
 
-pub fn add_wasip1_to_linker<O: WasiOutput + 'static>(l: &mut Linker<WasiCtx<O>>) -> Result<()> {
+pub fn add_wasip1_to_linker<R: WasiResource + 'static>(l: &mut Linker<WasiCtx<R>>) -> Result<()> {
     register_wasi!(l, proc_exit, [I32], []);
     register_wasi!(l, fd_write, [I32, I32, I32, I32], [I32]);
     register_wasi!(l, args_sizes_get, [I32, I32], [I32]);
     register_wasi!(l, args_get, [I32, I32], [I32]);
     register_wasi!(l, environ_sizes_get, [I32, I32], [I32]);
     register_wasi!(l, environ_get, [I32, I32], [I32]);
+    register_wasi!(l, fd_fdstat_get, [I32, I32], [I32]);
 
     Ok(())
 }

@@ -2,7 +2,7 @@ use crate::{
     prelude::*, Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
-use super::{OutputError, WasiCtx, WasiOutput};
+use super::{OutputError, WasiCtx, WasiResource, RIGHTS_FD_WRITE};
 
 const SUCCESS: i32 = 0;
 const AGAIN: i32 = 6;
@@ -11,10 +11,7 @@ const FAULT: i32 = 21;
 const INTR: i32 = 27;
 const IO: i32 = 29;
 const OVERFLOW: i32 = 61;
-
-fn errno(code: i32) -> HostOutcome {
-    HostOutcome::Return(vec![RawValue::from(code)])
-}
+const NOTCAPABLE: i32 = 76;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -34,8 +31,30 @@ macro_rules! wasi_try {
     };
 }
 
-pub(super) fn environ_get<O: WasiOutput>(
-    mut caller: Caller<'_, WasiCtx<O>>,
+pub(super) fn fd_fdstat_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let addr = args[1].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
+
+    let mut buf = [0u8; 24];
+    buf[0] = entry.resource.file_type() as u8;
+    buf[2..4].copy_from_slice(&entry.flags.to_le_bytes());
+    buf[8..16].copy_from_slice(&entry.rights_base.to_le_bytes());
+    buf[16..24].copy_from_slice(&entry.rights_inheriting.to_le_bytes());
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+    wasi_try!(memory.write_bytes(addr, &buf), FAULT);
+
+    errno(SUCCESS)
+}
+
+pub(super) fn environ_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
 ) -> HostOutcome {
     let (store, instance, ctx) = caller.parts_mut();
@@ -49,8 +68,8 @@ pub(super) fn environ_get<O: WasiOutput>(
     )
 }
 
-pub(super) fn environ_sizes_get<O: WasiOutput>(
-    mut caller: Caller<'_, WasiCtx<O>>,
+pub(super) fn environ_sizes_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
 ) -> HostOutcome {
     let (store, instance, ctx) = caller.parts_mut();
@@ -64,8 +83,8 @@ pub(super) fn environ_sizes_get<O: WasiOutput>(
     )
 }
 
-pub(super) fn args_get<O: WasiOutput>(
-    mut caller: Caller<'_, WasiCtx<O>>,
+pub(super) fn args_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
 ) -> HostOutcome {
     let (store, instance, ctx) = caller.parts_mut();
@@ -79,8 +98,8 @@ pub(super) fn args_get<O: WasiOutput>(
     )
 }
 
-pub(super) fn args_sizes_get<O: WasiOutput>(
-    mut caller: Caller<'_, WasiCtx<O>>,
+pub(super) fn args_sizes_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
 ) -> HostOutcome {
     let (store, instance, ctx) = caller.parts_mut();
@@ -94,8 +113,8 @@ pub(super) fn args_sizes_get<O: WasiOutput>(
     )
 }
 
-pub(super) const fn proc_exit<O: WasiOutput>(
-    _: Caller<'_, WasiCtx<O>>,
+pub(super) const fn proc_exit<R: WasiResource>(
+    _: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
 ) -> HostOutcome {
     HostOutcome::Exit(args[0].as_i32() as u32)
@@ -160,8 +179,8 @@ fn string_list_get(
     errno(SUCCESS)
 }
 
-pub(super) fn fd_write<O: WasiOutput>(
-    mut caller: Caller<'_, WasiCtx<O>>,
+pub(super) fn fd_write<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
 ) -> HostOutcome {
     let fd = args[0].as_i32() as u32;
@@ -169,12 +188,14 @@ pub(super) fn fd_write<O: WasiOutput>(
     let iovs_len = args[2].as_pointer();
     let nwritten_ptr = args[3].as_pointer();
 
-    if fd != 1 {
-        return errno(BADF);
-    }
-
     let (store, instance, ctx) = caller.parts_mut();
     let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+    if entry.rights_base & RIGHTS_FD_WRITE == 0 {
+        return errno(NOTCAPABLE);
+    }
+    let output = wasi_some!(entry.resource.output_mut(), BADF);
 
     // Validate all buffers before output, then borrow their bytes directly.
     // The output context is borrowed independently from guest memory.
@@ -208,7 +229,7 @@ pub(super) fn fd_write<O: WasiOutput>(
 
     let mut written = 0u32;
     for bytes in buffers {
-        match ctx.stdout_mut().write(bytes) {
+        match output.write(bytes) {
             Ok(bytes_written) if bytes_written <= bytes.len() => {
                 written += bytes_written as u32;
                 if bytes_written < bytes.len() {
@@ -247,4 +268,8 @@ fn guest_memory(store: &mut Store, instance: Instance) -> Option<&mut GuestMemor
             None
         })
         .map(|addr| &mut store.memories[addr].data)
+}
+
+fn errno(code: i32) -> HostOutcome {
+    HostOutcome::Return(vec![RawValue::from(code)])
 }
