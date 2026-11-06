@@ -42,6 +42,41 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_tell<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let position_ptr = args[1].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_tell() {
+        return errno(NOTCAPABLE);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.read_bytes(position_ptr, 8), FAULT);
+
+    let position = match entry.resource.tell() {
+        Ok(position) => position,
+        Err(error) => {
+            return errno(match error {
+                SeekError::Unsupported => SPIPE,
+                SeekError::InvalidOffset => INVAL,
+                SeekError::Overflow => OVERFLOW,
+                SeekError::Io => IO,
+            })
+        }
+    };
+
+    wasi_try!(memory.write(position_ptr, position.to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_seek<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
