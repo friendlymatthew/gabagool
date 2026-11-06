@@ -31,6 +31,7 @@ const EXIST: i32 = 20;
 const ILSEQ: i32 = 25;
 const NOENT: i32 = 44;
 const XDEV: i32 = 75;
+const NOTEMPTY: i32 = 55;
 const MFILE: i32 = 33;
 
 macro_rules! wasi_some {
@@ -210,7 +211,7 @@ pub(super) fn path_link<R: WasiResource>(
     let new_ptr = args[5].as_pointer();
     let new_len = args[6].as_i32() as u32 as usize;
 
-    if flags & !super::LOOKUPFLAGS_SYMLINK_FOLLOW != 0 {
+    if flags & !LOOKUPFLAGS_SYMLINK_FOLLOW != 0 {
         return errno(INVAL);
     }
 
@@ -424,6 +425,37 @@ pub(super) fn path_create_directory<R: WasiResource>(
     })
 }
 
+pub(super) fn path_remove_directory<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let path_ptr = args[1].as_pointer();
+    let path_len = args[2].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_remove_directory() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    errno(match entry.resource.remove_directory(path) {
+        Ok(()) => SUCCESS,
+        Err(error) => path_errno(error),
+    })
+}
+
 fn guest_path(memory: &GuestMemory, ptr: usize, len: usize) -> core::result::Result<&str, i32> {
     let bytes = memory.read_bytes(ptr, len).map_err(|_| FAULT)?;
     let path = core::str::from_utf8(bytes).map_err(|_| ILSEQ)?;
@@ -451,6 +483,7 @@ const fn path_errno(error: PathError) -> i32 {
         PathError::NotCapable => NOTCAPABLE,
         PathError::InvalidInput => INVAL,
         PathError::CrossDevice => XDEV,
+        PathError::NotEmpty => NOTEMPTY,
     }
 }
 
@@ -611,7 +644,7 @@ pub(super) fn fd_prestat_dir_name<R: WasiResource>(
     let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
     let name = wasi_some!(entry.preopen_name.as_ref(), BADF);
 
-    if !matches!(entry.resource.file_type(), super::FileType::Directory) {
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
         return errno(BADF);
     }
 
@@ -637,7 +670,7 @@ pub(super) fn fd_prestat_get<R: WasiResource>(
     let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
     let name = wasi_some!(entry.preopen_name.as_ref(), BADF);
 
-    if !matches!(entry.resource.file_type(), super::FileType::Directory) {
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
         return errno(BADF);
     }
 

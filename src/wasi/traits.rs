@@ -45,6 +45,7 @@ pub enum PathError {
     NotCapable,
     InvalidInput,
     CrossDevice,
+    NotEmpty,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +91,10 @@ pub trait WasiResource {
     }
 
     fn create_directory(&mut self, _path: &str) -> Result<(), PathError> {
+        Err(PathError::Unsupported)
+    }
+
+    fn remove_directory(&mut self, _path: &str) -> Result<(), PathError> {
         Err(PathError::Unsupported)
     }
 
