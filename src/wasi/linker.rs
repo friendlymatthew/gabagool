@@ -47,6 +47,12 @@ pub fn add_wasip1_to_linker<R: WasiResource + 'static>(l: &mut Linker<WasiCtx<R>
     register_wasi!(l, fd_seek, [I32, I64, I32, I32], [I32]);
     register_wasi!(l, fd_sync, [I32], [I32]);
     register_wasi!(l, fd_tell, [I32, I32], [I32]);
+    register_wasi!(l, poll_oneoff, [I32, I32, I32, I32], [I32]);
+    register_wasi!(l, sched_yield, [], [I32]);
+    register_wasi!(l, sock_accept, [I32, I32, I32], [I32]);
+    register_wasi!(l, sock_recv, [I32, I32, I32, I32, I32, I32], [I32]);
+    register_wasi!(l, sock_send, [I32, I32, I32, I32, I32], [I32]);
+    register_wasi!(l, sock_shutdown, [I32, I32], [I32]);
     register_wasi!(l, path_create_directory, [I32, I32, I32], [I32]);
     register_wasi!(l, path_remove_directory, [I32, I32, I32], [I32]);
     register_wasi!(l, path_unlink_file, [I32, I32, I32], [I32]);

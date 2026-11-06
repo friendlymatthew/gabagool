@@ -34,6 +34,7 @@ const NOENT: i32 = 44;
 const XDEV: i32 = 75;
 const NOTEMPTY: i32 = 55;
 const MFILE: i32 = 33;
+const NOSYS: i32 = 52;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -51,6 +52,54 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn sched_yield<R: WasiResource>(
+    _caller: Caller<'_, WasiCtx<R>>,
+    _args: &[RawValue],
+) -> HostOutcome {
+    // todo: provide a host scheduling hook
+    errno(NOSYS)
+}
+
+pub(super) fn sock_accept<R: WasiResource>(
+    _caller: Caller<'_, WasiCtx<R>>,
+    _args: &[RawValue],
+) -> HostOutcome {
+    // todo: implement socket accept support
+    errno(NOTSUP)
+}
+
+pub(super) fn sock_recv<R: WasiResource>(
+    _caller: Caller<'_, WasiCtx<R>>,
+    _args: &[RawValue],
+) -> HostOutcome {
+    // todo: implement socket receive support
+    errno(NOTSUP)
+}
+
+pub(super) fn sock_send<R: WasiResource>(
+    _caller: Caller<'_, WasiCtx<R>>,
+    _args: &[RawValue],
+) -> HostOutcome {
+    // todo: implement socket send support
+    errno(NOTSUP)
+}
+
+pub(super) fn sock_shutdown<R: WasiResource>(
+    _caller: Caller<'_, WasiCtx<R>>,
+    _args: &[RawValue],
+) -> HostOutcome {
+    // todo: implement socket shutdown support
+    errno(NOTSUP)
+}
+
+pub(super) fn poll_oneoff<R: WasiResource>(
+    _caller: Caller<'_, WasiCtx<R>>,
+    _args: &[RawValue],
+) -> HostOutcome {
+    // todo: implement clock and descriptor readiness polling
+    errno(NOSYS)
 }
 
 pub(super) fn path_symlink<R: WasiResource>(
