@@ -16,3 +16,6 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 [[bench]]
 name = "aoc"
 harness = false
+
+[profile.release]
+debug = true

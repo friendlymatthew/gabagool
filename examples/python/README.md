@@ -16,4 +16,8 @@ cargo r --release -- /aoc/day1_1.py
 
 # benchmark aoc problems (both python and gabagool)
 cargo bench --bench aoc
+
+# profile aoc problems 
+cargo b --release
+samply record ./target/release/python aoc/day7_1.py
 ```
