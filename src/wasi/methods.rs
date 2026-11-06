@@ -20,6 +20,7 @@ const OVERFLOW: i32 = 61;
 const NOTCAPABLE: i32 = 76;
 const INVAL: i32 = 28;
 const NOTSUP: i32 = 58;
+const NAMETOOLONG: i32 = 37;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -37,6 +38,34 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn fd_prestat_dir_name<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let path_ptr = args[1].as_pointer();
+    let path_len = args[2].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
+    let name = wasi_some!(entry.preopen_name.as_ref(), BADF);
+
+    if !matches!(entry.resource.file_type(), super::FileType::Directory) {
+        return errno(BADF);
+    }
+
+    if name.len() > path_len {
+        return errno(NAMETOOLONG);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.write_bytes(path_ptr, name), FAULT);
+
+    errno(SUCCESS)
 }
 
 pub(super) fn fd_prestat_get<R: WasiResource>(
