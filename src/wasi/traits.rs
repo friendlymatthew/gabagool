@@ -93,6 +93,10 @@ pub trait WasiResource {
         Err(PathError::Unsupported)
     }
 
+    fn read_link(&mut self, _path: &str) -> Result<Vec<u8>, PathError> {
+        Err(PathError::Unsupported)
+    }
+
     fn path_filestat(&mut self, _path: &str, _follow_symlink: bool) -> Result<Filestat, PathError> {
         Err(PathError::Unsupported)
     }

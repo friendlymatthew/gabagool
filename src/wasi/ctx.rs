@@ -21,6 +21,7 @@ pub const RIGHTS_FD_FILESTAT_SET_TIMES: u64 = 1 << 23;
 pub const RIGHTS_PATH_CREATE_DIRECTORY: u64 = 1 << 9;
 pub const RIGHTS_PATH_CREATE_FILE: u64 = 1 << 10;
 pub const RIGHTS_PATH_OPEN: u64 = 1 << 13;
+pub const RIGHTS_PATH_READLINK: u64 = 1 << 15;
 pub const RIGHTS_PATH_FILESTAT_SET_SIZE: u64 = 1 << 19;
 
 pub const OFLAGS_CREAT: u16 = 1 << 0;
@@ -234,6 +235,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_open(&self) -> bool {
         self.rights_base & RIGHTS_PATH_OPEN != 0
+    }
+
+    pub const fn can_readlink(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_READLINK != 0
     }
 
     pub const fn can_link_source(&self) -> bool {

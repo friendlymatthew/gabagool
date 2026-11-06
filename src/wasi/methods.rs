@@ -51,6 +51,52 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn path_readlink<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let path_ptr = args[1].as_pointer();
+    let path_len = args[2].as_i32() as u32 as usize;
+    let buf_ptr = args[3].as_pointer();
+    let buf_len = args[4].as_i32() as u32 as usize;
+    let used_ptr = args[5].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_readlink() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.read_bytes(buf_ptr, buf_len), FAULT);
+    wasi_try!(memory.read_bytes(used_ptr, 4), FAULT);
+
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let target = match entry.resource.read_link(path) {
+        Ok(target) => target,
+        Err(error) => return errno(path_errno(error)),
+    };
+
+    let copied = target.len().min(buf_len);
+
+    wasi_try!(memory.write_bytes(buf_ptr, &target[..copied]), FAULT);
+    wasi_try!(memory.write(used_ptr, (copied as u32).to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn path_open<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
