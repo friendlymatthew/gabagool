@@ -8,8 +8,8 @@ use std::{
 };
 
 use gabagool::{
-    wasi::{self, STDERR_FD, STDOUT_FD},
     ExecutionState, Linker, Module, Store,
+    wasi::{self, STDERR_FD, STDOUT_FD},
 };
 
 mod filesystem;
@@ -73,7 +73,8 @@ fn run() -> Result<i32, Box<dyn Error>> {
         .ok_or("interpreter path has no parent")?
         .join("lib");
 
-    let mut ctx = filesystem::context(&stdlib)?;
+    let aoc = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aoc");
+    let mut ctx = filesystem::context(&stdlib, &aoc)?;
     ctx.set_random(random::OsRandom);
     ctx.args_mut().push("python".into());
     ctx.args_mut().extend(python_args);

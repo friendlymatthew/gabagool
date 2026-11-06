@@ -9,11 +9,11 @@ use cap_fs_ext::{
 };
 use cap_std::fs::{Dir, File, Metadata};
 use gabagool::wasi::{
-    DirectoryEntry, FdEntry, FileType, Filestat, MemoryInput, MemoryResource, OpenOptions,
-    PathError, SeekError, SeekFrom, WasiCtx, WasiIOError, WasiInput, WasiOutput, WasiResource,
-    FDFLAGS_NONBLOCK, RIGHTS_FD_ADVISE, RIGHTS_FD_DATASYNC, RIGHTS_FD_FDSTAT_SET_FLAGS,
+    DirectoryEntry, FDFLAGS_NONBLOCK, FdEntry, FileType, Filestat, MemoryInput, MemoryResource,
+    OpenOptions, PathError, RIGHTS_FD_ADVISE, RIGHTS_FD_DATASYNC, RIGHTS_FD_FDSTAT_SET_FLAGS,
     RIGHTS_FD_FILESTAT_GET, RIGHTS_FD_READ, RIGHTS_FD_READDIR, RIGHTS_FD_SEEK, RIGHTS_FD_SYNC,
-    RIGHTS_FD_TELL, RIGHTS_PATH_FILESTAT_GET, RIGHTS_PATH_OPEN,
+    RIGHTS_FD_TELL, RIGHTS_PATH_FILESTAT_GET, RIGHTS_PATH_OPEN, SeekError, SeekFrom, WasiCtx,
+    WasiIOError, WasiInput, WasiOutput, WasiResource,
 };
 
 const DIRECTORY_RIGHTS: u64 =
@@ -307,25 +307,26 @@ fn path_error(error: io::Error) -> PathError {
     }
 }
 
-pub fn context(stdlib: &Path) -> io::Result<WasiCtx<Resource>> {
-    let dir = Dir::open_ambient_dir(stdlib, cap_std::ambient_authority())?;
-
+pub fn context(stdlib: &Path, aoc: &Path) -> io::Result<WasiCtx<Resource>> {
     let mut ctx = WasiCtx::new(
         Resource::Stream(MemoryResource::Input(MemoryInput::new(Vec::new()))),
         Resource::Stream(MemoryResource::Output(Vec::new())),
         Resource::Stream(MemoryResource::Output(Vec::new())),
     );
 
-    ctx.descriptors_mut().insert(
-        3,
-        FdEntry {
-            resource: Resource::Directory(Directory::new(dir)),
-            flags: 0,
-            rights_base: DIRECTORY_RIGHTS,
-            rights_inheriting: DIRECTORY_RIGHTS | FILE_RIGHTS,
-            preopen_name: Some(b"/python/lib".to_vec()),
-        },
-    );
+    for (fd, host, guest) in [(3, stdlib, "/python/lib"), (4, aoc, "/aoc")] {
+        let dir = Dir::open_ambient_dir(host, cap_std::ambient_authority())?;
+        ctx.descriptors_mut().insert(
+            fd,
+            FdEntry {
+                resource: Resource::Directory(Directory::new(dir)),
+                flags: 0,
+                rights_base: DIRECTORY_RIGHTS,
+                rights_inheriting: DIRECTORY_RIGHTS | FILE_RIGHTS,
+                preopen_name: Some(guest.as_bytes().to_vec()),
+            },
+        );
+    }
 
     ctx.environment_mut().extend([
         "PYTHONHOME=/python".into(),
