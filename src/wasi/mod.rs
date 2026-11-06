@@ -34,6 +34,7 @@ pub use ctx::{RIGHTS_FD_SEEK, RIGHTS_FD_TELL};
 pub use ctx::{RIGHTS_PATH_LINK_SOURCE, RIGHTS_PATH_LINK_TARGET};
 pub use ctx::{RIGHTS_PATH_RENAME_SOURCE, RIGHTS_PATH_RENAME_TARGET};
 pub use linker::*;
+pub use ctx::{DirectoryEntry, Filestat};
 pub use memory::{MemoryInput, MemoryResource};
 pub use traits::{
     OpenOptions, PathError, SeekError, SeekFrom, WasiIOError, WasiInput, WasiOutput, WasiResource,

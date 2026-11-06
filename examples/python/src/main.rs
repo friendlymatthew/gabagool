@@ -4,27 +4,26 @@ use std::{
     fs,
     io::{self, Write},
     path::PathBuf,
-    process,
-    thread,
+    process, thread,
 };
 
 use gabagool::{
-    wasi::{self, WasiCtx},
+    wasi::{self, STDERR_FD, STDOUT_FD},
     ExecutionState, Linker, Module, Store,
 };
 
+mod filesystem;
+mod random;
+
 fn main() {
-    // Loading CPython needs more native stack in debug builds than the
-    // platform's default main thread provides. Construct and use the runtime
-    // on this thread; its host callbacks do not need to be Send.
+    // loading python overflowed the main thread's stack lol
+    // here's a separate thread that uses a larger stack
     let outcome = thread::Builder::new()
         .name("python-runner".into())
         .stack_size(32 * 1024 * 1024)
         .spawn(|| run().map_err(|error| error.to_string()))
-        .map_err(|error| format!("cannot start Python runner: {error}"))
-        .and_then(|worker| {
-            worker.join().map_err(|_| "Python runner panicked".to_owned())
-        })
+        .map_err(|e| format!("cannot start runner: {e}"))
+        .and_then(|worker| worker.join().map_err(|_| "runner panicked".to_owned()))
         .and_then(|result| result);
 
     match outcome {
@@ -47,15 +46,17 @@ fn run() -> Result<i32, Box<dyn Error>> {
     }
 
     let mut python_args = arguments.collect::<Vec<_>>();
+
     if python_args.is_empty() {
+        println!("no arguments provided: printing hello...");
         python_args = vec!["-c".into(), "print('hello')".into()];
     }
 
-    let bytes = fs::read(&wasm_path).map_err(|error| {
+    let bytes = fs::read(&wasm_path).map_err(|e| {
         io::Error::new(
-            error.kind(),
+            e.kind(),
             format!(
-                "cannot read {}: {error}; run sh examples/python/download.sh first",
+                "cannot read {}: {e}; run sh examples/python/download.sh first",
                 wasm_path.display(),
             ),
         )
@@ -67,7 +68,13 @@ fn run() -> Result<i32, Box<dyn Error>> {
     let mut linker = Linker::new();
     wasi::add_wasip1_to_linker(&mut linker)?;
 
-    let mut ctx = WasiCtx::default();
+    let stdlib = wasm_path
+        .parent()
+        .ok_or("interpreter path has no parent")?
+        .join("lib");
+
+    let mut ctx = filesystem::context(&stdlib)?;
+    ctx.set_random(random::OsRandom);
     ctx.args_mut().push("python".into());
     ctx.args_mut().extend(python_args);
 
@@ -75,17 +82,17 @@ fn run() -> Result<i32, Box<dyn Error>> {
     let outcome = linker.invoke_no_args(&mut store, &mut ctx, instance, "_start");
 
     let mut stdout = io::stdout().lock();
-    stdout.write_all(ctx.stdout().unwrap_or_default())?;
+    stdout.write_all(filesystem::captured_output(&ctx, STDOUT_FD))?;
     stdout.flush()?;
 
     let mut stderr = io::stderr().lock();
-    stderr.write_all(ctx.stderr().unwrap_or_default())?;
+    stderr.write_all(filesystem::captured_output(&ctx, STDERR_FD))?;
     stderr.flush()?;
 
     match outcome? {
         ExecutionState::Completed(_) => Ok(0),
         ExecutionState::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
-        ExecutionState::FuelExhausted => Err("Python execution exhausted its fuel".into()),
+        ExecutionState::FuelExhausted => Err("execution exhausted its fuel".into()),
         ExecutionState::Suspended {
             module_name,
             func_name,

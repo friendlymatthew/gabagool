@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 gabagool = { path = "../.." }
+getrandom = "0.4"
+cap-std = "4"
+cap-fs-ext = "4"
