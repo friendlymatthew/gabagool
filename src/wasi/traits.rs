@@ -80,6 +80,10 @@ pub trait WasiResource {
         Err(WasiIOError::Unsupported)
     }
 
+    fn sync(&mut self) -> Result<(), WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn set_fdflags(&mut self, _flags: u16) -> Result<(), WasiIOError> {
         Err(WasiIOError::Unsupported)
     }

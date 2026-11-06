@@ -486,6 +486,27 @@ pub(super) fn fd_fdstat_set_flags<R: WasiResource>(
     }
 }
 
+pub(super) fn fd_sync<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+
+    let entry = wasi_some!(caller.data_mut().descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_sync() {
+        return errno(NOTCAPABLE);
+    }
+
+    errno(match entry.resource.sync() {
+        Ok(()) => SUCCESS,
+        Err(WasiIOError::Io) => IO,
+        Err(WasiIOError::Interrupted) => INTR,
+        Err(WasiIOError::WouldBlock) => AGAIN,
+        Err(WasiIOError::Unsupported) => NOTSUP,
+    })
+}
+
 pub(super) fn fd_datasync<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],

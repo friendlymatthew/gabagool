@@ -13,6 +13,7 @@ pub const RIGHTS_FD_TELL: u64 = 1 << 5;
 pub const RIGHTS_FD_READDIR: u64 = 1 << 14;
 pub const RIGHTS_FD_ADVISE: u64 = 1 << 7;
 pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
+pub const RIGHTS_FD_SYNC: u64 = 1 << 4;
 pub const RIGHTS_FD_FDSTAT_SET_FLAGS: u64 = 1 << 3;
 pub const RIGHTS_FD_FILESTAT_GET: u64 = 1 << 21;
 pub const RIGHTS_FD_FILESTAT_SET_SIZE: u64 = 1 << 22;
@@ -230,6 +231,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_datasync(&self) -> bool {
         self.rights_base & RIGHTS_FD_DATASYNC != 0
+    }
+
+    pub const fn can_sync(&self) -> bool {
+        self.rights_base & RIGHTS_FD_SYNC != 0
     }
 
     pub const fn can_set_flags(&self) -> bool {
