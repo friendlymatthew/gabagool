@@ -34,6 +34,28 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_fdstat_set_rights<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let base_rights = args[1].as_i64() as u64;
+    let inherited_rights = args[2].as_i64() as u64;
+
+    let ctx = caller.data_mut();
+
+    let d = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if (base_rights & !d.rights_base) != 0 || (inherited_rights & !d.rights_inheriting) != 0 {
+        return errno(NOTCAPABLE);
+    }
+
+    d.rights_base = base_rights;
+    d.rights_inheriting = inherited_rights;
+
+    errno(SUCCESS)
+}
+
 pub(super) fn clock_res_get<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
