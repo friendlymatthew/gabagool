@@ -24,6 +24,7 @@ pub const RIGHTS_PATH_OPEN: u64 = 1 << 13;
 pub const RIGHTS_PATH_READLINK: u64 = 1 << 15;
 pub const RIGHTS_PATH_SYMLINK: u64 = 1 << 24;
 pub const RIGHTS_PATH_REMOVE_DIRECTORY: u64 = 1 << 25;
+pub const RIGHTS_PATH_UNLINK_FILE: u64 = 1 << 26;
 pub const RIGHTS_PATH_FILESTAT_SET_SIZE: u64 = 1 << 19;
 
 pub const OFLAGS_CREAT: u16 = 1 << 0;
@@ -239,6 +240,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_remove_directory(&self) -> bool {
         self.rights_base & RIGHTS_PATH_REMOVE_DIRECTORY != 0
+    }
+
+    pub const fn can_unlink_file(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_UNLINK_FILE != 0
     }
 
     pub const fn can_open(&self) -> bool {

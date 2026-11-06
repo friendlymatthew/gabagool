@@ -11,7 +11,7 @@ use crate::{
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
-use {PathError, SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
+use super::{PathError, SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
 
 const SUCCESS: i32 = 0;
 const AGAIN: i32 = 6;
@@ -545,6 +545,37 @@ pub(super) fn path_remove_directory<R: WasiResource>(
     };
 
     errno(match entry.resource.remove_directory(path) {
+        Ok(()) => SUCCESS,
+        Err(error) => path_errno(error),
+    })
+}
+
+pub(super) fn path_unlink_file<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let path_ptr = args[1].as_pointer();
+    let path_len = args[2].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_unlink_file() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    errno(match entry.resource.unlink_file(path) {
         Ok(()) => SUCCESS,
         Err(error) => path_errno(error),
     })
