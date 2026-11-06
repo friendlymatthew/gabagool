@@ -30,6 +30,10 @@ pub trait WasiResource {
         Err(WasiIOError::Unsupported)
     }
 
+    fn set_size(&mut self, _size: u64) -> Result<(), WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn datasync(&mut self) -> Result<(), WasiIOError> {
         Err(WasiIOError::Unsupported)
     }

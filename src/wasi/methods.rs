@@ -38,6 +38,26 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_filestat_set_size<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let size = args[1].as_i64() as u64;
+    let entry = wasi_some!(caller.data_mut().descriptors_mut().get_mut(&fd), BADF);
+    if !entry.can_filestat_set_size() {
+        return errno(NOTCAPABLE);
+    }
+
+    errno(match entry.resource.set_size(size) {
+        Ok(()) => SUCCESS,
+        Err(WasiIOError::Io) => IO,
+        Err(WasiIOError::Interrupted) => INTR,
+        Err(WasiIOError::WouldBlock) => AGAIN,
+        Err(WasiIOError::Unsupported) => NOTSUP,
+    })
+}
+
 pub(super) fn fd_filestat_get<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
