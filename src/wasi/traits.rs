@@ -34,6 +34,18 @@ pub enum SeekError {
     Io,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum PathError {
+    Io,
+    Unsupported,
+    NotFound,
+    AlreadyExists,
+    NotDirectory,
+    PermissionDenied,
+    NotCapable,
+    InvalidInput,
+}
+
 impl WasiOutput for Vec<u8> {
     fn write(&mut self, bytes: &[u8]) -> Result<usize, WasiIOError> {
         self.extend_from_slice(bytes);
@@ -43,6 +55,10 @@ impl WasiOutput for Vec<u8> {
 
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
+
+    fn create_directory(&mut self, _path: &str) -> Result<(), PathError> {
+        Err(PathError::Unsupported)
+    }
 
     fn seek(&mut self, _from: SeekFrom) -> Result<u64, SeekError> {
         Err(SeekError::Unsupported)

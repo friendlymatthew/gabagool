@@ -3,12 +3,12 @@ use crate::{
     wasi::{
         ctx::FDFLAGS_ALL,
         traits::{ClockError, ClockId},
-        FSTFLAGS_ATIM, FSTFLAGS_ATIM_NOW, FSTFLAGS_MTIM, FSTFLAGS_MTIM_NOW,
+        FileType, FSTFLAGS_ATIM, FSTFLAGS_ATIM_NOW, FSTFLAGS_MTIM, FSTFLAGS_MTIM_NOW,
     },
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
-use super::{SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
+use super::{PathError, SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
 
 const SUCCESS: i32 = 0;
 const AGAIN: i32 = 6;
@@ -23,6 +23,10 @@ const NOTSUP: i32 = 58;
 const NAMETOOLONG: i32 = 37;
 const NOTDIR: i32 = 54;
 const SPIPE: i32 = 70;
+const ACCES: i32 = 2;
+const EXIST: i32 = 20;
+const ILSEQ: i32 = 25;
+const NOENT: i32 = 44;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -40,6 +44,60 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn path_create_directory<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let path_ptr = args[1].as_pointer();
+    let path_len = args[2].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_create_directory() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+    let bytes = wasi_try!(memory.read_bytes(path_ptr, path_len), FAULT);
+    let path = wasi_try!(core::str::from_utf8(bytes), ILSEQ);
+
+    if path.is_empty() {
+        return errno(NOENT);
+    }
+
+    if path.as_bytes().contains(&0) {
+        return errno(INVAL);
+    }
+
+    if path.starts_with('/') {
+        return errno(NOTCAPABLE);
+    }
+
+    errno(match entry.resource.create_directory(path) {
+        Ok(()) => SUCCESS,
+        Err(error) => path_errno(error),
+    })
+}
+
+const fn path_errno(error: PathError) -> i32 {
+    match error {
+        PathError::Io => IO,
+        PathError::Unsupported => NOTSUP,
+        PathError::NotFound => NOENT,
+        PathError::AlreadyExists => EXIST,
+        PathError::NotDirectory => NOTDIR,
+        PathError::PermissionDenied => ACCES,
+        PathError::NotCapable => NOTCAPABLE,
+        PathError::InvalidInput => INVAL,
+    }
 }
 
 pub(super) fn fd_tell<R: WasiResource>(

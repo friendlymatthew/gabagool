@@ -6,6 +6,7 @@ pub mod traits;
 
 pub use ctx::RIGHTS_FD_READDIR;
 pub use ctx::RIGHTS_FD_SYNC;
+pub use ctx::RIGHTS_PATH_CREATE_DIRECTORY;
 pub use ctx::{
     FdEntry, FileType, WasiCtx, RIGHTS_FD_ADVISE, RIGHTS_FD_DATASYNC, RIGHTS_FD_READ,
     RIGHTS_FD_WRITE, STDERR_FD, STDIN_FD, STDOUT_FD,
@@ -22,4 +23,6 @@ pub use ctx::{RIGHTS_FD_FILESTAT_GET, RIGHTS_FD_FILESTAT_SET_SIZE};
 pub use ctx::{RIGHTS_FD_SEEK, RIGHTS_FD_TELL};
 pub use linker::*;
 pub use memory::{MemoryInput, MemoryResource};
-pub use traits::{SeekError, SeekFrom, WasiIOError, WasiInput, WasiOutput, WasiResource};
+pub use traits::{
+    PathError, SeekError, SeekFrom, WasiIOError, WasiInput, WasiOutput, WasiResource,
+};
