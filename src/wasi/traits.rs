@@ -64,6 +64,16 @@ pub trait WasiResource {
         Err(PathError::Unsupported)
     }
 
+    fn path_set_times(
+        &mut self,
+        _path: &str,
+        _follow_symlink: bool,
+        _atim: Option<u64>,
+        _mtim: Option<u64>,
+    ) -> Result<(), PathError> {
+        Err(PathError::Unsupported)
+    }
+
     fn seek(&mut self, _from: SeekFrom) -> Result<u64, SeekError> {
         Err(SeekError::Unsupported)
     }

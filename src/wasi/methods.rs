@@ -46,6 +46,102 @@ macro_rules! wasi_try {
     };
 }
 
+fn valid_timestamp_flags(flags: u32) -> bool {
+    let atim = u32::from(FSTFLAGS_ATIM | FSTFLAGS_ATIM_NOW);
+    let mtim = u32::from(FSTFLAGS_MTIM | FSTFLAGS_MTIM_NOW);
+    flags & !(atim | mtim) == 0 && flags & atim != atim && flags & mtim != mtim
+}
+
+fn timestamp_values<R>(
+    ctx: &mut WasiCtx<R>,
+    atim: u64,
+    mtim: u64,
+    flags: u32,
+) -> core::result::Result<(Option<u64>, Option<u64>), i32> {
+    let now = if flags & u32::from(FSTFLAGS_ATIM_NOW | FSTFLAGS_MTIM_NOW) != 0 {
+        ctx.clock_mut()
+            .now_nanos(ClockId::Realtime, 0)
+            .map_err(|error| match error {
+                ClockError::Unsupported => INVAL,
+                ClockError::Unavailable => IO,
+                ClockError::Overflow => OVERFLOW,
+            })?
+    } else {
+        0
+    };
+
+    let access = if flags & u32::from(FSTFLAGS_ATIM_NOW) != 0 {
+        Some(now)
+    } else if flags & u32::from(FSTFLAGS_ATIM) != 0 {
+        Some(atim)
+    } else {
+        None
+    };
+
+    let modified = if flags & u32::from(FSTFLAGS_MTIM_NOW) != 0 {
+        Some(now)
+    } else if flags & u32::from(FSTFLAGS_MTIM) != 0 {
+        Some(mtim)
+    } else {
+        None
+    };
+
+    Ok((access, modified))
+}
+
+pub(super) fn path_filestat_set_times<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let lookup_flags = args[1].as_i32() as u32;
+    let path_ptr = args[2].as_pointer();
+    let path_len = args[3].as_i32() as u32 as usize;
+    let atim = args[4].as_i64() as u64;
+    let mtim = args[5].as_i64() as u64;
+    let flags = args[6].as_i32() as u32;
+
+    if lookup_flags & !super::LOOKUPFLAGS_SYMLINK_FOLLOW != 0 || !valid_timestamp_flags(flags) {
+        return errno(INVAL);
+    }
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
+
+    if !entry.can_path_filestat_set_times() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let (access, modified) = match timestamp_values(ctx, atim, mtim, flags) {
+        Ok(times) => times,
+        Err(code) => return errno(code),
+    };
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    errno(
+        match entry
+            .resource
+            .path_set_times(path, lookup_flags != 0, access, modified)
+        {
+            Ok(()) => SUCCESS,
+            Err(error) => path_errno(error),
+        },
+    )
+}
+
 pub(super) fn path_filestat_get<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
@@ -486,13 +582,7 @@ pub(super) fn fd_filestat_set_times<R: WasiResource>(
     let mtim = args[2].as_i64() as u64;
     let flags = args[3].as_i32() as u32;
 
-    let atim_flags = u32::from(FSTFLAGS_ATIM | FSTFLAGS_ATIM_NOW);
-    let mtim_flags = u32::from(FSTFLAGS_MTIM | FSTFLAGS_MTIM_NOW);
-
-    if flags & !(atim_flags | mtim_flags) != 0
-        || flags & atim_flags == atim_flags
-        || flags & mtim_flags == mtim_flags
-    {
+    if !valid_timestamp_flags(flags) {
         return errno(INVAL);
     }
 
@@ -502,35 +592,9 @@ pub(super) fn fd_filestat_set_times<R: WasiResource>(
         return errno(NOTCAPABLE);
     }
 
-    let now = if flags & u32::from(FSTFLAGS_ATIM_NOW | FSTFLAGS_MTIM_NOW) != 0 {
-        match ctx.clock_mut().now_nanos(ClockId::Realtime, 0) {
-            Ok(now) => now,
-            Err(error) => {
-                return errno(match error {
-                    ClockError::Unsupported => INVAL,
-                    ClockError::Unavailable => IO,
-                    ClockError::Overflow => OVERFLOW,
-                })
-            }
-        }
-    } else {
-        0
-    };
-
-    let access = if flags & u32::from(FSTFLAGS_ATIM_NOW) != 0 {
-        Some(now)
-    } else if flags & u32::from(FSTFLAGS_ATIM) != 0 {
-        Some(atim)
-    } else {
-        None
-    };
-
-    let modified = if flags & u32::from(FSTFLAGS_MTIM_NOW) != 0 {
-        Some(now)
-    } else if flags & u32::from(FSTFLAGS_MTIM) != 0 {
-        Some(mtim)
-    } else {
-        None
+    let (access, modified) = match timestamp_values(ctx, atim, mtim, flags) {
+        Ok(times) => times,
+        Err(code) => return errno(code),
     };
 
     let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
