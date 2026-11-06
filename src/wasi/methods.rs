@@ -46,6 +46,51 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn path_filestat_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let flags = args[1].as_i32() as u32;
+    let path_ptr = args[2].as_pointer();
+    let path_len = args[3].as_i32() as u32 as usize;
+    let stat_ptr = args[4].as_pointer();
+
+    if flags & !super::LOOKUPFLAGS_SYMLINK_FOLLOW != 0 {
+        return errno(INVAL);
+    }
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_path_filestat_get() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.read_bytes(stat_ptr, 64), FAULT);
+
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let stat = match entry.resource.path_filestat(path, flags != 0) {
+        Ok(stat) => stat,
+        Err(error) => return errno(path_errno(error)),
+    };
+
+    wasi_try!(memory.write(stat_ptr, stat.to_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn path_create_directory<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
@@ -66,25 +111,31 @@ pub(super) fn path_create_directory<R: WasiResource>(
     }
 
     let memory = wasi_some!(guest_memory(store, instance), FAULT);
-    let bytes = wasi_try!(memory.read_bytes(path_ptr, path_len), FAULT);
-    let path = wasi_try!(core::str::from_utf8(bytes), ILSEQ);
-
-    if path.is_empty() {
-        return errno(NOENT);
-    }
-
-    if path.as_bytes().contains(&0) {
-        return errno(INVAL);
-    }
-
-    if path.starts_with('/') {
-        return errno(NOTCAPABLE);
-    }
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
 
     errno(match entry.resource.create_directory(path) {
         Ok(()) => SUCCESS,
         Err(error) => path_errno(error),
     })
+}
+
+fn guest_path(memory: &GuestMemory, ptr: usize, len: usize) -> core::result::Result<&str, i32> {
+    let bytes = memory.read_bytes(ptr, len).map_err(|_| FAULT)?;
+    let path = core::str::from_utf8(bytes).map_err(|_| ILSEQ)?;
+    if path.is_empty() {
+        return Err(NOENT);
+    }
+    if bytes.contains(&0) {
+        return Err(INVAL);
+    }
+    if path.starts_with('/') {
+        return Err(NOTCAPABLE);
+    }
+    // Backend path resolution must additionally enforce capability boundaries.
+    Ok(path)
 }
 
 const fn path_errno(error: PathError) -> i32 {

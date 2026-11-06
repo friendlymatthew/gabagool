@@ -60,6 +60,10 @@ pub trait WasiResource {
         Err(PathError::Unsupported)
     }
 
+    fn path_filestat(&mut self, _path: &str, _follow_symlink: bool) -> Result<Filestat, PathError> {
+        Err(PathError::Unsupported)
+    }
+
     fn seek(&mut self, _from: SeekFrom) -> Result<u64, SeekError> {
         Err(SeekError::Unsupported)
     }

@@ -19,6 +19,8 @@ pub const RIGHTS_FD_FILESTAT_GET: u64 = 1 << 21;
 pub const RIGHTS_FD_FILESTAT_SET_SIZE: u64 = 1 << 22;
 pub const RIGHTS_FD_FILESTAT_SET_TIMES: u64 = 1 << 23;
 pub const RIGHTS_PATH_CREATE_DIRECTORY: u64 = 1 << 9;
+pub const RIGHTS_PATH_FILESTAT_GET: u64 = 1 << 18;
+pub const LOOKUPFLAGS_SYMLINK_FOLLOW: u32 = 1 << 0;
 
 pub const FSTFLAGS_ATIM: u16 = 1 << 0;
 pub const FSTFLAGS_ATIM_NOW: u16 = 1 << 1;
@@ -216,6 +218,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_create_directory(&self) -> bool {
         self.rights_base & RIGHTS_PATH_CREATE_DIRECTORY != 0
+    }
+
+    pub const fn can_path_filestat_get(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_FILESTAT_GET != 0
     }
 
     pub const fn can_write(&self) -> bool {
