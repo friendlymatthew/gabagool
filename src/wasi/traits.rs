@@ -115,6 +115,10 @@ pub trait WasiResource {
         Err(PathError::Unsupported)
     }
 
+    fn symlink(&mut self, _target: &str, _path: &str) -> Result<(), PathError> {
+        Err(PathError::Unsupported)
+    }
+
     fn path_filestat(&mut self, _path: &str, _follow_symlink: bool) -> Result<Filestat, PathError> {
         Err(PathError::Unsupported)
     }

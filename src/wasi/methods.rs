@@ -11,7 +11,7 @@ use crate::{
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
-use super::{PathError, SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
+use {PathError, SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
 
 const SUCCESS: i32 = 0;
 const AGAIN: i32 = 6;
@@ -51,6 +51,53 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn path_symlink<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let target_ptr = args[0].as_pointer();
+    let target_len = args[1].as_i32() as u32 as usize;
+    let fd = args[2].as_i32() as u32;
+    let path_ptr = args[3].as_pointer();
+    let path_len = args[4].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_symlink() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let bytes = wasi_try!(memory.read_bytes(target_ptr, target_len), FAULT);
+
+    let target = wasi_try!(core::str::from_utf8(bytes), ILSEQ);
+
+    if target.is_empty() {
+        return errno(NOENT);
+    }
+
+    if bytes.contains(&0) {
+        return errno(INVAL);
+    }
+
+    errno(match entry.resource.symlink(target, path) {
+        Ok(()) => SUCCESS,
+        Err(error) => path_errno(error),
+    })
 }
 
 pub(super) fn path_readlink<R: WasiResource>(
@@ -355,7 +402,7 @@ pub(super) fn path_filestat_set_times<R: WasiResource>(
     let mtim = args[5].as_i64() as u64;
     let flags = args[6].as_i32() as u32;
 
-    if lookup_flags & !super::LOOKUPFLAGS_SYMLINK_FOLLOW != 0 || !valid_timestamp_flags(flags) {
+    if lookup_flags & !LOOKUPFLAGS_SYMLINK_FOLLOW != 0 || !valid_timestamp_flags(flags) {
         return errno(INVAL);
     }
 
@@ -406,7 +453,7 @@ pub(super) fn path_filestat_get<R: WasiResource>(
     let path_len = args[3].as_i32() as u32 as usize;
     let stat_ptr = args[4].as_pointer();
 
-    if flags & !super::LOOKUPFLAGS_SYMLINK_FOLLOW != 0 {
+    if flags & !LOOKUPFLAGS_SYMLINK_FOLLOW != 0 {
         return errno(INVAL);
     }
 
@@ -637,7 +684,7 @@ pub(super) fn fd_readdir<R: WasiResource>(
     if !entry.can_readdir() {
         return errno(NOTCAPABLE);
     }
-    if !matches!(entry.resource.file_type(), super::FileType::Directory) {
+    if !matches!(entry.resource.file_type(), FileType::Directory) {
         return errno(NOTDIR);
     }
     let memory = wasi_some!(guest_memory(store, instance), FAULT);
