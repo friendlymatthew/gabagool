@@ -2,7 +2,7 @@ use crate::{
     prelude::*, Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
-use super::{OutputError, WasiCtx, WasiResource, RIGHTS_FD_WRITE};
+use super::{WasiCtx, WasiIOError, WasiResource};
 
 const SUCCESS: i32 = 0;
 const AGAIN: i32 = 6;
@@ -43,6 +43,66 @@ pub(super) fn fd_close<R: WasiResource>(
         Some(_) => errno(SUCCESS),
         None => errno(BADF),
     }
+}
+
+pub fn fd_read<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let iovs_ptr = args[1].as_pointer();
+    let iovs_len = args[2].as_i32() as u32 as usize;
+    let nread_ptr = args[3].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let file_entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !file_entry.can_read() {
+        return errno(NOTCAPABLE);
+    }
+
+    let input = wasi_some!(file_entry.resource.input_mut(), BADF);
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let buffers = match decode_iovecs(memory, iovs_ptr, iovs_len) {
+        Ok(buffers) => buffers,
+        Err(code) => return errno(code),
+    };
+
+    // first check before consuming input
+    wasi_try!(memory.read_bytes(nread_ptr, 4), FAULT);
+
+    let mut total_read = 0u32;
+
+    for (ptr, len) in buffers {
+        let buffer = wasi_try!(memory.read_bytes_mut(ptr as usize, len as usize), FAULT);
+
+        match input.read(buffer) {
+            Ok(n) if n <= buffer.len() => {
+                total_read += n as u32;
+
+                if n < buffer.len() {
+                    break;
+                }
+            }
+            result => {
+                if total_read != 0 {
+                    break;
+                }
+
+                return errno(match result {
+                    Err(WasiIOError::Interrupted) => INTR,
+                    Err(WasiIOError::WouldBlock) => AGAIN,
+                    _ => IO,
+                });
+            }
+        }
+    }
+
+    wasi_try!(memory.write(nread_ptr, total_read.to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
 }
 
 pub(super) fn fd_fdstat_get<R: WasiResource>(
@@ -206,43 +266,20 @@ pub(super) fn fd_write<R: WasiResource>(
     let memory = wasi_some!(guest_memory(store, instance), FAULT);
 
     let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
-    if entry.rights_base & RIGHTS_FD_WRITE == 0 {
+    if !entry.can_write() {
         return errno(NOTCAPABLE);
     }
     let output = wasi_some!(entry.resource.output_mut(), BADF);
 
-    // Validate all buffers before output, then borrow their bytes directly.
-    // The output context is borrowed independently from guest memory.
-    let mut buffers = Vec::new();
-
-    {
-        let table_len = wasi_some!(iovs_len.checked_mul(8), FAULT);
-        let table = wasi_try!(memory.read_bytes(iovs_ptr, table_len), FAULT);
-
-        wasi_try!(memory.read_bytes(nwritten_ptr, 4), FAULT);
-
-        let mut total = 0u32;
-
-        let (chunks, _remainder) = table.as_chunks::<8>();
-
-        for &[p1, p2, p3, p4, l1, l2, l3, l4] in chunks {
-            let ptr = u32::from_le_bytes([p1, p2, p3, p4]) as usize;
-            let len = u32::from_le_bytes([l1, l2, l3, l4]);
-
-            if len == 0 {
-                continue;
-            }
-
-            total = wasi_some!(total.checked_add(len), OVERFLOW);
-
-            let bs = wasi_try!(memory.read_bytes(ptr, len as usize), FAULT);
-
-            buffers.push(bs);
-        }
-    }
+    let buffers = match decode_iovecs(memory, iovs_ptr, iovs_len) {
+        Ok(buffers) => buffers,
+        Err(code) => return errno(code),
+    };
+    wasi_try!(memory.read_bytes(nwritten_ptr, 4), FAULT);
 
     let mut written = 0u32;
-    for bytes in buffers {
+    for (ptr, len) in buffers {
+        let bytes = wasi_try!(memory.read_bytes(ptr as usize, len as usize), FAULT);
         match output.write(bytes) {
             Ok(bytes_written) if bytes_written <= bytes.len() => {
                 written += bytes_written as u32;
@@ -256,8 +293,8 @@ pub(super) fn fd_write<R: WasiResource>(
                 }
 
                 return errno(match result {
-                    Err(OutputError::Interrupted) => INTR,
-                    Err(OutputError::WouldBlock) => AGAIN,
+                    Err(WasiIOError::Interrupted) => INTR,
+                    Err(WasiIOError::WouldBlock) => AGAIN,
                     _ => IO,
                 });
             }
@@ -267,6 +304,33 @@ pub(super) fn fd_write<R: WasiResource>(
     wasi_try!(memory.write(nwritten_ptr, written.to_le_bytes()), FAULT);
 
     errno(SUCCESS)
+}
+
+fn decode_iovecs(
+    memory: &GuestMemory,
+    table_ptr: usize,
+    count: usize,
+) -> core::result::Result<Vec<(u32, u32)>, i32> {
+    let table_len = count.checked_mul(8).ok_or(FAULT)?;
+    let table = memory.read_bytes(table_ptr, table_len).map_err(|_| FAULT)?;
+    let mut buffers = Vec::new();
+    let mut total = 0u32;
+
+    let (chunks, _) = table.as_chunks::<8>();
+    for &[p1, p2, p3, p4, l1, l2, l3, l4] in chunks {
+        let ptr = u32::from_le_bytes([p1, p2, p3, p4]);
+        let len = u32::from_le_bytes([l1, l2, l3, l4]);
+        if len == 0 {
+            continue;
+        }
+        total = total.checked_add(len).ok_or(OVERFLOW)?;
+        memory
+            .read_bytes(ptr as usize, len as usize)
+            .map_err(|_| FAULT)?;
+        buffers.push((ptr, len));
+    }
+
+    Ok(buffers)
 }
 
 fn guest_memory(store: &mut Store, instance: Instance) -> Option<&mut GuestMemory> {

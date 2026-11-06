@@ -40,7 +40,7 @@ impl GuestMemory {
         self.bytes.get(ptr..end).ok_or(OOB)
     }
 
-    fn read_bytes_mut(&mut self, ptr: usize, len: usize) -> Result<&mut [u8]> {
+    pub fn read_bytes_mut(&mut self, ptr: usize, len: usize) -> Result<&mut [u8]> {
         let end = ptr.checked_add(len).ok_or(OOB)?;
         self.bytes.get_mut(ptr..end).ok_or(OOB)
     }

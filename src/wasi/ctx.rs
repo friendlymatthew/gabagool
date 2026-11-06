@@ -3,6 +3,7 @@ use alloc::collections::BTreeMap;
 use crate::prelude::*;
 
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
+pub const RIGHTS_FD_READ: u64 = 1 << 1;
 
 pub const STDOUT_FD: u32 = 1;
 pub const STDERR_FD: u32 = 2;
@@ -94,5 +95,15 @@ pub struct FdEntry<R> {
 impl<R: Default> Default for WasiCtx<R> {
     fn default() -> Self {
         Self::new(R::default(), R::default())
+    }
+}
+
+impl<R> FdEntry<R> {
+    pub const fn can_read(&self) -> bool {
+        self.rights_base & RIGHTS_FD_READ != 0
+    }
+
+    pub const fn can_write(&self) -> bool {
+        self.rights_base & RIGHTS_FD_WRITE != 0
     }
 }

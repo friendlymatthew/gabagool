@@ -5,4 +5,4 @@ pub mod traits;
 
 pub use ctx::{FdEntry, FileType, WasiCtx, RIGHTS_FD_WRITE};
 pub use linker::*;
-pub use traits::{OutputError, WasiOutput, WasiResource};
+pub use traits::{WasiIOError, WasiOutput, WasiResource};
