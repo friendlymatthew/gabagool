@@ -34,6 +34,27 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_advise<R: WasiResource>(
+    caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let _offset = args[1].as_i64() as u64;
+    let _len = args[2].as_i64() as u64;
+    let advice = args[3].as_i32() as u32;
+
+    if advice > 5 {
+        return errno(INVAL);
+    }
+
+    let entry = wasi_some!(caller.data().descriptors().get(&fd), BADF);
+    if !entry.can_advise() {
+        return errno(NOTCAPABLE);
+    }
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_fdstat_set_rights<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
