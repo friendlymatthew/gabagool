@@ -1,5 +1,7 @@
 use crate::{
-    prelude::*, Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
+    prelude::*,
+    wasi::traits::{ClockError, ClockId},
+    Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
 use super::{WasiCtx, WasiIOError, WasiResource};
@@ -12,6 +14,7 @@ const INTR: i32 = 27;
 const IO: i32 = 29;
 const OVERFLOW: i32 = 61;
 const NOTCAPABLE: i32 = 76;
+const INVAL: i32 = 28;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -31,6 +34,39 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn clock_time_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let clock_id = args[0].as_i32() as u32;
+    let precision_nanos = args[1].as_i64() as u64;
+    let guest_addr = args[2].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    if !memory.has_space(guest_addr, 8) {
+        return errno(FAULT);
+    }
+
+    let clock_id = wasi_try!(ClockId::try_from(clock_id), INVAL);
+
+    let nanos = match ctx.clock_mut().now_nanos(clock_id, precision_nanos) {
+        Ok(nanos) => nanos,
+        Err(error) => {
+            return errno(match error {
+                ClockError::Unsupported => INVAL,
+                ClockError::Unavailable => IO,
+                ClockError::Overflow => OVERFLOW,
+            })
+        }
+    };
+
+    wasi_try!(memory.write(guest_addr, nanos.to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn random_get<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
@@ -41,7 +77,7 @@ pub(super) fn random_get<R: WasiResource>(
     let (store, instance, ctx) = caller.parts_mut();
     let memory = wasi_some!(guest_memory(store, instance), FAULT);
 
-    let buf = wasi_try!(memory.read_bytes_mut(addr, len as usize), BADF);
+    let buf = wasi_try!(memory.read_bytes_mut(addr, len as usize), FAULT);
 
     let rand = ctx.random_mut();
     wasi_try!(rand.fill_bytes(buf), IO);

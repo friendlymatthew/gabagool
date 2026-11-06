@@ -77,4 +77,11 @@ impl GuestMemory {
     pub const fn as_slice(&self) -> &[u8] {
         self.bytes.as_slice()
     }
+
+    pub const fn has_space(&self, ptr: usize, len: usize) -> bool {
+        match ptr.checked_add(len) {
+            Some(end) => end <= self.bytes.len(),
+            None => false,
+        }
+    }
 }

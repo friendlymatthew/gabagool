@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use super::{MemoryInput, MemoryResource};
 use crate::{
     prelude::*,
-    wasi::traits::{RandomError, WasiRandom},
+    wasi::traits::{ClockError, ClockId, RandomError, WasiClock, WasiRandom},
 };
 
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
@@ -20,6 +20,7 @@ pub struct WasiCtx<R = MemoryResource> {
     descriptors: BTreeMap<u32, FdEntry<R>>,
 
     random: Box<dyn WasiRandom>,
+    clock: Box<dyn WasiClock>,
 }
 
 impl<R> WasiCtx<R> {
@@ -61,11 +62,8 @@ impl<R> WasiCtx<R> {
             environment: vec![],
             descriptors,
             random: Box::new(UnavailableRandom),
+            clock: Box::new(UnavailableClock),
         }
-    }
-
-    pub fn set_random(&mut self, random: impl WasiRandom + 'static) {
-        self.random = Box::new(random);
     }
 
     pub fn args(&self) -> &[String] {
@@ -98,6 +96,22 @@ impl<R> WasiCtx<R> {
 
     pub fn random_mut(&mut self) -> &mut dyn WasiRandom {
         &mut *self.random
+    }
+
+    pub fn set_random(&mut self, random: impl WasiRandom + 'static) {
+        self.random = Box::new(random);
+    }
+
+    pub fn clock(&self) -> &dyn WasiClock {
+        &*self.clock
+    }
+
+    pub fn clock_mut(&mut self) -> &mut dyn WasiClock {
+        &mut *self.clock
+    }
+
+    pub fn set_clock(&mut self, clock: impl WasiClock + 'static) {
+        self.clock = Box::new(clock);
     }
 }
 
@@ -169,5 +183,14 @@ pub struct UnavailableRandom;
 impl WasiRandom for UnavailableRandom {
     fn fill_bytes(&mut self, _: &mut [u8]) -> Result<(), RandomError> {
         Err(RandomError::Unavailable)
+    }
+}
+
+#[derive(Debug)]
+pub struct UnavailableClock;
+
+impl WasiClock for UnavailableClock {
+    fn now_nanos(&mut self, _: ClockId, _: u64) -> Result<u64, ClockError> {
+        Err(ClockError::Unavailable)
     }
 }

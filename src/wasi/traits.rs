@@ -53,3 +53,39 @@ pub enum RandomError {
 pub trait WasiRandom: core::fmt::Debug {
     fn fill_bytes(&mut self, buffer: &mut [u8]) -> Result<(), RandomError>;
 }
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy)]
+pub enum ClockId {
+    Realtime = 0,
+    Monotonic = 1,
+    ProcessCpuTime = 2,
+    ThreadCpuTime = 3,
+}
+
+impl TryFrom<u32> for ClockId {
+    type Error = ClockError;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        let out = match value {
+            0 => Self::Realtime,
+            1 => Self::Monotonic,
+            2 => Self::ProcessCpuTime,
+            3 => Self::ThreadCpuTime,
+            _ => return Err(ClockError::Unsupported),
+        };
+
+        Ok(out)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ClockError {
+    Unsupported,
+    Unavailable,
+    Overflow,
+}
+
+pub trait WasiClock: core::fmt::Debug {
+    fn now_nanos(&mut self, clock: ClockId, precision_ns: u64) -> Result<u64, ClockError>;
+}

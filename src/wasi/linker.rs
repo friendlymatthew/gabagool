@@ -30,6 +30,7 @@ pub fn add_wasip1_to_linker<R: WasiResource + 'static>(l: &mut Linker<WasiCtx<R>
     register_wasi!(l, fd_close, [I32], [I32]);
     register_wasi!(l, fd_read, [I32, I32, I32, I32], [I32]);
     register_wasi!(l, random_get, [I32, I32], [I32]);
+    register_wasi!(l, clock_time_get, [I32, I64, I32], [I32]);
 
     Ok(())
 }
