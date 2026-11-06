@@ -31,6 +31,20 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_close<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+
+    let ctx = caller.data_mut();
+
+    match ctx.descriptors_mut().remove(&fd) {
+        Some(_) => errno(SUCCESS),
+        None => errno(BADF),
+    }
+}
+
 pub(super) fn fd_fdstat_get<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
