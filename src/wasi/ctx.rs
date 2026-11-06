@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use super::{MemoryInput, MemoryResource};
 use crate::{
     prelude::*,
-    wasi::traits::{ClockError, ClockId, RandomError, WasiClock, WasiRandom},
+    wasi::traits::{WasiClock, WasiRandom},
 };
 
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
@@ -179,18 +179,8 @@ impl<R> FdEntry<R> {
 
 #[derive(Debug)]
 pub struct UnavailableRandom;
-
-impl WasiRandom for UnavailableRandom {
-    fn fill_bytes(&mut self, _: &mut [u8]) -> Result<(), RandomError> {
-        Err(RandomError::Unavailable)
-    }
-}
+impl WasiRandom for UnavailableRandom {}
 
 #[derive(Debug)]
 pub struct UnavailableClock;
-
-impl WasiClock for UnavailableClock {
-    fn now_nanos(&mut self, _: ClockId, _: u64) -> Result<u64, ClockError> {
-        Err(ClockError::Unavailable)
-    }
-}
+impl WasiClock for UnavailableClock {}

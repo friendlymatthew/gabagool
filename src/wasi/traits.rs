@@ -1,5 +1,5 @@
 use crate::{prelude::*, wasi::FileType};
-use core::result::Result;
+use core::{num::NonZeroU64, result::Result};
 
 pub trait WasiOutput {
     fn write(&mut self, bytes: &[u8]) -> Result<usize, WasiIOError>;
@@ -51,7 +51,9 @@ pub enum RandomError {
 }
 
 pub trait WasiRandom: core::fmt::Debug {
-    fn fill_bytes(&mut self, buffer: &mut [u8]) -> Result<(), RandomError>;
+    fn fill_bytes(&mut self, _buffer: &mut [u8]) -> Result<(), RandomError> {
+        Err(RandomError::Unavailable)
+    }
 }
 
 #[repr(u32)]
@@ -87,5 +89,11 @@ pub enum ClockError {
 }
 
 pub trait WasiClock: core::fmt::Debug {
-    fn now_nanos(&mut self, clock: ClockId, precision_ns: u64) -> Result<u64, ClockError>;
+    fn now_nanos(&mut self, _clock: ClockId, _precision_ns: u64) -> Result<u64, ClockError> {
+        Err(ClockError::Unavailable)
+    }
+
+    fn resolution_ns(&mut self, _clock: ClockId) -> Result<NonZeroU64, ClockError> {
+        Err(ClockError::Unavailable)
+    }
 }

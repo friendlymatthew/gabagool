@@ -34,6 +34,34 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn clock_res_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let clock_id = args[0].as_i32() as u32;
+    let addr = args[1].as_pointer();
+
+    let clock_id = wasi_try!(ClockId::try_from(clock_id), INVAL);
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let nanos = match ctx.clock_mut().resolution_ns(clock_id) {
+        Ok(nanos) => nanos.get(),
+        Err(error) => {
+            return errno(match error {
+                ClockError::Unsupported => INVAL,
+                ClockError::Unavailable => IO,
+                ClockError::Overflow => OVERFLOW,
+            })
+        }
+    };
+
+    wasi_try!(memory.write(addr, nanos.to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn clock_time_get<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],
@@ -44,10 +72,6 @@ pub(super) fn clock_time_get<R: WasiResource>(
 
     let (store, instance, ctx) = caller.parts_mut();
     let memory = wasi_some!(guest_memory(store, instance), FAULT);
-
-    if !memory.has_space(guest_addr, 8) {
-        return errno(FAULT);
-    }
 
     let clock_id = wasi_try!(ClockId::try_from(clock_id), INVAL);
 
