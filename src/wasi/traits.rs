@@ -1,6 +1,9 @@
 use crate::{
     prelude::*,
-    wasi::{ctx::Filestat, FileType},
+    wasi::{
+        ctx::{DirectoryEntry, Filestat},
+        FileType,
+    },
 };
 use core::{num::NonZeroU64, result::Result};
 
@@ -16,6 +19,21 @@ pub enum WasiIOError {
     Unsupported,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum SeekFrom {
+    Start(u64),
+    Current(i64),
+    End(i64),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SeekError {
+    Unsupported,
+    InvalidOffset,
+    Overflow,
+    Io,
+}
+
 impl WasiOutput for Vec<u8> {
     fn write(&mut self, bytes: &[u8]) -> Result<usize, WasiIOError> {
         self.extend_from_slice(bytes);
@@ -25,6 +43,18 @@ impl WasiOutput for Vec<u8> {
 
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
+
+    fn seek(&mut self, _from: SeekFrom) -> Result<u64, SeekError> {
+        Err(SeekError::Unsupported)
+    }
+
+    fn tell(&mut self) -> Result<u64, SeekError> {
+        self.seek(SeekFrom::Current(0))
+    }
+
+    fn directory_entry(&mut self, _cookie: u64) -> Result<Option<DirectoryEntry>, WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
 
     fn read_at(&mut self, _buffer: &mut [u8], _offset: u64) -> Result<usize, WasiIOError> {
         Err(WasiIOError::Unsupported)

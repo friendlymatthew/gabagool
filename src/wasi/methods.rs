@@ -8,7 +8,7 @@ use crate::{
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
-use super::{WasiCtx, WasiIOError, WasiResource};
+use super::{SeekError, SeekFrom, WasiCtx, WasiIOError, WasiResource};
 
 const SUCCESS: i32 = 0;
 const AGAIN: i32 = 6;
@@ -21,6 +21,8 @@ const NOTCAPABLE: i32 = 76;
 const INVAL: i32 = 28;
 const NOTSUP: i32 = 58;
 const NAMETOOLONG: i32 = 37;
+const NOTDIR: i32 = 54;
+const SPIPE: i32 = 70;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -38,6 +40,115 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn fd_seek<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let offset = args[1].as_i64();
+    let whence = args[2].as_i32() as u32;
+    let position_ptr = args[3].as_pointer();
+
+    let from = match whence {
+        0 if offset >= 0 => SeekFrom::Start(offset as u64),
+        1 => SeekFrom::Current(offset),
+        2 => SeekFrom::End(offset),
+        _ => return errno(INVAL),
+    };
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    let query_only = whence == 1 && offset == 0;
+
+    if !(entry.can_seek() || query_only && entry.can_tell()) {
+        return errno(NOTCAPABLE);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.read_bytes(position_ptr, 8), FAULT);
+
+    let result = if query_only {
+        entry.resource.tell()
+    } else {
+        entry.resource.seek(from)
+    };
+
+    let position = match result {
+        Ok(position) => position,
+        Err(error) => {
+            return errno(match error {
+                SeekError::Unsupported => SPIPE,
+                SeekError::InvalidOffset => INVAL,
+                SeekError::Overflow => OVERFLOW,
+                SeekError::Io => IO,
+            })
+        }
+    };
+
+    wasi_try!(memory.write(position_ptr, position.to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
+pub(super) fn fd_readdir<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let buf_ptr = args[1].as_pointer();
+    let buf_len = args[2].as_i32() as u32 as usize;
+    let mut cookie = args[3].as_i64() as u64;
+    let used_ptr = args[4].as_pointer();
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+    if !entry.can_readdir() {
+        return errno(NOTCAPABLE);
+    }
+    if !matches!(entry.resource.file_type(), super::FileType::Directory) {
+        return errno(NOTDIR);
+    }
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+    wasi_try!(memory.read_bytes(used_ptr, 4), FAULT);
+    let buffer = wasi_try!(memory.read_bytes_mut(buf_ptr, buf_len), FAULT);
+    let mut used = 0usize;
+
+    while used < buffer.len() {
+        let item = match entry.resource.directory_entry(cookie) {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
+            Err(error) => {
+                return errno(match error {
+                    WasiIOError::Io => IO,
+                    WasiIOError::Interrupted => INTR,
+                    WasiIOError::WouldBlock => AGAIN,
+                    WasiIOError::Unsupported => NOTSUP,
+                })
+            }
+        };
+        let name_len = wasi_try!(u32::try_from(item.name.len()), OVERFLOW);
+        let header = item.header(name_len);
+        let header_len = header.len().min(buffer.len() - used);
+        buffer[used..used + header_len].copy_from_slice(&header[..header_len]);
+        used += header_len;
+        if header_len < header.len() {
+            break;
+        }
+        let copied = item.name.len().min(buffer.len() - used);
+        buffer[used..used + copied].copy_from_slice(&item.name[..copied]);
+        used += copied;
+        if copied < item.name.len() {
+            break;
+        }
+        cookie = item.next_cookie;
+    }
+
+    wasi_try!(memory.write(used_ptr, (used as u32).to_le_bytes()), FAULT);
+    errno(SUCCESS)
 }
 
 pub(super) fn fd_prestat_dir_name<R: WasiResource>(

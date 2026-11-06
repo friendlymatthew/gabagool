@@ -9,6 +9,8 @@ use crate::{
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 pub const RIGHTS_FD_READ: u64 = 1 << 1;
 pub const RIGHTS_FD_SEEK: u64 = 1 << 2;
+pub const RIGHTS_FD_TELL: u64 = 1 << 5;
+pub const RIGHTS_FD_READDIR: u64 = 1 << 14;
 pub const RIGHTS_FD_ADVISE: u64 = 1 << 7;
 pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
 pub const RIGHTS_FD_FDSTAT_SET_FLAGS: u64 = 1 << 3;
@@ -202,12 +204,24 @@ impl<R> FdEntry<R> {
         self.can_read() && self.rights_base & RIGHTS_FD_SEEK != 0
     }
 
+    pub const fn can_seek(&self) -> bool {
+        self.rights_base & RIGHTS_FD_SEEK != 0
+    }
+
+    pub const fn can_tell(&self) -> bool {
+        self.can_seek() || self.rights_base & RIGHTS_FD_TELL != 0
+    }
+
     pub const fn can_write(&self) -> bool {
         self.rights_base & RIGHTS_FD_WRITE != 0
     }
 
     pub const fn can_pwrite(&self) -> bool {
         self.can_write() && self.rights_base & RIGHTS_FD_SEEK != 0
+    }
+
+    pub const fn can_readdir(&self) -> bool {
+        self.rights_base & RIGHTS_FD_READDIR != 0
     }
 
     pub const fn can_advise(&self) -> bool {
@@ -283,5 +297,25 @@ impl Filestat {
         bytes[56..64].copy_from_slice(&self.ctim.to_le_bytes());
 
         bytes
+    }
+}
+
+#[derive(Debug)]
+pub struct DirectoryEntry {
+    pub next_cookie: u64,
+    pub ino: u64,
+    pub filetype: FileType,
+    pub name: Vec<u8>,
+}
+
+impl DirectoryEntry {
+    pub(super) fn header(&self, name_len: u32) -> [u8; 24] {
+        let mut header = [0; 24];
+        header[..8].copy_from_slice(&self.next_cookie.to_le_bytes());
+        header[8..16].copy_from_slice(&self.ino.to_le_bytes());
+        header[16..20].copy_from_slice(&name_len.to_le_bytes());
+        header[20] = self.filetype as u8;
+
+        header
     }
 }
