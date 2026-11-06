@@ -27,6 +27,12 @@ pub trait WasiResource {
         Err(WasiIOError::Unsupported)
     }
 
+    /// Apply descriptor flags. On error, leave the resource unchanged.
+    /// The ABI layer updates its metadata only after this succeeds.
+    fn set_fdflags(&mut self, _flags: u16) -> Result<(), WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn output_mut(&mut self) -> Option<&mut dyn WasiOutput> {
         None
     }

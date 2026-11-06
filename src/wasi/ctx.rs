@@ -10,6 +10,15 @@ pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 pub const RIGHTS_FD_READ: u64 = 1 << 1;
 pub const RIGHTS_FD_ADVISE: u64 = 1 << 7;
 pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
+pub const RIGHTS_FD_FDSTAT_SET_FLAGS: u64 = 1 << 3;
+
+pub const FDFLAGS_APPEND: u16 = 1 << 0;
+pub const FDFLAGS_DSYNC: u16 = 1 << 1;
+pub const FDFLAGS_NONBLOCK: u16 = 1 << 2;
+pub const FDFLAGS_RSYNC: u16 = 1 << 3;
+pub const FDFLAGS_SYNC: u16 = 1 << 4;
+pub(super) const FDFLAGS_ALL: u16 =
+    FDFLAGS_APPEND | FDFLAGS_DSYNC | FDFLAGS_NONBLOCK | FDFLAGS_RSYNC | FDFLAGS_SYNC;
 
 pub const STDIN_FD: u32 = 0;
 pub const STDOUT_FD: u32 = 1;
@@ -184,6 +193,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_datasync(&self) -> bool {
         self.rights_base & RIGHTS_FD_DATASYNC != 0
+    }
+
+    pub const fn can_set_flags(&self) -> bool {
+        self.rights_base & RIGHTS_FD_FDSTAT_SET_FLAGS != 0
     }
 }
 

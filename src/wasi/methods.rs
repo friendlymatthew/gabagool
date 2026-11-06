@@ -1,6 +1,9 @@
 use crate::{
     prelude::*,
-    wasi::traits::{ClockError, ClockId},
+    wasi::{
+        ctx::FDFLAGS_ALL,
+        traits::{ClockError, ClockId},
+    },
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
 
@@ -33,6 +36,37 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn fd_fdstat_set_flags<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let flags = args[1].as_i32() as u32;
+
+    if flags & !u32::from(FDFLAGS_ALL) != 0 {
+        return errno(INVAL);
+    }
+    let flags = flags as u16;
+
+    let entry = wasi_some!(caller.data_mut().descriptors_mut().get_mut(&fd), BADF);
+    if !entry.can_set_flags() {
+        return errno(NOTCAPABLE);
+    }
+
+    match entry.resource.set_fdflags(flags) {
+        Ok(()) => {
+            entry.flags = flags;
+            errno(SUCCESS)
+        }
+        Err(error) => errno(match error {
+            WasiIOError::Io => IO,
+            WasiIOError::Interrupted => INTR,
+            WasiIOError::WouldBlock => AGAIN,
+            WasiIOError::Unsupported => NOTSUP,
+        }),
+    }
 }
 
 pub(super) fn fd_datasync<R: WasiResource>(
