@@ -19,6 +19,8 @@ pub const RIGHTS_FD_FILESTAT_GET: u64 = 1 << 21;
 pub const RIGHTS_FD_FILESTAT_SET_SIZE: u64 = 1 << 22;
 pub const RIGHTS_FD_FILESTAT_SET_TIMES: u64 = 1 << 23;
 pub const RIGHTS_PATH_CREATE_DIRECTORY: u64 = 1 << 9;
+pub const RIGHTS_PATH_LINK_SOURCE: u64 = 1 << 11;
+pub const RIGHTS_PATH_LINK_TARGET: u64 = 1 << 12;
 pub const RIGHTS_PATH_FILESTAT_GET: u64 = 1 << 18;
 pub const RIGHTS_PATH_FILESTAT_SET_TIMES: u64 = 1 << 20;
 pub const LOOKUPFLAGS_SYMLINK_FOLLOW: u32 = 1 << 0;
@@ -219,6 +221,14 @@ impl<R> FdEntry<R> {
 
     pub const fn can_create_directory(&self) -> bool {
         self.rights_base & RIGHTS_PATH_CREATE_DIRECTORY != 0
+    }
+
+    pub const fn can_link_source(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_LINK_SOURCE != 0
+    }
+
+    pub const fn can_link_target(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_LINK_TARGET != 0
     }
 
     pub const fn can_path_filestat_get(&self) -> bool {

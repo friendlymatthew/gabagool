@@ -44,6 +44,7 @@ pub enum PathError {
     PermissionDenied,
     NotCapable,
     InvalidInput,
+    CrossDevice,
 }
 
 impl WasiOutput for Vec<u8> {
@@ -55,6 +56,19 @@ impl WasiOutput for Vec<u8> {
 
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
+
+    fn link(
+        &self,
+        _old_path: &str,
+        _follow_symlink: bool,
+        _target_directory: &Self,
+        _new_path: &str,
+    ) -> Result<(), PathError>
+    where
+        Self: Sized,
+    {
+        Err(PathError::Unsupported)
+    }
 
     fn create_directory(&mut self, _path: &str) -> Result<(), PathError> {
         Err(PathError::Unsupported)

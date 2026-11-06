@@ -23,6 +23,7 @@ pub use ctx::{
 pub use ctx::{LOOKUPFLAGS_SYMLINK_FOLLOW, RIGHTS_PATH_FILESTAT_GET};
 pub use ctx::{RIGHTS_FD_FILESTAT_GET, RIGHTS_FD_FILESTAT_SET_SIZE};
 pub use ctx::{RIGHTS_FD_SEEK, RIGHTS_FD_TELL};
+pub use ctx::{RIGHTS_PATH_LINK_SOURCE, RIGHTS_PATH_LINK_TARGET};
 pub use linker::*;
 pub use memory::{MemoryInput, MemoryResource};
 pub use traits::{

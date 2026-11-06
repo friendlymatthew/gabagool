@@ -27,6 +27,7 @@ const ACCES: i32 = 2;
 const EXIST: i32 = 20;
 const ILSEQ: i32 = 25;
 const NOENT: i32 = 44;
+const XDEV: i32 = 75;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -44,6 +45,60 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn path_link<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let old_fd = args[0].as_i32() as u32;
+    let flags = args[1].as_i32() as u32;
+    let old_ptr = args[2].as_pointer();
+    let old_len = args[3].as_i32() as u32 as usize;
+    let new_fd = args[4].as_i32() as u32;
+    let new_ptr = args[5].as_pointer();
+    let new_len = args[6].as_i32() as u32 as usize;
+
+    if flags & !super::LOOKUPFLAGS_SYMLINK_FOLLOW != 0 {
+        return errno(INVAL);
+    }
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let source = wasi_some!(ctx.descriptors().get(&old_fd), BADF);
+    let target = wasi_some!(ctx.descriptors().get(&new_fd), BADF);
+
+    if !source.can_link_source() || !target.can_link_target() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(source.resource.file_type(), FileType::Directory)
+        || !matches!(target.resource.file_type(), FileType::Directory)
+    {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let old_path = match guest_path(memory, old_ptr, old_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let new_path = match guest_path(memory, new_ptr, new_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    errno(
+        match source
+            .resource
+            .link(old_path, flags != 0, &target.resource, new_path)
+        {
+            Ok(()) => SUCCESS,
+            Err(error) => path_errno(error),
+        },
+    )
 }
 
 fn valid_timestamp_flags(flags: u32) -> bool {
@@ -244,6 +299,7 @@ const fn path_errno(error: PathError) -> i32 {
         PathError::PermissionDenied => ACCES,
         PathError::NotCapable => NOTCAPABLE,
         PathError::InvalidInput => INVAL,
+        PathError::CrossDevice => XDEV,
     }
 }
 
