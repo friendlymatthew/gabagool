@@ -2,9 +2,17 @@
 name = "python"
 version = "0.1.0"
 edition = "2024"
+default-run = "python"
 
 [dependencies]
 gabagool = { path = "../.." }
 getrandom = "0.4"
 cap-std = "4"
 cap-fs-ext = "4"
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "aoc"
+harness = false

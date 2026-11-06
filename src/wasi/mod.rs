@@ -12,6 +12,7 @@ pub use ctx::RIGHTS_PATH_READLINK;
 pub use ctx::RIGHTS_PATH_REMOVE_DIRECTORY;
 pub use ctx::RIGHTS_PATH_SYMLINK;
 pub use ctx::RIGHTS_PATH_UNLINK_FILE;
+pub use ctx::{DirectoryEntry, Filestat};
 pub use ctx::{
     FdEntry, FileType, WasiCtx, RIGHTS_FD_ADVISE, RIGHTS_FD_DATASYNC, RIGHTS_FD_READ,
     RIGHTS_FD_WRITE, STDERR_FD, STDIN_FD, STDOUT_FD,
@@ -34,7 +35,6 @@ pub use ctx::{RIGHTS_FD_SEEK, RIGHTS_FD_TELL};
 pub use ctx::{RIGHTS_PATH_LINK_SOURCE, RIGHTS_PATH_LINK_TARGET};
 pub use ctx::{RIGHTS_PATH_RENAME_SOURCE, RIGHTS_PATH_RENAME_TARGET};
 pub use linker::*;
-pub use ctx::{DirectoryEntry, Filestat};
 pub use memory::{MemoryInput, MemoryResource};
 pub use traits::{
     OpenOptions, PathError, SeekError, SeekFrom, WasiIOError, WasiInput, WasiOutput, WasiResource,
