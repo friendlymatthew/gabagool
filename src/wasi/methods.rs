@@ -39,6 +39,33 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_prestat_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let addr = args[1].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
+    let name = wasi_some!(entry.preopen_name.as_ref(), BADF);
+
+    if !matches!(entry.resource.file_type(), super::FileType::Directory) {
+        return errno(BADF);
+    }
+
+    let name_len = wasi_try!(u32::try_from(name.len()), OVERFLOW);
+
+    let mut bytes = [0u8; 8];
+    bytes[4..8].copy_from_slice(&name_len.to_le_bytes());
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.write(addr, bytes), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_pread<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],

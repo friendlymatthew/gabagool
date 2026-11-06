@@ -54,6 +54,7 @@ impl<R> WasiCtx<R> {
                 flags: 0,
                 rights_base: RIGHTS_FD_READ | RIGHTS_FD_FILESTAT_GET,
                 rights_inheriting: 0,
+                preopen_name: None,
             },
         );
 
@@ -64,6 +65,7 @@ impl<R> WasiCtx<R> {
                 flags: 0,
                 rights_base: RIGHTS_FD_WRITE | RIGHTS_FD_FILESTAT_GET,
                 rights_inheriting: 0,
+                preopen_name: None,
             },
         );
 
@@ -74,6 +76,7 @@ impl<R> WasiCtx<R> {
                 flags: 0,
                 rights_base: RIGHTS_FD_WRITE | RIGHTS_FD_FILESTAT_GET,
                 rights_inheriting: 0,
+                preopen_name: None,
             },
         );
 
@@ -154,6 +157,9 @@ pub struct FdEntry<R> {
     pub flags: u16,
     pub rights_base: u64,
     pub rights_inheriting: u64,
+    /// Guest-visible directory name for a preopened capability, without a NUL.
+    /// Ordinary descriptors, including standard streams, have no preopen name.
+    pub preopen_name: Option<Vec<u8>>,
 }
 
 impl WasiCtx<MemoryResource> {
