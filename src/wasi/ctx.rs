@@ -1,23 +1,35 @@
 use alloc::collections::BTreeMap;
 
+use super::{MemoryInput, MemoryResource};
 use crate::prelude::*;
 
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 pub const RIGHTS_FD_READ: u64 = 1 << 1;
 
+pub const STDIN_FD: u32 = 0;
 pub const STDOUT_FD: u32 = 1;
 pub const STDERR_FD: u32 = 2;
 
 #[derive(Debug)]
-pub struct WasiCtx<R = Vec<u8>> {
+pub struct WasiCtx<R = MemoryResource> {
     args: Vec<String>,
     environment: Vec<String>,
     descriptors: BTreeMap<u32, FdEntry<R>>,
 }
 
 impl<R> WasiCtx<R> {
-    pub fn new(stdout: R, stderr: R) -> Self {
+    pub fn new(stdin: R, stdout: R, stderr: R) -> Self {
         let mut descriptors = BTreeMap::new();
+
+        descriptors.insert(
+            STDIN_FD,
+            FdEntry {
+                resource: stdin,
+                flags: 0,
+                rights_base: RIGHTS_FD_READ,
+                rights_inheriting: 0,
+            },
+        );
 
         descriptors.insert(
             STDOUT_FD,
@@ -92,9 +104,34 @@ pub struct FdEntry<R> {
     pub rights_inheriting: u64,
 }
 
-impl<R: Default> Default for WasiCtx<R> {
+impl WasiCtx<MemoryResource> {
+    pub fn in_memory(stdin: Vec<u8>) -> Self {
+        Self::new(
+            MemoryResource::Input(MemoryInput::new(stdin)),
+            MemoryResource::Output(Vec::new()),
+            MemoryResource::Output(Vec::new()),
+        )
+    }
+
+    pub fn stdout(&self) -> Option<&[u8]> {
+        self.captured_output(STDOUT_FD)
+    }
+
+    pub fn stderr(&self) -> Option<&[u8]> {
+        self.captured_output(STDERR_FD)
+    }
+
+    fn captured_output(&self, fd: u32) -> Option<&[u8]> {
+        match &self.descriptors.get(&fd)?.resource {
+            MemoryResource::Output(bytes) => Some(bytes),
+            MemoryResource::Input(_) => None,
+        }
+    }
+}
+
+impl Default for WasiCtx<MemoryResource> {
     fn default() -> Self {
-        Self::new(R::default(), R::default())
+        Self::in_memory(Vec::new())
     }
 }
 
