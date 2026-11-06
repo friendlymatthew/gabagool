@@ -38,6 +38,7 @@ pub fn add_wasip1_to_linker<R: WasiResource + 'static>(l: &mut Linker<WasiCtx<R>
     register_wasi!(l, fd_fdstat_set_flags, [I32, I32], [I32]);
     register_wasi!(l, fd_filestat_get, [I32, I32], [I32]);
     register_wasi!(l, fd_filestat_set_size, [I32, I64], [I32]);
+    register_wasi!(l, fd_filestat_set_times, [I32, I64, I64, I32], [I32]);
 
     Ok(())
 }

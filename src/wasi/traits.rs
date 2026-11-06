@@ -34,6 +34,10 @@ pub trait WasiResource {
         Err(WasiIOError::Unsupported)
     }
 
+    fn set_times(&mut self, _atim: Option<u64>, _mtim: Option<u64>) -> Result<(), WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn datasync(&mut self) -> Result<(), WasiIOError> {
         Err(WasiIOError::Unsupported)
     }

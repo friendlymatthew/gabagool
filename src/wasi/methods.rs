@@ -3,6 +3,7 @@ use crate::{
     wasi::{
         ctx::FDFLAGS_ALL,
         traits::{ClockError, ClockId},
+        FSTFLAGS_ATIM, FSTFLAGS_ATIM_NOW, FSTFLAGS_MTIM, FSTFLAGS_MTIM_NOW,
     },
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
@@ -36,6 +37,73 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn fd_filestat_set_times<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let atim = args[1].as_i64() as u64;
+    let mtim = args[2].as_i64() as u64;
+    let flags = args[3].as_i32() as u32;
+
+    let atim_flags = u32::from(FSTFLAGS_ATIM | FSTFLAGS_ATIM_NOW);
+    let mtim_flags = u32::from(FSTFLAGS_MTIM | FSTFLAGS_MTIM_NOW);
+
+    if flags & !(atim_flags | mtim_flags) != 0
+        || flags & atim_flags == atim_flags
+        || flags & mtim_flags == mtim_flags
+    {
+        return errno(INVAL);
+    }
+
+    let ctx = caller.data_mut();
+    let entry = wasi_some!(ctx.descriptors().get(&fd), BADF);
+    if !entry.can_filestat_set_times() {
+        return errno(NOTCAPABLE);
+    }
+
+    let now = if flags & u32::from(FSTFLAGS_ATIM_NOW | FSTFLAGS_MTIM_NOW) != 0 {
+        match ctx.clock_mut().now_nanos(ClockId::Realtime, 0) {
+            Ok(now) => now,
+            Err(error) => {
+                return errno(match error {
+                    ClockError::Unsupported => INVAL,
+                    ClockError::Unavailable => IO,
+                    ClockError::Overflow => OVERFLOW,
+                })
+            }
+        }
+    } else {
+        0
+    };
+
+    let access = if flags & u32::from(FSTFLAGS_ATIM_NOW) != 0 {
+        Some(now)
+    } else if flags & u32::from(FSTFLAGS_ATIM) != 0 {
+        Some(atim)
+    } else {
+        None
+    };
+
+    let modified = if flags & u32::from(FSTFLAGS_MTIM_NOW) != 0 {
+        Some(now)
+    } else if flags & u32::from(FSTFLAGS_MTIM) != 0 {
+        Some(mtim)
+    } else {
+        None
+    };
+
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    errno(match entry.resource.set_times(access, modified) {
+        Ok(()) => SUCCESS,
+        Err(WasiIOError::Io) => IO,
+        Err(WasiIOError::Interrupted) => INTR,
+        Err(WasiIOError::WouldBlock) => AGAIN,
+        Err(WasiIOError::Unsupported) => NOTSUP,
+    })
 }
 
 pub(super) fn fd_filestat_set_size<R: WasiResource>(

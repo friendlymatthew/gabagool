@@ -13,6 +13,12 @@ pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
 pub const RIGHTS_FD_FDSTAT_SET_FLAGS: u64 = 1 << 3;
 pub const RIGHTS_FD_FILESTAT_GET: u64 = 1 << 21;
 pub const RIGHTS_FD_FILESTAT_SET_SIZE: u64 = 1 << 22;
+pub const RIGHTS_FD_FILESTAT_SET_TIMES: u64 = 1 << 23;
+
+pub const FSTFLAGS_ATIM: u16 = 1 << 0;
+pub const FSTFLAGS_ATIM_NOW: u16 = 1 << 1;
+pub const FSTFLAGS_MTIM: u16 = 1 << 2;
+pub const FSTFLAGS_MTIM_NOW: u16 = 1 << 3;
 
 pub const FDFLAGS_APPEND: u16 = 1 << 0;
 pub const FDFLAGS_DSYNC: u16 = 1 << 1;
@@ -207,6 +213,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_filestat_set_size(&self) -> bool {
         self.rights_base & RIGHTS_FD_FILESTAT_SET_SIZE != 0
+    }
+
+    pub const fn can_filestat_set_times(&self) -> bool {
+        self.rights_base & RIGHTS_FD_FILESTAT_SET_TIMES != 0
     }
 }
 
