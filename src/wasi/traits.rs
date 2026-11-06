@@ -26,6 +26,10 @@ impl WasiOutput for Vec<u8> {
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
 
+    fn read_at(&mut self, _buffer: &mut [u8], _offset: u64) -> Result<usize, WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn filestat(&mut self) -> Result<Filestat, WasiIOError> {
         Err(WasiIOError::Unsupported)
     }

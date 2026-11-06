@@ -8,6 +8,7 @@ use crate::{
 
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 pub const RIGHTS_FD_READ: u64 = 1 << 1;
+pub const RIGHTS_FD_SEEK: u64 = 1 << 2;
 pub const RIGHTS_FD_ADVISE: u64 = 1 << 7;
 pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
 pub const RIGHTS_FD_FDSTAT_SET_FLAGS: u64 = 1 << 3;
@@ -189,6 +190,10 @@ impl Default for WasiCtx<MemoryResource> {
 impl<R> FdEntry<R> {
     pub const fn can_read(&self) -> bool {
         self.rights_base & RIGHTS_FD_READ != 0
+    }
+
+    pub const fn can_pread(&self) -> bool {
+        self.can_read() && self.rights_base & RIGHTS_FD_SEEK != 0
     }
 
     pub const fn can_write(&self) -> bool {

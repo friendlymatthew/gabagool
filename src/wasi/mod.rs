@@ -4,6 +4,7 @@ mod memory;
 mod methods;
 pub mod traits;
 
+pub use ctx::RIGHTS_FD_SEEK;
 pub use ctx::{
     FdEntry, FileType, WasiCtx, RIGHTS_FD_ADVISE, RIGHTS_FD_DATASYNC, RIGHTS_FD_READ,
     RIGHTS_FD_WRITE, STDERR_FD, STDIN_FD, STDOUT_FD,
