@@ -5,6 +5,7 @@ use crate::prelude::*;
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 
 pub const STDOUT_FD: u32 = 1;
+pub const STDERR_FD: u32 = 2;
 
 #[derive(Debug)]
 pub struct WasiCtx<R = Vec<u8>> {
@@ -14,12 +15,23 @@ pub struct WasiCtx<R = Vec<u8>> {
 }
 
 impl<R> WasiCtx<R> {
-    pub fn new(stdout: R) -> Self {
+    pub fn new(stdout: R, stderr: R) -> Self {
         let mut descriptors = BTreeMap::new();
+
         descriptors.insert(
             STDOUT_FD,
             FdEntry {
                 resource: stdout,
+                flags: 0,
+                rights_base: RIGHTS_FD_WRITE,
+                rights_inheriting: 0,
+            },
+        );
+
+        descriptors.insert(
+            STDERR_FD,
+            FdEntry {
+                resource: stderr,
                 flags: 0,
                 rights_base: RIGHTS_FD_WRITE,
                 rights_inheriting: 0,
@@ -81,6 +93,6 @@ pub struct FdEntry<R> {
 
 impl<R: Default> Default for WasiCtx<R> {
     fn default() -> Self {
-        Self::new(R::default())
+        Self::new(R::default(), R::default())
     }
 }
