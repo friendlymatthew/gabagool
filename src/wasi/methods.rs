@@ -25,6 +25,7 @@ const INVAL: i32 = 28;
 const NOTSUP: i32 = 58;
 const NAMETOOLONG: i32 = 37;
 const NOTDIR: i32 = 54;
+const ISDIR: i32 = 31;
 const SPIPE: i32 = 70;
 const ACCES: i32 = 2;
 const EXIST: i32 = 20;
@@ -247,6 +248,52 @@ pub(super) fn path_link<R: WasiResource>(
             .resource
             .link(old_path, flags != 0, &target.resource, new_path)
         {
+            Ok(()) => SUCCESS,
+            Err(error) => path_errno(error),
+        },
+    )
+}
+
+pub(super) fn path_rename<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let old_fd = args[0].as_i32() as u32;
+    let old_ptr = args[1].as_pointer();
+    let old_len = args[2].as_i32() as u32 as usize;
+    let new_fd = args[3].as_i32() as u32;
+    let new_ptr = args[4].as_pointer();
+    let new_len = args[5].as_i32() as u32 as usize;
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let source = wasi_some!(ctx.descriptors().get(&old_fd), BADF);
+    let target = wasi_some!(ctx.descriptors().get(&new_fd), BADF);
+
+    if !source.can_rename_source() || !target.can_rename_target() {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(source.resource.file_type(), FileType::Directory)
+        || !matches!(target.resource.file_type(), FileType::Directory)
+    {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let old_path = match guest_path(memory, old_ptr, old_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let new_path = match guest_path(memory, new_ptr, new_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    errno(
+        match source.resource.rename(old_path, &target.resource, new_path) {
             Ok(()) => SUCCESS,
             Err(error) => path_errno(error),
         },
@@ -484,6 +531,7 @@ const fn path_errno(error: PathError) -> i32 {
         PathError::InvalidInput => INVAL,
         PathError::CrossDevice => XDEV,
         PathError::NotEmpty => NOTEMPTY,
+        PathError::IsDirectory => ISDIR,
     }
 }
 

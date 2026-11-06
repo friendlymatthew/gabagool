@@ -32,6 +32,8 @@ pub const OFLAGS_TRUNC: u16 = 1 << 3;
 pub(super) const OFLAGS_ALL: u16 = OFLAGS_CREAT | OFLAGS_DIRECTORY | OFLAGS_EXCL | OFLAGS_TRUNC;
 pub const RIGHTS_PATH_LINK_SOURCE: u64 = 1 << 11;
 pub const RIGHTS_PATH_LINK_TARGET: u64 = 1 << 12;
+pub const RIGHTS_PATH_RENAME_SOURCE: u64 = 1 << 16;
+pub const RIGHTS_PATH_RENAME_TARGET: u64 = 1 << 17;
 pub const RIGHTS_PATH_FILESTAT_GET: u64 = 1 << 18;
 pub const RIGHTS_PATH_FILESTAT_SET_TIMES: u64 = 1 << 20;
 pub const LOOKUPFLAGS_SYMLINK_FOLLOW: u32 = 1 << 0;
@@ -252,6 +254,14 @@ impl<R> FdEntry<R> {
 
     pub const fn can_link_target(&self) -> bool {
         self.rights_base & RIGHTS_PATH_LINK_TARGET != 0
+    }
+
+    pub const fn can_rename_source(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_RENAME_SOURCE != 0
+    }
+
+    pub const fn can_rename_target(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_RENAME_TARGET != 0
     }
 
     pub const fn can_path_filestat_get(&self) -> bool {
