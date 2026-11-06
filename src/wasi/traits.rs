@@ -47,6 +47,18 @@ pub enum PathError {
     CrossDevice,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct OpenOptions {
+    pub follow_symlink: bool,
+    pub create: bool,
+    pub directory: bool,
+    pub exclusive: bool,
+    pub truncate: bool,
+    pub fdflags: u16,
+    pub rights_base: u64,
+    pub rights_inheriting: u64,
+}
+
 impl WasiOutput for Vec<u8> {
     fn write(&mut self, bytes: &[u8]) -> Result<usize, WasiIOError> {
         self.extend_from_slice(bytes);
@@ -56,6 +68,13 @@ impl WasiOutput for Vec<u8> {
 
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
+
+    fn open(&mut self, _path: &str, _options: OpenOptions) -> Result<Self, PathError>
+    where
+        Self: Sized,
+    {
+        Err(PathError::Unsupported)
+    }
 
     fn link(
         &self,

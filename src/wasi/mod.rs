@@ -21,11 +21,15 @@ pub use ctx::{
     RIGHTS_FD_FILESTAT_SET_TIMES,
 };
 pub use ctx::{LOOKUPFLAGS_SYMLINK_FOLLOW, RIGHTS_PATH_FILESTAT_GET};
+pub use ctx::{
+    OFLAGS_CREAT, OFLAGS_DIRECTORY, OFLAGS_EXCL, OFLAGS_TRUNC, RIGHTS_PATH_CREATE_FILE,
+    RIGHTS_PATH_FILESTAT_SET_SIZE, RIGHTS_PATH_OPEN,
+};
 pub use ctx::{RIGHTS_FD_FILESTAT_GET, RIGHTS_FD_FILESTAT_SET_SIZE};
 pub use ctx::{RIGHTS_FD_SEEK, RIGHTS_FD_TELL};
 pub use ctx::{RIGHTS_PATH_LINK_SOURCE, RIGHTS_PATH_LINK_TARGET};
 pub use linker::*;
 pub use memory::{MemoryInput, MemoryResource};
 pub use traits::{
-    PathError, SeekError, SeekFrom, WasiIOError, WasiInput, WasiOutput, WasiResource,
+    OpenOptions, PathError, SeekError, SeekFrom, WasiIOError, WasiInput, WasiOutput, WasiResource,
 };

@@ -1,9 +1,12 @@
 use crate::{
     prelude::*,
     wasi::{
-        ctx::FDFLAGS_ALL,
+        ctx::{FDFLAGS_ALL, OFLAGS_ALL},
         traits::{ClockError, ClockId},
-        FileType, FSTFLAGS_ATIM, FSTFLAGS_ATIM_NOW, FSTFLAGS_MTIM, FSTFLAGS_MTIM_NOW,
+        FdEntry, FileType, OpenOptions, FDFLAGS_DSYNC, FDFLAGS_RSYNC, FDFLAGS_SYNC, FSTFLAGS_ATIM,
+        FSTFLAGS_ATIM_NOW, FSTFLAGS_MTIM, FSTFLAGS_MTIM_NOW, LOOKUPFLAGS_SYMLINK_FOLLOW,
+        OFLAGS_CREAT, OFLAGS_DIRECTORY, OFLAGS_EXCL, OFLAGS_TRUNC, RIGHTS_FD_DATASYNC,
+        RIGHTS_FD_SYNC, RIGHTS_PATH_CREATE_FILE, RIGHTS_PATH_FILESTAT_SET_SIZE,
     },
     Caller, ExternalValue, GuestMemory, HostOutcome, Instance, RawValue, Store,
 };
@@ -28,6 +31,7 @@ const EXIST: i32 = 20;
 const ILSEQ: i32 = 25;
 const NOENT: i32 = 44;
 const XDEV: i32 = 75;
+const MFILE: i32 = 33;
 
 macro_rules! wasi_some {
     ($expr:expr, $errno:expr $(,)?) => {
@@ -45,6 +49,107 @@ macro_rules! wasi_try {
             Err(_) => return $crate::wasi::methods::errno($errno),
         }
     };
+}
+
+pub(super) fn path_open<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let lookup = args[1].as_i32() as u32;
+    let path_ptr = args[2].as_pointer();
+    let path_len = args[3].as_i32() as u32 as usize;
+    let oflags = args[4].as_i32() as u32;
+    let rights_base = args[5].as_i64() as u64;
+    let rights_inheriting = args[6].as_i64() as u64;
+    let fdflags = args[7].as_i32() as u32;
+    let opened_ptr = args[8].as_pointer();
+
+    if lookup & !LOOKUPFLAGS_SYMLINK_FOLLOW != 0
+        || oflags & !u32::from(OFLAGS_ALL) != 0
+        || fdflags & !u32::from(FDFLAGS_ALL) != 0
+    {
+        return errno(INVAL);
+    }
+    let oflags = oflags as u16;
+    let fdflags = fdflags as u16;
+
+    let (store, instance, ctx) = caller.parts_mut();
+
+    let parent = wasi_some!(ctx.descriptors().get(&fd), BADF);
+
+    if !parent.can_open()
+        || (rights_base | rights_inheriting) & !parent.rights_inheriting != 0
+        || oflags & OFLAGS_CREAT != 0 && parent.rights_base & RIGHTS_PATH_CREATE_FILE == 0
+        || oflags & OFLAGS_TRUNC != 0 && parent.rights_base & RIGHTS_PATH_FILESTAT_SET_SIZE == 0
+        || fdflags & FDFLAGS_DSYNC != 0
+            && parent.rights_base & (RIGHTS_FD_DATASYNC | RIGHTS_FD_SYNC) == 0
+        || fdflags & (FDFLAGS_RSYNC | FDFLAGS_SYNC) != 0 && parent.rights_base & RIGHTS_FD_SYNC == 0
+    {
+        return errno(NOTCAPABLE);
+    }
+
+    if !matches!(parent.resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.read_bytes(opened_ptr, 4), FAULT);
+
+    let path = match guest_path(memory, path_ptr, path_len) {
+        Ok(path) => path,
+        Err(code) => return errno(code),
+    };
+
+    let mut new_fd = 3u32;
+
+    for &existing in ctx.descriptors().keys().filter(|&&key| key >= 3) {
+        if existing != new_fd {
+            break;
+        }
+        new_fd += 1;
+        if new_fd > i32::MAX as u32 {
+            return errno(MFILE);
+        }
+    }
+
+    let options = OpenOptions {
+        follow_symlink: lookup != 0,
+        create: oflags & OFLAGS_CREAT != 0,
+        directory: oflags & OFLAGS_DIRECTORY != 0,
+        exclusive: oflags & OFLAGS_EXCL != 0,
+        truncate: oflags & OFLAGS_TRUNC != 0,
+        fdflags,
+        rights_base,
+        rights_inheriting,
+    };
+
+    let parent = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    let resource = match parent.resource.open(path, options) {
+        Ok(resource) => resource,
+        Err(error) => return errno(path_errno(error)),
+    };
+
+    if options.directory && !matches!(resource.file_type(), FileType::Directory) {
+        return errno(NOTDIR);
+    }
+
+    ctx.descriptors_mut().insert(
+        new_fd,
+        FdEntry {
+            resource,
+            flags: fdflags,
+            rights_base,
+            rights_inheriting,
+            preopen_name: None,
+        },
+    );
+
+    wasi_try!(memory.write(opened_ptr, new_fd.to_le_bytes()), FAULT);
+
+    errno(SUCCESS)
 }
 
 pub(super) fn path_link<R: WasiResource>(

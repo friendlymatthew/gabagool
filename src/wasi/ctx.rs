@@ -19,6 +19,15 @@ pub const RIGHTS_FD_FILESTAT_GET: u64 = 1 << 21;
 pub const RIGHTS_FD_FILESTAT_SET_SIZE: u64 = 1 << 22;
 pub const RIGHTS_FD_FILESTAT_SET_TIMES: u64 = 1 << 23;
 pub const RIGHTS_PATH_CREATE_DIRECTORY: u64 = 1 << 9;
+pub const RIGHTS_PATH_CREATE_FILE: u64 = 1 << 10;
+pub const RIGHTS_PATH_OPEN: u64 = 1 << 13;
+pub const RIGHTS_PATH_FILESTAT_SET_SIZE: u64 = 1 << 19;
+
+pub const OFLAGS_CREAT: u16 = 1 << 0;
+pub const OFLAGS_DIRECTORY: u16 = 1 << 1;
+pub const OFLAGS_EXCL: u16 = 1 << 2;
+pub const OFLAGS_TRUNC: u16 = 1 << 3;
+pub(super) const OFLAGS_ALL: u16 = OFLAGS_CREAT | OFLAGS_DIRECTORY | OFLAGS_EXCL | OFLAGS_TRUNC;
 pub const RIGHTS_PATH_LINK_SOURCE: u64 = 1 << 11;
 pub const RIGHTS_PATH_LINK_TARGET: u64 = 1 << 12;
 pub const RIGHTS_PATH_FILESTAT_GET: u64 = 1 << 18;
@@ -221,6 +230,10 @@ impl<R> FdEntry<R> {
 
     pub const fn can_create_directory(&self) -> bool {
         self.rights_base & RIGHTS_PATH_CREATE_DIRECTORY != 0
+    }
+
+    pub const fn can_open(&self) -> bool {
+        self.rights_base & RIGHTS_PATH_OPEN != 0
     }
 
     pub const fn can_link_source(&self) -> bool {
