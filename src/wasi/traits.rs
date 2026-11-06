@@ -44,3 +44,12 @@ impl WasiResource for Vec<u8> {
 pub trait WasiInput {
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize, WasiIOError>;
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RandomError {
+    Unavailable,
+}
+
+pub trait WasiRandom: core::fmt::Debug {
+    fn fill_bytes(&mut self, buffer: &mut [u8]) -> Result<(), RandomError>;
+}

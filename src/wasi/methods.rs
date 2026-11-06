@@ -31,6 +31,24 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn random_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let addr = args[0].as_pointer();
+    let len = args[1].as_i32() as u32;
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let buf = wasi_try!(memory.read_bytes_mut(addr, len as usize), BADF);
+
+    let rand = ctx.random_mut();
+    wasi_try!(rand.fill_bytes(buf), IO);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_close<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],

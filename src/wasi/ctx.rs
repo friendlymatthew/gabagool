@@ -1,7 +1,10 @@
 use alloc::collections::BTreeMap;
 
 use super::{MemoryInput, MemoryResource};
-use crate::prelude::*;
+use crate::{
+    prelude::*,
+    wasi::traits::{RandomError, WasiRandom},
+};
 
 pub const RIGHTS_FD_WRITE: u64 = 1 << 6;
 pub const RIGHTS_FD_READ: u64 = 1 << 1;
@@ -15,6 +18,8 @@ pub struct WasiCtx<R = MemoryResource> {
     args: Vec<String>,
     environment: Vec<String>,
     descriptors: BTreeMap<u32, FdEntry<R>>,
+
+    random: Box<dyn WasiRandom>,
 }
 
 impl<R> WasiCtx<R> {
@@ -55,7 +60,12 @@ impl<R> WasiCtx<R> {
             args: vec![],
             environment: vec![],
             descriptors,
+            random: Box::new(UnavailableRandom),
         }
+    }
+
+    pub fn set_random(&mut self, random: impl WasiRandom + 'static) {
+        self.random = Box::new(random);
     }
 
     pub fn args(&self) -> &[String] {
@@ -80,6 +90,14 @@ impl<R> WasiCtx<R> {
 
     pub const fn descriptors_mut(&mut self) -> &mut BTreeMap<u32, FdEntry<R>> {
         &mut self.descriptors
+    }
+
+    pub fn random(&self) -> &dyn WasiRandom {
+        &*self.random
+    }
+
+    pub fn random_mut(&mut self) -> &mut dyn WasiRandom {
+        &mut *self.random
     }
 }
 
@@ -142,5 +160,14 @@ impl<R> FdEntry<R> {
 
     pub const fn can_write(&self) -> bool {
         self.rights_base & RIGHTS_FD_WRITE != 0
+    }
+}
+
+#[derive(Debug)]
+pub struct UnavailableRandom;
+
+impl WasiRandom for UnavailableRandom {
+    fn fill_bytes(&mut self, _: &mut [u8]) -> Result<(), RandomError> {
+        Err(RandomError::Unavailable)
     }
 }
