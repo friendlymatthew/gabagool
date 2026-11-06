@@ -30,6 +30,10 @@ pub trait WasiResource {
         Err(WasiIOError::Unsupported)
     }
 
+    fn write_at(&mut self, _buffer: &[u8], _offset: u64) -> Result<usize, WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn filestat(&mut self) -> Result<Filestat, WasiIOError> {
         Err(WasiIOError::Unsupported)
     }

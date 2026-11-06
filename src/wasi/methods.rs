@@ -157,6 +157,71 @@ pub(super) fn fd_pread<R: WasiResource>(
     errno(SUCCESS)
 }
 
+pub(super) fn fd_pwrite<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let iovs_ptr = args[1].as_pointer();
+    let iovs_len = args[2].as_i32() as u32 as usize;
+    let offset = args[3].as_i64() as u64;
+    let nwritten_ptr = args[4].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_pwrite() {
+        return errno(NOTCAPABLE);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    let buffers = match decode_iovecs(memory, iovs_ptr, iovs_len) {
+        Ok(buffers) => buffers,
+        Err(code) => return errno(code),
+    };
+
+    wasi_try!(memory.read_bytes(nwritten_ptr, 4), FAULT);
+
+    let capacity: u64 = buffers.iter().map(|&(_, len)| u64::from(len)).sum();
+    wasi_some!(offset.checked_add(capacity), OVERFLOW);
+
+    let mut total_written = 0u32;
+    for (ptr, len) in buffers {
+        let buffer = wasi_try!(memory.read_bytes(ptr as usize, len as usize), FAULT);
+
+        match entry
+            .resource
+            .write_at(buffer, offset + u64::from(total_written))
+        {
+            Ok(n) if n <= buffer.len() => {
+                total_written += n as u32;
+                if n < buffer.len() {
+                    break;
+                }
+            }
+            result => {
+                if total_written != 0 {
+                    break;
+                }
+                return errno(match result {
+                    Err(WasiIOError::Interrupted) => INTR,
+                    Err(WasiIOError::WouldBlock) => AGAIN,
+                    Err(WasiIOError::Unsupported) => NOTSUP,
+                    _ => IO,
+                });
+            }
+        }
+    }
+
+    wasi_try!(
+        memory.write(nwritten_ptr, total_written.to_le_bytes()),
+        FAULT
+    );
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_filestat_set_times<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],

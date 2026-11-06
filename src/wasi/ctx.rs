@@ -206,6 +206,10 @@ impl<R> FdEntry<R> {
         self.rights_base & RIGHTS_FD_WRITE != 0
     }
 
+    pub const fn can_pwrite(&self) -> bool {
+        self.can_write() && self.rights_base & RIGHTS_FD_SEEK != 0
+    }
+
     pub const fn can_advise(&self) -> bool {
         self.rights_base & RIGHTS_FD_ADVISE != 0
     }
