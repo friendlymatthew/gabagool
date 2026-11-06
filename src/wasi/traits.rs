@@ -1,4 +1,7 @@
-use crate::{prelude::*, wasi::FileType};
+use crate::{
+    prelude::*,
+    wasi::{ctx::Filestat, FileType},
+};
 use core::{num::NonZeroU64, result::Result};
 
 pub trait WasiOutput {
@@ -23,12 +26,14 @@ impl WasiOutput for Vec<u8> {
 pub trait WasiResource {
     fn file_type(&self) -> FileType;
 
+    fn filestat(&mut self) -> Result<Filestat, WasiIOError> {
+        Err(WasiIOError::Unsupported)
+    }
+
     fn datasync(&mut self) -> Result<(), WasiIOError> {
         Err(WasiIOError::Unsupported)
     }
 
-    /// Apply descriptor flags. On error, leave the resource unchanged.
-    /// The ABI layer updates its metadata only after this succeeds.
     fn set_fdflags(&mut self, _flags: u16) -> Result<(), WasiIOError> {
         Err(WasiIOError::Unsupported)
     }
@@ -43,6 +48,10 @@ pub trait WasiResource {
 }
 
 impl WasiResource for Vec<u8> {
+    fn filestat(&mut self) -> Result<Filestat, WasiIOError> {
+        Ok(Filestat::stream(self.file_type()))
+    }
+
     fn file_type(&self) -> super::FileType {
         super::FileType::Unknown
     }

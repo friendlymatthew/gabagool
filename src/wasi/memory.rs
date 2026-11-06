@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{prelude::*, wasi::ctx::Filestat};
 
 use super::{FileType, WasiIOError, WasiInput, WasiOutput, WasiResource};
 
@@ -9,6 +9,10 @@ pub enum MemoryResource {
 }
 
 impl WasiResource for MemoryResource {
+    fn filestat(&mut self) -> core::result::Result<Filestat, WasiIOError> {
+        Ok(Filestat::stream(self.file_type()))
+    }
+
     fn file_type(&self) -> FileType {
         FileType::Unknown
     }

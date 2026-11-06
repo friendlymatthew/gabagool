@@ -38,6 +38,41 @@ macro_rules! wasi_try {
     };
 }
 
+pub(super) fn fd_filestat_get<R: WasiResource>(
+    mut caller: Caller<'_, WasiCtx<R>>,
+    args: &[RawValue],
+) -> HostOutcome {
+    let fd = args[0].as_i32() as u32;
+    let addr = args[1].as_pointer();
+
+    let (store, instance, ctx) = caller.parts_mut();
+    let entry = wasi_some!(ctx.descriptors_mut().get_mut(&fd), BADF);
+
+    if !entry.can_filestat_get() {
+        return errno(NOTCAPABLE);
+    }
+
+    let memory = wasi_some!(guest_memory(store, instance), FAULT);
+
+    wasi_try!(memory.read_bytes(addr, 64), FAULT);
+
+    let stat = match entry.resource.filestat() {
+        Ok(stat) => stat,
+        Err(error) => {
+            return errno(match error {
+                WasiIOError::Io => IO,
+                WasiIOError::Interrupted => INTR,
+                WasiIOError::WouldBlock => AGAIN,
+                WasiIOError::Unsupported => NOTSUP,
+            })
+        }
+    };
+
+    wasi_try!(memory.write(addr, stat.to_bytes()), FAULT);
+
+    errno(SUCCESS)
+}
+
 pub(super) fn fd_fdstat_set_flags<R: WasiResource>(
     mut caller: Caller<'_, WasiCtx<R>>,
     args: &[RawValue],

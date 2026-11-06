@@ -11,6 +11,7 @@ pub const RIGHTS_FD_READ: u64 = 1 << 1;
 pub const RIGHTS_FD_ADVISE: u64 = 1 << 7;
 pub const RIGHTS_FD_DATASYNC: u64 = 1 << 0;
 pub const RIGHTS_FD_FDSTAT_SET_FLAGS: u64 = 1 << 3;
+pub const RIGHTS_FD_FILESTAT_GET: u64 = 1 << 21;
 
 pub const FDFLAGS_APPEND: u16 = 1 << 0;
 pub const FDFLAGS_DSYNC: u16 = 1 << 1;
@@ -43,7 +44,7 @@ impl<R> WasiCtx<R> {
             FdEntry {
                 resource: stdin,
                 flags: 0,
-                rights_base: RIGHTS_FD_READ,
+                rights_base: RIGHTS_FD_READ | RIGHTS_FD_FILESTAT_GET,
                 rights_inheriting: 0,
             },
         );
@@ -53,7 +54,7 @@ impl<R> WasiCtx<R> {
             FdEntry {
                 resource: stdout,
                 flags: 0,
-                rights_base: RIGHTS_FD_WRITE,
+                rights_base: RIGHTS_FD_WRITE | RIGHTS_FD_FILESTAT_GET,
                 rights_inheriting: 0,
             },
         );
@@ -63,7 +64,7 @@ impl<R> WasiCtx<R> {
             FdEntry {
                 resource: stderr,
                 flags: 0,
-                rights_base: RIGHTS_FD_WRITE,
+                rights_base: RIGHTS_FD_WRITE | RIGHTS_FD_FILESTAT_GET,
                 rights_inheriting: 0,
             },
         );
@@ -127,7 +128,7 @@ impl<R> WasiCtx<R> {
 }
 
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum FileType {
     Unknown = 0,
     BlockDevice = 1,
@@ -198,6 +199,10 @@ impl<R> FdEntry<R> {
     pub const fn can_set_flags(&self) -> bool {
         self.rights_base & RIGHTS_FD_FDSTAT_SET_FLAGS != 0
     }
+
+    pub const fn can_filestat_get(&self) -> bool {
+        self.rights_base & RIGHTS_FD_FILESTAT_GET != 0
+    }
 }
 
 #[derive(Debug)]
@@ -207,3 +212,46 @@ impl WasiRandom for UnavailableRandom {}
 #[derive(Debug)]
 pub struct UnavailableClock;
 impl WasiClock for UnavailableClock {}
+
+#[derive(Debug)]
+pub struct Filestat {
+    pub dev: u64,
+    pub ino: u64,
+    pub filetype: FileType,
+    pub nlink: u64,
+    pub size: u64,
+    pub atim: u64,
+    pub mtim: u64,
+    pub ctim: u64,
+}
+
+impl Filestat {
+    pub const fn stream(filetype: FileType) -> Self {
+        Self {
+            dev: 0,
+            ino: 0,
+            filetype,
+            nlink: 1,
+            size: 0,
+            atim: 0,
+            mtim: 0,
+            ctim: 0,
+        }
+    }
+
+    pub(super) fn to_bytes(&self) -> [u8; 64] {
+        let mut bytes = [0; 64];
+        bytes[0..8].copy_from_slice(&self.dev.to_le_bytes());
+        bytes[8..16].copy_from_slice(&self.ino.to_le_bytes());
+        bytes[16] = self.filetype as u8;
+
+        // Offsets 17..24 are ABI padding.
+        bytes[24..32].copy_from_slice(&self.nlink.to_le_bytes());
+        bytes[32..40].copy_from_slice(&self.size.to_le_bytes());
+        bytes[40..48].copy_from_slice(&self.atim.to_le_bytes());
+        bytes[48..56].copy_from_slice(&self.mtim.to_le_bytes());
+        bytes[56..64].copy_from_slice(&self.ctim.to_le_bytes());
+
+        bytes
+    }
+}
