@@ -22,7 +22,7 @@ This project aims to build a **serious**, fully spec-compliant, performant WASM 
 
 As a pure interpreter, it is safe to assume `gabagool` is spec compliant. `gabagool` is tested against the [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core). **1,960 tests pass out of 2,049 (96%).** `gabagool` passes on arithmetic, control flow, memory, tables, globals, function references, imports/exports, and exceptions. Remaining tests involve supporting SIMD and garbage collection.
 
-`gabagool` is not focused on performance optimization. No serious profiling/benchmarking has been done (yet!). That said, the goal is to make `gabagool` performant while preserving its snapshot friendly execution model. `gabagool` already lowers WASM instructions into a compact, serializable intermediate representation. The most interesting direction now is an experimental JIT compiler based on copy and patch compilation.
+`gabagool` is not focused on performance optimization. No serious profiling/benchmarking has been done (yet!). That said, the goal is to make `gabagool` performant while preserving its snapshot friendly execution model. `gabagool` already lowers WASM instructions into a compact, serializable intermediate representation. A future direction is a JIT compiler based on copy and patch compilation.
 
 **Current work** focuses on how gabagool interacts with its host environment. This includes a robust, virtualized WASI Preview 1 implementation whose state can be snapshotted and restored alongside the interpreter.
 

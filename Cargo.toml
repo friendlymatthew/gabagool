@@ -10,18 +10,12 @@ license = "Apache-2.0"
 [dependencies]
 libm = "0.2.16"
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2.183"
-
 [build-dependencies]
 wast = { version = "245.0.1", optional = true }
-cc = { version = "1.2.57", optional = true }
-object = { version = "0.38.1", optional = true }
 
 [features]
 core-tests = ["wast"]
 component-tests = []
-jit = ["cc", "object"]
 
 [dev-dependencies]
 insta = "1"

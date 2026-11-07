@@ -18,9 +18,6 @@ mod validator;
 
 pub mod wasi;
 
-#[cfg(feature = "jit")]
-mod jit;
-
 pub use component::*;
 pub use error::*;
 pub use linker::*;

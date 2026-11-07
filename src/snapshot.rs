@@ -780,22 +780,27 @@ impl Snapshot for ModuleCode {
     }
 }
 
-impl Snapshot for CallFrame {
-    fn encode(&self, buf: &mut Vec<u8>) {
+impl CallFrame {
+    fn encode_with_locals(&self, locals: &[RawValue], buf: &mut Vec<u8>) {
         self.module_i.encode(buf);
         self.compiled_func_i.encode(buf);
         self.pc.encode(buf);
-        encode_bulk(&self.locals, buf);
+        encode_bulk(&locals[self.locals.clone()], buf);
         self.stack_base.encode(buf);
         self.arity.encode(buf);
     }
 
-    fn decode(buf: &mut &[u8]) -> Self {
+    fn decode_with_locals(buf: &mut &[u8], locals: &mut Vec<RawValue>) -> Self {
+        let module_i = u16::decode(buf);
+        let compiled_func_i = u32::decode(buf);
+        let pc = usize::decode(buf);
+        let base = locals.len();
+        locals.extend_from_slice(&decode_bulk::<RawValue>(buf));
         Self {
-            module_i: u16::decode(buf),
-            compiled_func_i: u32::decode(buf),
-            pc: usize::decode(buf),
-            locals: decode_bulk::<RawValue>(buf),
+            module_i,
+            compiled_func_i,
+            pc,
+            locals: base..locals.len(),
             stack_base: usize::decode(buf),
             arity: usize::decode(buf),
         }
@@ -827,8 +832,6 @@ impl Snapshot for InstantiatedModule {
             data_addrs: Vec::<usize>::decode(buf),
             exports: Vec::<ExportInstance>::decode(buf),
             // todo: figure out this
-            #[cfg(feature = "jit")]
-            jit_functions: Vec::new(),
         }
     }
 }
@@ -1209,7 +1212,11 @@ impl Snapshot for Store {
         stack_cursor.encode(buf);
 
         // call stack
-        self.call_stack.encode(buf);
+        // Keep the existing snapshot layout: locals are encoded per frame.
+        (self.call_stack.len() as u32).encode(buf);
+        for frame in &self.call_stack {
+            frame.encode_with_locals(&self.locals, buf);
+        }
 
         // fuel + pending_arity
         self.fuel.encode(buf);
@@ -1310,7 +1317,11 @@ impl Snapshot for Store {
         let stack = ValueStack::from_snapshot(stack_data, stack_cursor);
 
         // call stack
-        let call_stack = Vec::decode(buf);
+        let frame_count = u32::decode(buf) as usize;
+        let mut locals = Vec::new();
+        let call_stack = (0..frame_count)
+            .map(|_| CallFrame::decode_with_locals(buf, &mut locals))
+            .collect();
 
         // fuel + pending_arity + pending_lifted
         let fuel = Option::decode(buf);
@@ -1335,6 +1346,7 @@ impl Snapshot for Store {
             instances,
             stack,
             call_stack,
+            locals,
             catch_stack: Vec::new(),
             exceptions: Vec::new(),
             fuel,

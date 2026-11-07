@@ -2,7 +2,7 @@ use crate::prelude::*;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::fmt::Debug;
-use core::ops::Neg;
+use core::ops::{Neg, Range};
 
 use crate::compiler::ModuleCode;
 use crate::component::flatten::Initializer;
@@ -10,8 +10,6 @@ use crate::component::model::{
     ComponentDefinedKind, ComponentTypeDef, ComponentValueKind, PrimitiveValueKind,
 };
 use crate::error::{Error, Result};
-#[cfg(feature = "jit")]
-use crate::jit::assembler::JitFunction;
 use crate::{
     bail_instantiation, bail_trap, ensure_instantiation, ensure_trap, AddrType, Component,
     ComponentInstance, ComponentValue, DataMode, ElementMode, GuestMemory, ImportDescription,
@@ -112,7 +110,7 @@ macro_rules! cmp_branch {
 
 macro_rules! local_get_load {
     ($self:expr, $depth:expr, $mi:expr, $local_i:expr, $offset:expr, $memory:expr, $width:literal, |$bytes:ident| $convert:expr) => {{
-        let locals = &$self.call_stack[$depth].locals;
+        let locals = &$self.locals[$self.call_stack[$depth].locals.clone()];
         let mem_addr = $self.instances[$mi].mem_addrs[$memory as usize];
         let mem = &$self.memories[mem_addr];
         let base = match mem.memory_type.addr_type {
@@ -132,7 +130,7 @@ macro_rules! local_get_load {
 
 macro_rules! local_get_store {
     ($self:expr, $depth:expr, $mi:expr, $local_i:expr, $offset:expr, $memory:expr, $width:literal, $to_bytes:expr) => {{
-        let locals = &$self.call_stack[$depth].locals;
+        let locals = &$self.locals[$self.call_stack[$depth].locals.clone()];
         let val = locals[$local_i as usize];
         let mem_addr = $self.instances[$mi].mem_addrs[$memory as usize];
         let addr_type = $self.memories[mem_addr].memory_type.addr_type;
@@ -217,7 +215,8 @@ pub struct CallFrame {
     pub module_i: u16,
     pub compiled_func_i: u32,
     pub pc: usize,
-    pub locals: Vec<RawValue>,
+    /// Range within the store-owned locals buffer.
+    pub locals: Range<usize>,
     pub stack_base: usize,
     pub arity: usize,
 }
@@ -240,8 +239,6 @@ pub struct InstantiatedModule {
     pub elem_addrs: Vec<usize>,
     pub data_addrs: Vec<usize>,
     pub exports: Vec<ExportInstance>,
-    #[cfg(feature = "jit")]
-    pub jit_functions: Vec<Option<JitFunction>>,
 }
 
 impl InstantiatedModule {
@@ -256,8 +253,6 @@ impl InstantiatedModule {
             elem_addrs: Vec::new(),
             data_addrs: Vec::new(),
             exports: Vec::new(),
-            #[cfg(feature = "jit")]
-            jit_functions: Vec::new(),
         }
     }
 }
@@ -281,6 +276,7 @@ pub struct Store {
     // execution state
     pub(crate) stack: ValueStack,
     pub(crate) call_stack: Vec<CallFrame>,
+    pub(crate) locals: Vec<RawValue>,
     pub(crate) catch_stack: Vec<CatchFrame>,
     pub(crate) exceptions: Vec<Exception>,
     pub(crate) fuel: Option<u64>,
@@ -329,6 +325,7 @@ impl Store {
             data_segments: Vec::new(),
             stack: ValueStack::with_capacity(1024),
             call_stack: Vec::new(),
+            locals: Vec::new(),
             catch_stack: Vec::new(),
             exceptions: Vec::new(),
             fuel: None,
@@ -783,21 +780,6 @@ impl Store {
             .map_err(|_| Error::Instantiation("too many module instances".into()))?;
 
         let module_instance = self.allocate_module(module, instance_i, external_addresses)?;
-
-        #[cfg(feature = "jit")]
-        let module_instance = {
-            use crate::jit::assembler::assemble;
-
-            let mut module_instance = module_instance;
-            module_instance.jit_functions = module_instance
-                .code
-                .compiled_funcs
-                .iter()
-                .map(|cf| assemble(&cf.ops))
-                .collect();
-
-            module_instance
-        };
 
         let start_func_addr = module
             .start
@@ -1602,6 +1584,7 @@ impl Store {
             Err(e) => {
                 self.stack.clear();
                 self.call_stack.clear();
+                self.locals.clear();
                 self.catch_stack.clear();
                 self.pending_arity = None;
                 Err(e)
@@ -1705,13 +1688,19 @@ impl Store {
 
         ensure_instantiation!(self.stack.len() >= num_args, "not enough args on stack");
         let args_start = self.stack.len() - num_args;
-        let mut locals = self.stack.slice_from(args_start).to_vec();
+        let locals_base = self.locals.len();
+        self.locals
+            .extend_from_slice(self.stack.slice_from(args_start));
         self.stack.truncate(args_start);
 
         let cf = &self.instances[usize::from(module_i)].code.compiled_funcs
             [usize::try_from(compiled_func_i).expect("u32 fits in usize")];
 
-        locals.resize(locals.len() + cf.local_types.len(), RawValue::default());
+        self.locals.resize(
+            self.locals.len() + cf.local_types.len(),
+            RawValue::default(),
+        );
+        let locals = locals_base..self.locals.len();
 
         let stack_base = self.stack.len();
 
@@ -1725,55 +1714,6 @@ impl Store {
         });
 
         Ok(false)
-    }
-
-    #[cfg(feature = "jit")]
-    fn run_jit(&mut self) -> Result<RunOutcome> {
-        use crate::jit::{Exit, StencilContext};
-
-        loop {
-            let depth = match self.call_stack.len() {
-                0 => return Ok(RunOutcome::Completed),
-                n => n - 1,
-            };
-
-            let mi = self.call_stack[depth].module_i as usize;
-            let func_i = self.call_stack[depth].compiled_func_i;
-            let pc = self.call_stack[depth].pc;
-
-            let Some(jit_function) = &self.instances[mi].jit_functions[func_i as usize] else {
-                return self.run();
-            };
-
-            let mut ctx = StencilContext {
-                stack: self.stack.as_mut_ptr() as *mut u64,
-                stack_pointer: self.stack.len() as u64,
-                locals: self.call_stack[depth].locals.as_mut_ptr() as *mut u64,
-                mem_base: core::ptr::null_mut(),
-                mem_len: 0,
-                globals: core::ptr::null_mut(),
-                imm_table: jit_function.imm_table.as_ptr(),
-                fn_table: jit_function.fn_table.as_ptr(),
-                pc: pc as u32,
-                snapshot_flag: 0,
-                exit_reason: 0,
-                exit_value: 0,
-            };
-
-            unsafe { (jit_function.fn_table[pc])(&mut ctx) };
-
-            self.stack.truncate(ctx.stack_pointer as usize);
-            self.call_stack[depth].pc = ctx.pc as usize;
-
-            match ctx.exit_reason.into() {
-                Exit::Return => {
-                    self.do_return(depth);
-                }
-                Exit::Snapshot => {
-                    return Ok(RunOutcome::FuelExhausted);
-                }
-            }
-        }
     }
 
     fn run(&mut self) -> Result<RunOutcome> {
@@ -1910,7 +1850,7 @@ impl Store {
 
                     self.stack.copy_within(len - num_args..len, old_base);
                     self.stack.truncate(old_base + num_args);
-                    self.call_stack.pop();
+                    self.pop_call_frame();
 
                     if self.push_function_call(func_addr)? {
                         return Ok(RunOutcome::Suspended);
@@ -1952,7 +1892,7 @@ impl Store {
 
                     self.stack.copy_within(len - num_args..len, old_base);
                     self.stack.truncate(old_base + num_args);
-                    self.call_stack.pop();
+                    self.pop_call_frame();
                     if self.push_function_call(func_addr)? {
                         return Ok(RunOutcome::Suspended);
                     }
@@ -1982,7 +1922,7 @@ impl Store {
 
                     self.stack.copy_within(len - num_args..len, old_base);
                     self.stack.truncate(old_base + num_args);
-                    self.call_stack.pop();
+                    self.pop_call_frame();
                     if self.push_function_call(func_addr)? {
                         return Ok(RunOutcome::Suspended);
                     }
@@ -1998,7 +1938,7 @@ impl Store {
                 Op::LocalGet { local_i } => self.do_local_get(local_i as usize, depth),
                 Op::LocalSet { local_i } => {
                     let val = self.stack.pop();
-                    let locals = &mut self.call_stack[depth].locals;
+                    let locals = &mut self.locals[self.call_stack[depth].locals.clone()];
                     assert!(
                         (local_i as usize) < locals.len(),
                         "compiler error: local index {local_i} oob (func has {} locals)",
@@ -2008,7 +1948,7 @@ impl Store {
                 }
                 Op::LocalTee { local_i } => {
                     let val = *self.stack.last();
-                    let locals = &mut self.call_stack[depth].locals;
+                    let locals = &mut self.locals[self.call_stack[depth].locals.clone()];
                     assert!(
                         (local_i as usize) < locals.len(),
                         "compiler error: local index {local_i} oob (func has {} locals)",
@@ -2996,7 +2936,7 @@ impl Store {
                     local_i_a,
                     local_i_b,
                 } => {
-                    let locals = &self.call_stack[depth].locals;
+                    let locals = &self.locals[self.call_stack[depth].locals.clone()];
 
                     self.stack.extend_from_slice(&[
                         locals[local_i_a as usize],
@@ -3095,7 +3035,7 @@ impl Store {
                     local_get_i,
                     local_set_i,
                 } => {
-                    let locals = &mut self.call_stack[depth].locals;
+                    let locals = &mut self.locals[self.call_stack[depth].locals.clone()];
                     let out = locals[local_get_i as usize];
 
                     locals[local_set_i as usize] = out;
@@ -3106,7 +3046,7 @@ impl Store {
     }
 
     fn do_local_get(&mut self, local_i: usize, depth: usize) {
-        let locals = &self.call_stack[depth].locals;
+        let locals = &self.locals[self.call_stack[depth].locals.clone()];
         debug_assert!(
             local_i < locals.len(),
             "compiler error: local index {local_i} oob (func has {} locals)",
@@ -3138,7 +3078,7 @@ impl Store {
                     self.catch_stack.pop();
 
                     while self.call_stack.len() > call_depth {
-                        self.call_stack.pop();
+                        self.pop_call_frame();
                     }
 
                     self.stack.truncate(stack_restore);
@@ -3188,6 +3128,13 @@ impl Store {
         }
     }
 
+    /// Release the top frame's locals without freeing the shared allocation.
+    fn pop_call_frame(&mut self) {
+        if let Some(frame) = self.call_stack.pop() {
+            self.locals.truncate(frame.locals.start);
+        }
+    }
+
     fn do_return(&mut self, depth: usize) {
         let arity = self.call_stack[depth].arity;
         let base = self.call_stack[depth].stack_base;
@@ -3205,7 +3152,7 @@ impl Store {
             self.stack.copy_within(len - arity..len, base);
         }
         self.stack.truncate(base + arity);
-        self.call_stack.pop();
+        self.pop_call_frame();
     }
 
     fn func_num_params(&self, func_addr: usize) -> usize {
@@ -3265,7 +3212,7 @@ impl Store {
             module_i,
             compiled_func_i: compiled_func_i as u32,
             pc: 0,
-            locals: Vec::new(),
+            locals: self.locals.len()..self.locals.len(),
             stack_base: self.stack.len(),
             arity: 0,
         });
