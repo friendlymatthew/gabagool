@@ -24,6 +24,9 @@ fn main() {
         )
         .unwrap();
     }
+
+    #[cfg(feature = "jit")]
+    stencil::generate();
 }
 
 #[cfg(feature = "component-tests")]
@@ -33,3 +36,7 @@ mod component_tests;
 #[cfg(feature = "core-tests")]
 #[path = "build/core_tests.rs"]
 mod core_tests;
+
+#[cfg(feature = "jit")]
+#[path = "build/stencil.rs"]
+mod stencil;
