@@ -7,6 +7,8 @@ pub mod compiler;
 pub mod component;
 mod error;
 pub mod ir;
+#[cfg(feature = "jit")]
+mod jit;
 pub mod leb128;
 mod linker;
 mod module;

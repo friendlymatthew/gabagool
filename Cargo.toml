@@ -11,6 +11,7 @@ license = "Apache-2.0"
 libm = "0.2.16"
 
 [build-dependencies]
+object = "0.41.0"
 wast = { version = "245.0.1", optional = true }
 
 [features]

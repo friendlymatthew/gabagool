@@ -38,5 +38,5 @@ mod component_tests;
 mod core_tests;
 
 #[cfg(feature = "jit")]
-#[path = "build/stencil.rs"]
+#[path = "build/stencil/mod.rs"]
 mod stencil;

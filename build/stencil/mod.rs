@@ -1,3 +1,6 @@
+mod extract;
+mod write;
+
 use std::{env, path::PathBuf, process::Command};
 
 pub fn generate() {
@@ -34,6 +37,11 @@ pub fn generate() {
         status.success(),
         "stencil compilation failed for target {target} (Clang target {clang_target})"
     );
+
+    let object_bytes = std::fs::read(&object).expect("failed to read compiled stencils");
+
+    let stencils = extract::into_stencils(&object_bytes);
+    write::generate(&stencils, &out_dir.join("stencils_generated.rs"));
 
     println!("cargo::rerun-if-changed=src/jit/stencils/stencils.c");
     println!("cargo::rerun-if-changed=src/jit/stencils/shared.h");
