@@ -7,6 +7,7 @@ const fn find_stencil(op: Op) -> Option<&'static str> {
         Op::I32Const { .. } => "_i32_const",
         Op::LocalGet { .. } => "_local_get",
         Op::LocalSet { .. } => "_local_set",
+        Op::LocalTee { .. } => "_local_tee",
         Op::LocalGet2 { .. } => "_local_get2",
         Op::Return => "_return_value",
         Op::I32Add => "_i32_add",
@@ -105,11 +106,13 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
         let parameters = match op {
             Op::I32Const { value } => {
                 stack_height += 1;
+
                 vec![u64::from(value as u32)]
             }
             Op::LocalGet { local_i } => {
                 required_locals = required_locals.max(u64::from(local_i) + 1);
                 stack_height += 1;
+
                 vec![u64::from(local_i)]
             }
             Op::LocalSet { local_i } => {
@@ -117,8 +120,20 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
                     stack_height >= 1,
                     "stack underflow at IR {pc}: LocalSet needs one value"
                 );
+
                 required_locals = required_locals.max(u64::from(local_i) + 1);
                 stack_height -= 1;
+
+                vec![u64::from(local_i)]
+            }
+            Op::LocalTee { local_i } => {
+                ensure_jit!(
+                    stack_height >= 1,
+                    "stack underflow at IR {pc}: LocalTee needs one value"
+                );
+
+                required_locals = required_locals.max(u64::from(local_i) + 1);
+
                 vec![u64::from(local_i)]
             }
             Op::LocalGet2 {
