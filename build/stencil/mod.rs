@@ -24,6 +24,8 @@ pub fn generate() {
             "-O2",
             // prevents function inlining
             "-fno-inline",
+            // wasm floating-point operations do not use C errno.
+            "-fno-math-errno",
             // compiles into object files without linking
             "-c",
         ])
