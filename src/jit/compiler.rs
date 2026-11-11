@@ -17,6 +17,17 @@ const fn find_stencil(op: Op) -> Option<&'static str> {
         Op::I32DivUnsigned => "_i32_div_u",
         Op::I32RemainderSigned => "_i32_rem_s",
         Op::I32RemainderUnsigned => "_i32_rem_u",
+        Op::I32EqZero => "_i32_eqz",
+        Op::I32Eq => "_i32_eq",
+        Op::I32Ne => "_i32_ne",
+        Op::I32LtSigned => "_i32_lt_s",
+        Op::I32LtUnsigned => "_i32_lt_u",
+        Op::I32GtSigned => "_i32_gt_s",
+        Op::I32GtUnsigned => "_i32_gt_u",
+        Op::I32LeSigned => "_i32_le_s",
+        Op::I32LeUnsigned => "_i32_le_u",
+        Op::I32GeSigned => "_i32_ge_s",
+        Op::I32GeUnsigned => "_i32_ge_u",
         _ => return None,
     })
 }
@@ -159,13 +170,31 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
                 stack_height += 2;
                 vec![u64::from(local_i_a), u64::from(local_i_b)]
             }
+            Op::I32EqZero => {
+                ensure_jit!(
+                    stack_height >= 1,
+                    "stack underflow at IR {pc}: I32EqZero needs one value"
+                );
+
+                Vec::new()
+            }
             Op::I32Add
             | Op::I32Sub
             | Op::I32Mul
             | Op::I32DivSigned
             | Op::I32DivUnsigned
             | Op::I32RemainderSigned
-            | Op::I32RemainderUnsigned => {
+            | Op::I32RemainderUnsigned
+            | Op::I32Eq
+            | Op::I32Ne
+            | Op::I32LtSigned
+            | Op::I32LtUnsigned
+            | Op::I32GtSigned
+            | Op::I32GtUnsigned
+            | Op::I32LeSigned
+            | Op::I32LeUnsigned
+            | Op::I32GeSigned
+            | Op::I32GeUnsigned => {
                 ensure_jit!(
                     stack_height >= 2,
                     "stack underflow at IR {pc}: {op:?} needs two values"
@@ -212,6 +241,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn executes_i32_comparisons() {
+        let comparisons: &[(Op, fn(i32, i32) -> bool)] = &[
+            (Op::I32Eq, |a, b| a == b),
+            (Op::I32Ne, |a, b| a != b),
+            (Op::I32LtSigned, |a, b| a < b),
+            (Op::I32LtUnsigned, |a, b| (a as u32) < (b as u32)),
+            (Op::I32GtSigned, |a, b| a > b),
+            (Op::I32GtUnsigned, |a, b| (a as u32) > (b as u32)),
+            (Op::I32LeSigned, |a, b| a <= b),
+            (Op::I32LeUnsigned, |a, b| (a as u32) <= (b as u32)),
+            (Op::I32GeSigned, |a, b| a >= b),
+            (Op::I32GeUnsigned, |a, b| (a as u32) >= (b as u32)),
+        ];
+
+        for &(op, expected) in comparisons {
+            let ops = [
+                Op::LocalGet2 {
+                    local_i_a: 0,
+                    local_i_b: 1,
+                },
+                op,
+                Op::Return,
+            ];
+
+            assert!(supports(&ops));
+
+            let function = compile(&ops).unwrap();
+
+            assert_eq!(function.result_count(), 1);
+
+            for (a, b) in [(0, 0), (1, 2), (2, 1), (-1, 1), (i32::MIN, i32::MAX)] {
+                let mut locals = [u64::from(a as u32), u64::from(b as u32)];
+                let mut stack = [0; 2];
+
+                assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+                assert_eq!(stack[0], u64::from(expected(a, b)), "{op:?}: {a}, {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn executes_i32_eqz() {
+        let ops = [Op::LocalGet { local_i: 0 }, Op::I32EqZero, Op::Return];
+
+        assert!(supports(&ops));
+
+        let function = compile(&ops).unwrap();
+
+        assert_eq!(function.max_stack_height, 1);
+
+        for value in [0, 1, -1, i32::MIN] {
+            let mut locals = [u64::from(value as u32)];
+            let mut stack = [0];
+
+            assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+            assert_eq!(stack[0], u64::from(value == 0));
+        }
+    }
+
+    #[test]
     fn sets_and_reads_local() {
         let ops = [
             Op::I32Const { value: 42 },
@@ -243,9 +332,13 @@ mod tests {
                 Op::I32Add,
                 Op::Return,
             ];
+
             assert!(supports(&ops));
+
             let function = compile(&ops).unwrap();
+
             let mut stack = [0_u64; 2];
+
             assert_eq!(function.execute(&mut [], &mut stack).unwrap(), 1);
             assert_eq!(stack[0], expected);
         }

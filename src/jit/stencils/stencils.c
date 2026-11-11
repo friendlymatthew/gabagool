@@ -149,3 +149,123 @@ void i32_rem_u(VMContext *ctx) {
 
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
+
+void i32_eqz(VMContext *ctx) {
+  uint32_t value = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = value == 0;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_eq(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a == b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ne(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a != b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_lt_s(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a < b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_lt_u(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a < b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_gt_s(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a > b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_gt_u(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a > b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_le_s(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a <= b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_le_u(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a <= b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ge_s(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a >= b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ge_u(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  uint32_t result = a >= b;
+
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
