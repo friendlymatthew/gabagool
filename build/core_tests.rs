@@ -485,9 +485,7 @@ fn render_expected(results: &[WastRet<'_>]) -> Result<String, SkipReason> {
                 Ok(format!("ExpectedValue::I64({})", render_i64(*value)))
             }
             WastRet::Core(WastRetCore::F32(pattern)) => Ok(match pattern {
-                NanPattern::CanonicalNan => {
-                    "ExpectedValue::F32(NanPat::CanonicalNan)".to_string()
-                }
+                NanPattern::CanonicalNan => "ExpectedValue::F32(NanPat::CanonicalNan)".to_string(),
                 NanPattern::ArithmeticNan => {
                     "ExpectedValue::F32(NanPat::ArithmeticNan)".to_string()
                 }
@@ -496,9 +494,7 @@ fn render_expected(results: &[WastRet<'_>]) -> Result<String, SkipReason> {
                 }
             }),
             WastRet::Core(WastRetCore::F64(pattern)) => Ok(match pattern {
-                NanPattern::CanonicalNan => {
-                    "ExpectedValue::F64(NanPat::CanonicalNan)".to_string()
-                }
+                NanPattern::CanonicalNan => "ExpectedValue::F64(NanPat::CanonicalNan)".to_string(),
                 NanPattern::ArithmeticNan => {
                     "ExpectedValue::F64(NanPat::ArithmeticNan)".to_string()
                 }

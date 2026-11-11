@@ -175,7 +175,8 @@ mod tests {
 
         type Entry = unsafe extern "C" fn(*mut VMContext);
 
-        // SAFETY: indices are in bounds, two pushes fit, and the entry ABI matches shared.h.
+        // SAFETY: indices are in bounds, two pushes fit, and the entry ABI
+        // matches shared.h.
         unsafe {
             let entry: Entry = core::mem::transmute(buffer.as_ptr());
 
