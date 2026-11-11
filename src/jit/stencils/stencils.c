@@ -41,3 +41,12 @@ void i32_const(VMContext *ctx) {
 
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
+
+void local_set(VMContext *ctx) {
+  uintptr_t local_index = (uintptr_t)&_JIT_PARAM_0;
+  uint64_t value = ctx->stack[--ctx->stack_height];
+
+  ctx->locals[local_index] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}

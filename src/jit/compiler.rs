@@ -6,6 +6,7 @@ const fn find_stencil(op: Op) -> Option<&'static str> {
     Some(match op {
         Op::I32Const { .. } => "_i32_const",
         Op::LocalGet { .. } => "_local_get",
+        Op::LocalSet { .. } => "_local_set",
         Op::LocalGet2 { .. } => "_local_get2",
         Op::Return => "_return_value",
         Op::I32Add => "_i32_add",
@@ -111,6 +112,15 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
                 stack_height += 1;
                 vec![u64::from(local_i)]
             }
+            Op::LocalSet { local_i } => {
+                ensure_jit!(
+                    stack_height >= 1,
+                    "stack underflow at IR {pc}: LocalSet needs one value"
+                );
+                required_locals = required_locals.max(u64::from(local_i) + 1);
+                stack_height -= 1;
+                vec![u64::from(local_i)]
+            }
             Op::LocalGet2 {
                 local_i_a,
                 local_i_b,
@@ -164,6 +174,29 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sets_and_reads_local() {
+        let ops = [
+            Op::I32Const { value: 42 },
+            Op::LocalSet { local_i: 3 },
+            Op::LocalGet { local_i: 3 },
+            Op::Return,
+        ];
+        assert!(supports(&ops));
+
+        let function = compile(&ops).unwrap();
+
+        assert_eq!(function.required_locals, 4);
+        assert_eq!(function.max_stack_height, 1);
+
+        let mut locals = [0; 4];
+        let mut stack = [0; 1];
+
+        assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+        assert_eq!(locals, [0, 0, 0, 42]);
+        assert_eq!(stack[0], 42);
+    }
 
     #[test]
     fn compiles_and_executes_i32_constants() {
