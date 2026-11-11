@@ -157,4 +157,9 @@ impl ValueStack {
     pub fn as_mut_ptr(&mut self) -> *mut RawValue {
         self.inner.as_mut_ptr()
     }
+
+    #[cfg(feature = "jit")]
+    pub(crate) fn spare_mut(&mut self) -> &mut [RawValue] {
+        &mut self.inner[self.cursor..]
+    }
 }

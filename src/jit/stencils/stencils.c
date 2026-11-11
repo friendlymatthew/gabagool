@@ -1,33 +1,34 @@
-
 #include "shared.h"
-#include <stdint.h>
-
-
-void local_get2(VMContext *ctx, uint64_t cached0, uint64_t cached1);
-void i32_add(VMContext *ctx, uint64_t cached0, uint64_t cached1);
-void return_value(VMContext *ctx, uint64_t cached0, uint64_t cached1);
-
 
 extern unsigned char _JIT_LOCAL_A;
 extern unsigned char _JIT_LOCAL_B;
 
-void local_get2(VMContext *ctx, uint64_t cached0, uint64_t cached1) {
-    cached0 = ctx->locals[(uintptr_t)&_JIT_LOCAL_A];
-    cached1 = ctx->locals[(uintptr_t)&_JIT_LOCAL_B];
+void i32_add(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
 
-    __attribute__((musttail))
-    return _JIT_CONTINUE(ctx, cached0, cached1);
+  uint32_t result = a + b;
+  ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
 
+void local_get(VMContext *ctx) {
+  uintptr_t local_index = (uintptr_t)&_JIT_LOCAL_A;
+  uint64_t value = ctx->locals[local_index];
+  ctx->stack[ctx->stack_height++] = value;
 
-void i32_add(VMContext *ctx, uint64_t cached0, uint64_t cached1) {
-    uint64_t out = (uint32_t)cached0 + (uint32_t)cached1;
-
-    __attribute__((musttail))
-    return _JIT_CONTINUE(ctx, out, 0);
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
 
-void return_value(VMContext *ctx, uint64_t cached0, uint64_t cached1) {
-    (void)cached1;
-     ctx->result = cached0;
+void local_get2(VMContext *ctx) {
+  uintptr_t a = (uintptr_t)&_JIT_LOCAL_A;
+  uintptr_t b = (uintptr_t)&_JIT_LOCAL_B;
+
+  ctx->stack[ctx->stack_height++] = ctx->locals[a];
+  ctx->stack[ctx->stack_height++] = ctx->locals[b];
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
+
+void return_value(VMContext *ctx) { (void)ctx; }

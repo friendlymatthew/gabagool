@@ -1,3 +1,6 @@
+#[cfg(feature = "jit")]
+use crate::jit::JitCompiledFunction;
+
 use crate::prelude::*;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -280,6 +283,8 @@ pub struct Store {
     pub(crate) catch_stack: Vec<CatchFrame>,
     pub(crate) exceptions: Vec<Exception>,
     pub(crate) fuel: Option<u64>,
+    #[cfg(feature = "jit")]
+    pub(crate) jit_functions: BTreeMap<(u16, u32), JitCompiledFunction>,
     pub(crate) pending_arity: Option<usize>,
     pub(crate) pending_suspension: Option<(String, String, Vec<RawValue>)>,
     pub(crate) pending_lifted: Option<(LiftedFunc, Vec<ComponentTypeDef>)>,
@@ -329,6 +334,8 @@ impl Store {
             catch_stack: Vec::new(),
             exceptions: Vec::new(),
             fuel: None,
+            #[cfg(feature = "jit")]
+            jit_functions: BTreeMap::new(),
             pending_arity: None,
             pending_suspension: None,
             pending_lifted: None,
@@ -1716,6 +1723,50 @@ impl Store {
         Ok(false)
     }
 
+    #[cfg(feature = "jit")]
+    fn try_run_jit(&mut self, depth: usize) -> Result<bool> {
+        use crate::{ensure_jit, jit};
+
+        let frame = &self.call_stack[depth];
+
+        if self.fuel.is_some() || frame.pc != 0 || self.stack.len() != frame.stack_base {
+            return Ok(false);
+        }
+
+        let key = (frame.module_i, frame.compiled_func_i);
+
+        if !self.jit_functions.contains_key(&key) {
+            let ops = &self.instances[key.0 as usize].code.compiled_funcs[key.1 as usize].ops;
+
+            assert!(
+                jit::supports(ops),
+                "JIT does not support function {} in module {}: {ops:?}",
+                key.1,
+                key.0,
+            );
+
+            let compiled = jit::compile(ops)?;
+
+            self.jit_functions.insert(key, compiled);
+        }
+
+        let function = &self.jit_functions[&key];
+
+        ensure_jit!(
+            function.result_count() == frame.arity,
+            "JIT result count differs from function signature"
+        );
+
+        let locals = frame.locals.clone();
+        let base = frame.stack_base;
+        let count = function.execute_vm(&mut self.locals[locals], self.stack.spare_mut())?;
+
+        self.stack.truncate(base + count);
+        self.do_return(depth);
+
+        Ok(true)
+    }
+
     fn run(&mut self) -> Result<RunOutcome> {
         loop {
             let depth = match self.call_stack.len() {
@@ -1723,6 +1774,11 @@ impl Store {
                 n => n - 1,
             };
             assert!(depth < self.call_stack.len());
+
+            #[cfg(feature = "jit")]
+            if self.try_run_jit(depth)? {
+                continue;
+            }
 
             let mi = self.call_stack[depth].module_i as usize;
             let func_i = self.call_stack[depth].compiled_func_i;
@@ -3139,6 +3195,7 @@ impl Store {
         let arity = self.call_stack[depth].arity;
         let base = self.call_stack[depth].stack_base;
         let len = self.stack.len();
+
         debug_assert!(
             len >= arity,
             "do_return: stack len {} < arity {}, base={}, func={}, mi={}",
@@ -3148,9 +3205,11 @@ impl Store {
             self.call_stack[depth].compiled_func_i,
             self.call_stack[depth].module_i,
         );
+
         if arity > 0 {
             self.stack.copy_within(len - arity..len, base);
         }
+
         self.stack.truncate(base + arity);
         self.pop_call_frame();
     }
@@ -3164,6 +3223,7 @@ impl Store {
 
     fn run_init_instructions(&mut self, instructions: &[Instruction], module_i: u16) -> Result<()> {
         let mut ops = Vec::with_capacity(instructions.len() + 1);
+
         for instr in instructions {
             match instr {
                 Instruction::I32Const(v) => ops.push(Op::I32Const { value: *v }),
@@ -3194,6 +3254,7 @@ impl Store {
                 }
             }
         }
+
         ops.push(Op::Return);
 
         let max_stack_height = ops.len() as u32;
@@ -3205,6 +3266,7 @@ impl Store {
         };
 
         let code = Arc::make_mut(&mut self.instances[module_i as usize].code);
+
         let compiled_func_i = code.compiled_funcs.len();
         code.compiled_funcs.push(cf);
 
@@ -3216,7 +3278,9 @@ impl Store {
             stack_base: self.stack.len(),
             arity: 0,
         });
+
         self.run()?;
+
         Ok(())
     }
 

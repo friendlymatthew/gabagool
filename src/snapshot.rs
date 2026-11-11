@@ -1350,6 +1350,8 @@ impl Snapshot for Store {
             catch_stack: Vec::new(),
             exceptions: Vec::new(),
             fuel,
+            #[cfg(feature = "jit")]
+            jit_functions: Default::default(),
             pending_arity,
             pending_suspension: None,
             pending_lifted,

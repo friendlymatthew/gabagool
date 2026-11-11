@@ -12,6 +12,7 @@ pub enum Ref {
 }
 
 #[derive(Debug, Copy, Clone, Default)]
+#[repr(transparent)]
 pub struct RawValue(u64);
 
 impl RawValue {

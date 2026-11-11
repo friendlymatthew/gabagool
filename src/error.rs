@@ -54,6 +54,7 @@ pub enum Error {
     Parse(String),
     Validation(String),
     Instantiation(String),
+    Jit(String),
     Trap(Trap),
     Exception(Exception),
 }
@@ -70,6 +71,10 @@ impl Error {
     pub fn instantiation(message: impl Into<String>) -> Self {
         Self::Instantiation(message.into())
     }
+
+    pub fn jit(message: impl Into<String>) -> Self {
+        Self::Jit(message.into())
+    }
 }
 
 impl fmt::Display for Error {
@@ -77,6 +82,7 @@ impl fmt::Display for Error {
         match self {
             Self::Parse(msg) => write!(f, "parse error: {msg}"),
             Self::Instantiation(msg) => write!(f, "instantiation error: {msg}"),
+            Self::Jit(msg) => write!(f, "JIT error: {msg}"),
             Self::Trap(trap) => write!(f, "trap: {trap}"),
             Self::Exception(_) => write!(f, "unhandled exception"),
             Self::Validation(msg) => write!(f, "validation error: {msg}"),
@@ -102,6 +108,25 @@ impl From<Utf8Error> for Error {
     fn from(e: Utf8Error) -> Self {
         Self::Parse(e.to_string())
     }
+}
+
+#[macro_export]
+macro_rules! bail_jit {
+    ($fmt:literal $($arg:tt)*) => {
+        return Err($crate::Error::jit(format!($fmt $($arg)*)))
+    };
+    ($message:expr $(,)?) => {
+        return Err($crate::Error::jit($message))
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_jit {
+    ($cond:expr, $($msg:tt)+) => {
+        if !$cond {
+            $crate::bail_jit!($($msg)+);
+        }
+    };
 }
 
 #[macro_export]

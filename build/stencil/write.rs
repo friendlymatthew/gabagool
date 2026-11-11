@@ -39,6 +39,20 @@ pub struct Stencil {
     pub patches: &'static [Patch],
 }
 
+/// Values supplied by one IR operation when it uses a stencil.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StencilOperands {
+    None,
+    LocalGet { local_i: u32 },
+    LocalGet2 { local_i_a: u32, local_i_b: u32 },
+}
+
+#[derive(Debug)]
+pub struct StencilInstance<'a> {
+    pub stencil: &'a Stencil,
+    pub operands: StencilOperands,
+}
+
 pub static STENCILS: &[Stencil] = &[
 "#,
     );

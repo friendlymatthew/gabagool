@@ -3,15 +3,12 @@
 
 #include <stdint.h>
 
-typedef struct {
+typedef struct VMContext {
     uint64_t *locals;
-    uint64_t result;
+    uint64_t *stack;
+    uint64_t stack_height;
 } VMContext;
 
-extern void _JIT_CONTINUE(
-    VMContext *ctx,
-    uint64_t cached0,
-    uint64_t cached1
-);
+extern void _JIT_CONTINUE(VMContext *ctx);
 
 #endif
