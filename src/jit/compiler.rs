@@ -35,6 +35,7 @@ use super::{
     STENCIL_I64_TRUNC_F32_S, STENCIL_I64_TRUNC_F32_U, STENCIL_I64_TRUNC_F64_S,
     STENCIL_I64_TRUNC_F64_U, STENCIL_I64_TRUNC_SAT_F32_S, STENCIL_I64_TRUNC_SAT_F32_U,
     STENCIL_I64_TRUNC_SAT_F64_S, STENCIL_I64_TRUNC_SAT_F64_U, STENCIL_I64_XOR, STENCIL_JUMP,
+    STENCIL_JUMP_IF, STENCIL_JUMP_IF_NOT, STENCIL_JUMP_IF_NOT_WITH_DROP, STENCIL_JUMP_IF_WITH_DROP,
     STENCIL_JUMP_WITH_DROP, STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2, STENCIL_LOCAL_SET,
     STENCIL_LOCAL_TEE, STENCIL_RETURN_VALUE,
 };
@@ -49,6 +50,10 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::Return => &STENCIL_RETURN_VALUE,
         Op::Jump { drop: 0, .. } => &STENCIL_JUMP,
         Op::Jump { .. } => &STENCIL_JUMP_WITH_DROP,
+        Op::JumpIf { drop: 0, .. } => &STENCIL_JUMP_IF,
+        Op::JumpIf { .. } => &STENCIL_JUMP_IF_WITH_DROP,
+        Op::JumpIfNot { drop: 0, .. } => &STENCIL_JUMP_IF_NOT,
+        Op::JumpIfNot { .. } => &STENCIL_JUMP_IF_NOT_WITH_DROP,
         Op::I32Add => &STENCIL_I32_ADD,
         Op::I32Sub => &STENCIL_I32_SUB,
         Op::I32Mul => &STENCIL_I32_MUL,
@@ -305,14 +310,20 @@ pub fn compile(
 
                 vec![u64::from(local_i_a), u64::from(local_i_b)]
             }
-            Op::Jump { keep, drop, .. } if drop != 0 => {
+            Op::Jump { keep, drop, .. }
+            | Op::JumpIf { keep, drop, .. }
+            | Op::JumpIfNot { keep, drop, .. }
+                if drop != 0 =>
+            {
                 vec![u64::from(keep), u64::from(drop)]
             }
             _ => Vec::new(),
         };
 
         let target = match op {
-            Op::Jump { target, .. } => Some(target as usize),
+            Op::Jump { target, .. } | Op::JumpIf { target, .. } | Op::JumpIfNot { target, .. } => {
+                Some(target as usize)
+            }
             _ => None,
         };
 
@@ -336,6 +347,127 @@ pub fn compile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_jumps_take_target_or_continue() {
+        for invert in [false, true] {
+            let branch = if invert {
+                Op::JumpIfNot {
+                    target: 4,
+                    keep: 0,
+                    drop: 0,
+                }
+            } else {
+                Op::JumpIf {
+                    target: 4,
+                    keep: 0,
+                    drop: 0,
+                }
+            };
+            let ops = [
+                Op::LocalGet { local_i: 0 },
+                branch,
+                Op::I32Const { value: 10 },
+                Op::Return,
+                Op::I32Const { value: 20 },
+                Op::Return,
+            ];
+
+            assert!(supports(&ops));
+
+            let function = compile(&ops, 1, 1).unwrap();
+
+            for condition in [0_u64, 1, u32::MAX as u64, 1_u64 << 32] {
+                let taken = (condition as u32 != 0) != invert;
+                let mut locals = [condition];
+                let mut stack = [0];
+
+                assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+                assert_eq!(stack[0], if taken { 20 } else { 10 });
+            }
+        }
+    }
+
+    #[test]
+    fn conditional_jumps_adjust_stack_only_when_taken() {
+        for invert in [false, true] {
+            let branch = if invert {
+                Op::JumpIfNot {
+                    target: 9,
+                    keep: 3,
+                    drop: 2,
+                }
+            } else {
+                Op::JumpIf {
+                    target: 9,
+                    keep: 3,
+                    drop: 2,
+                }
+            };
+            let ops = [
+                Op::I32Const { value: 100 },
+                Op::I32Const { value: 200 },
+                Op::I32Const { value: 10 },
+                Op::I32Const { value: 20 },
+                Op::I32Const { value: 30 },
+                Op::LocalGet { local_i: 0 },
+                branch,
+                Op::I32Add,
+                Op::I32Add,
+                Op::I32Add,
+                Op::I32Add,
+                Op::Return,
+            ];
+
+            let function = compile(&ops, 6, 1).unwrap();
+
+            for condition in [0_u64, 1] {
+                let taken = (condition != 0) != invert;
+                let mut locals = [condition];
+                let mut stack = [0; 6];
+
+                assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+                assert_eq!(stack[0], if taken { 60 } else { 360 });
+            }
+        }
+    }
+
+    #[test]
+    fn conditional_backedges_execute_countdown_loops() {
+        for invert in [false, true] {
+            let mut ops = vec![
+                Op::LocalGet { local_i: 0 },
+                Op::I32Const { value: 1 },
+                Op::I32Sub,
+                Op::LocalTee { local_i: 0 },
+            ];
+
+            if invert {
+                ops.push(Op::I32EqZero);
+                ops.push(Op::JumpIfNot {
+                    target: 0,
+                    keep: 0,
+                    drop: 0,
+                });
+            } else {
+                ops.push(Op::JumpIf {
+                    target: 0,
+                    keep: 0,
+                    drop: 0,
+                });
+            }
+
+            ops.extend_from_slice(&[Op::LocalGet { local_i: 0 }, Op::Return]);
+
+            let function = compile(&ops, 2, 1).unwrap();
+            let mut locals = [10_000];
+            let mut stack = [0; 2];
+
+            assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+            assert_eq!(stack[0], 0);
+            assert_eq!(locals[0], 0);
+        }
+    }
 
     #[test]
     fn jump_skips_unreachable_instructions() {

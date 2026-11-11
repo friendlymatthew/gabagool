@@ -22,6 +22,68 @@ void jump_with_drop(VMContext *ctx) {
   __attribute__((musttail)) return _JIT_TARGET(ctx);
 }
 
+void jump_if(VMContext *ctx) {
+  uint32_t condition = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (condition != 0) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void jump_if_with_drop(VMContext *ctx) {
+  uint32_t condition = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (condition != 0) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+    uint64_t source = ctx->stack_height - keep;
+    uint64_t destination = source - drop;
+
+    for (uint64_t i = 0; i < keep; i++) {
+      ctx->stack[destination + i] = ctx->stack[source + i];
+    }
+
+    ctx->stack_height -= drop;
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void jump_if_not(VMContext *ctx) {
+  uint32_t condition = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (condition == 0) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void jump_if_not_with_drop(VMContext *ctx) {
+  uint32_t condition = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (condition == 0) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+    uint64_t source = ctx->stack_height - keep;
+    uint64_t destination = source - drop;
+
+    for (uint64_t i = 0; i < keep; i++) {
+      ctx->stack[destination + i] = ctx->stack[source + i];
+    }
+
+    ctx->stack_height -= drop;
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
 void return_value(VMContext *ctx) { (void)ctx; }
 
 void local_get(VMContext *ctx) {
