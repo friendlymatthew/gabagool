@@ -1,24 +1,14 @@
 use crate::{ensure_jit, ir::Op, prelude::*, Error, Result};
 
-use super::{
-    codebuffer::CodeBuffer, code_layout::CodeLayout, StencilInstance, StencilOperands, STENCILS,
-};
+use super::{code_buffer::CodeBuffer, code_layout::CodeLayout, StencilInstance, STENCILS};
 
-const fn find_stencil(op: Op) -> Option<(&'static str, StencilOperands)> {
+const fn find_stencil(op: Op) -> Option<&'static str> {
     Some(match op {
-        Op::LocalGet { local_i } => ("_local_get", StencilOperands::LocalGet { local_i }),
-        Op::LocalGet2 {
-            local_i_a,
-            local_i_b,
-        } => (
-            "_local_get2",
-            StencilOperands::LocalGet2 {
-                local_i_a,
-                local_i_b,
-            },
-        ),
-        Op::Return => ("_return_value", StencilOperands::None),
-        Op::I32Add => ("_i32_add", StencilOperands::None),
+        Op::I32Const { .. } => "_i32_const",
+        Op::LocalGet { .. } => "_local_get",
+        Op::LocalGet2 { .. } => "_local_get2",
+        Op::Return => "_return_value",
+        Op::I32Add => "_i32_add",
         _ => return None,
     })
 }
@@ -108,13 +98,18 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
     let mut required_locals = 0_u64;
 
     for (pc, &op) in ops.iter().enumerate() {
-        let (name, operands) = find_stencil(op)
+        let name = find_stencil(op)
             .ok_or_else(|| Error::jit(format!("unsupported operation at IR {pc}: {op:?}")))?;
 
-        match op {
+        let parameters = match op {
+            Op::I32Const { value } => {
+                stack_height += 1;
+                vec![u64::from(value as u32)]
+            }
             Op::LocalGet { local_i } => {
                 required_locals = required_locals.max(u64::from(local_i) + 1);
                 stack_height += 1;
+                vec![u64::from(local_i)]
             }
             Op::LocalGet2 {
                 local_i_a,
@@ -122,6 +117,7 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
             } => {
                 required_locals = required_locals.max(u64::from(local_i_a.max(local_i_b)) + 1);
                 stack_height += 2;
+                vec![u64::from(local_i_a), u64::from(local_i_b)]
             }
             Op::I32Add => {
                 ensure_jit!(
@@ -130,15 +126,17 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
                 );
 
                 stack_height -= 1;
+                Vec::new()
             }
             Op::Return => {
                 ensure_jit!(
                     pc + 1 == ops.len(),
                     "instructions after Return at IR {pc} are not supported"
                 );
+                Vec::new()
             }
             _ => unreachable!("unsupported operations were rejected above"),
-        }
+        };
 
         max_stack_height = max_stack_height.max(stack_height);
 
@@ -147,7 +145,10 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
             .find(|stencil| stencil.name == name)
             .ok_or_else(|| Error::jit(format!("missing stencil {name} at IR {pc}")))?;
 
-        instances.push(StencilInstance { stencil, operands });
+        instances.push(StencilInstance {
+            stencil,
+            parameters,
+        });
     }
 
     let layout = CodeLayout::try_new(&instances)?;
@@ -158,4 +159,26 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
         max_stack_height,
         result_count: stack_height,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiles_and_executes_i32_constants() {
+        for (a, b, expected) in [(20, 22, 42_u64), (-1, 1, 0), (i32::MIN, 0, 0x8000_0000)] {
+            let ops = [
+                Op::I32Const { value: a },
+                Op::I32Const { value: b },
+                Op::I32Add,
+                Op::Return,
+            ];
+            assert!(supports(&ops));
+            let function = compile(&ops).unwrap();
+            let mut stack = [0_u64; 2];
+            assert_eq!(function.execute(&mut [], &mut stack).unwrap(), 1);
+            assert_eq!(stack[0], expected);
+        }
+    }
 }

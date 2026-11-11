@@ -5,7 +5,7 @@ core::cfg_select! {
         mod arm64;
         use arm64::resolve_data_slot_addresses;
 
-        mod codebuffer;
+        mod code_buffer;
         mod code_layout;
         mod compiler;
         pub(crate) use compiler::{compile, supports, JitCompiledFunction};

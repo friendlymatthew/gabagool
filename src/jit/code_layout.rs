@@ -1,41 +1,12 @@
 use crate::{ensure_jit, prelude::*, Result};
 
-use crate::jit::{PatchEncoding, PatchValue, StencilInstance, StencilOperands};
+use crate::jit::{PatchEncoding, PatchValue, StencilInstance};
 
 #[derive(Debug)]
 pub struct DataSlotPatch {
     pub offset: usize,
     pub slot_offset: usize,
     pub encoding: PatchEncoding,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::jit::{Patch, Stencil};
-
-    #[test]
-    fn rejects_missing_second_local_index() {
-        let stencil = Stencil {
-            name: "requires_local_b",
-            code: &[0; 4],
-            patches: &[Patch {
-                offset: 0,
-                value: PatchValue::LocalB,
-                encoding: PatchEncoding::GotPage21,
-                addend: 0,
-            }],
-        };
-        let instances = [StencilInstance {
-            stencil: &stencil,
-            operands: StencilOperands::LocalGet { local_i: 5 },
-        }];
-
-        assert!(matches!(
-            CodeLayout::try_new(&instances),
-            Err(crate::Error::Jit(message)) if message == "missing local-index operand"
-        ));
-    }
 }
 
 #[derive(Debug)]
@@ -57,49 +28,26 @@ impl CodeLayout {
         let mut slots = Vec::with_capacity(instances.len());
 
         for instance in instances {
-            let has_local_patches = instance
+            let parameter_count = instance
                 .stencil
                 .patches
                 .iter()
-                .any(|patch| matches!(patch.value, PatchValue::LocalA | PatchValue::LocalB));
+                .filter_map(|patch| match patch.value {
+                    PatchValue::Parameter(index) => Some(index + 1),
+                    PatchValue::Continue => None,
+                })
+                .max()
+                .unwrap_or(0);
 
-            match instance.operands {
-                StencilOperands::None => {
-                    ensure_jit!(
-                        !has_local_patches,
-                        "local index patches need local operands"
-                    );
+            ensure_jit!(
+                instance.parameters.len() == parameter_count,
+                "parameter count mismatch"
+            );
 
-                    slots.push([None, None]);
-                }
-                StencilOperands::LocalGet { local_i } => {
-                    ensure_jit!(
-                        has_local_patches,
-                        "local operands need a stencil with local index patches"
-                    );
+            slots.push(slots_start + data.len());
 
-                    let a = slots_start + data.len();
-                    data.extend_from_slice(&u64::from(local_i).to_le_bytes());
-
-                    slots.push([Some(a), None]);
-                }
-                StencilOperands::LocalGet2 {
-                    local_i_a,
-                    local_i_b,
-                } => {
-                    ensure_jit!(
-                        has_local_patches,
-                        "local operands need a stencil with local index patches"
-                    );
-
-                    let a = slots_start + data.len();
-                    data.extend_from_slice(&u64::from(local_i_a).to_le_bytes());
-
-                    let b = slots_start + data.len();
-                    data.extend_from_slice(&u64::from(local_i_b).to_le_bytes());
-
-                    slots.push([Some(a), Some(b)]);
-                }
+            for value in &instance.parameters {
+                data.extend_from_slice(&value.to_le_bytes());
             }
         }
 
@@ -123,30 +71,23 @@ impl CodeLayout {
                     "nonzero patch addends are not supported yet"
                 );
 
-                if matches!(patch.value, PatchValue::LocalA | PatchValue::LocalB) {
+                if let PatchValue::Parameter(index) = patch.value {
                     ensure_jit!(
                         matches!(
                             patch.encoding,
                             PatchEncoding::GotPage21 | PatchEncoding::GotPageOff12
                         ),
-                        "local-index patch must use a GOT load encoding"
+                        "data-slot patch must use a GOT load encoding"
                     );
 
-                    let [a, b] = slots[i];
-
-                    let slot = if patch.value == PatchValue::LocalA {
-                        a
-                    } else {
-                        b
-                    };
-                    let slot_offset =
-                        slot.ok_or_else(|| crate::Error::jit("missing local-index operand"))?;
+                    let slot_offset = slots[i] + index * 8;
 
                     data_slot_patches.push(DataSlotPatch {
                         offset: start_offset + patch.offset,
                         slot_offset,
                         encoding: patch.encoding,
                     });
+
                     continue;
                 }
 
