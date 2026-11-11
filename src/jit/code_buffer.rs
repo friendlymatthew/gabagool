@@ -108,6 +108,7 @@ mod tests {
             locals: *mut u64,
             stack: *mut u64,
             stack_height: u64,
+            trap: u64,
         }
 
         let mut stack = [30u64, 37];
@@ -116,6 +117,7 @@ mod tests {
             locals: core::ptr::null_mut(),
             stack: stack.as_mut_ptr(),
             stack_height: 2,
+            trap: 0,
         };
 
         type Entry = unsafe extern "C" fn(*mut VMContext);
@@ -161,6 +163,7 @@ mod tests {
             locals: *mut u64,
             stack: *mut u64,
             stack_height: u64,
+            trap: u64,
         }
 
         let mut locals = [999_u64, 888, 20, 22];
@@ -171,6 +174,7 @@ mod tests {
             locals: locals.as_mut_ptr(),
             stack: stack.as_mut_ptr(),
             stack_height: 0,
+            trap: 0,
         };
 
         type Entry = unsafe extern "C" fn(*mut VMContext);

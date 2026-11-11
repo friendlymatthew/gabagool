@@ -1,4 +1,4 @@
-use crate::{ensure_jit, ir::Op, prelude::*, Error, Result};
+use crate::{bail_jit, bail_trap, ensure_jit, ir::Op, prelude::*, Error, Result, Trap};
 
 use super::{code_buffer::CodeBuffer, code_layout::CodeLayout, StencilInstance, STENCILS};
 
@@ -11,6 +11,12 @@ const fn find_stencil(op: Op) -> Option<&'static str> {
         Op::LocalGet2 { .. } => "_local_get2",
         Op::Return => "_return_value",
         Op::I32Add => "_i32_add",
+        Op::I32Sub => "_i32_sub",
+        Op::I32Mul => "_i32_mul",
+        Op::I32DivSigned => "_i32_div_s",
+        Op::I32DivUnsigned => "_i32_div_u",
+        Op::I32RemainderSigned => "_i32_rem_s",
+        Op::I32RemainderUnsigned => "_i32_rem_u",
         _ => return None,
     })
 }
@@ -27,6 +33,7 @@ struct VMContext {
     locals: *mut u64,
     stack: *mut u64,
     stack_height: u64,
+    trap: u64,
 }
 
 impl JitCompiledFunction {
@@ -65,6 +72,7 @@ impl JitCompiledFunction {
             locals: locals.as_mut_ptr(),
             stack: stack.as_mut_ptr(),
             stack_height: 0,
+            trap: 0,
         };
 
         type Entry = unsafe extern "C" fn(*mut VMContext);
@@ -72,6 +80,13 @@ impl JitCompiledFunction {
         unsafe {
             let entry: Entry = core::mem::transmute(self.code.as_ptr());
             entry(&mut context);
+        }
+
+        match context.trap {
+            0 => {}
+            1 => bail_trap!(Trap::IntegerDivideByZero),
+            2 => bail_trap!(Trap::IntegerOverflow),
+            code => bail_jit!("unknown trap code {code}"),
         }
 
         ensure_jit!(
@@ -144,10 +159,16 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
                 stack_height += 2;
                 vec![u64::from(local_i_a), u64::from(local_i_b)]
             }
-            Op::I32Add => {
+            Op::I32Add
+            | Op::I32Sub
+            | Op::I32Mul
+            | Op::I32DivSigned
+            | Op::I32DivUnsigned
+            | Op::I32RemainderSigned
+            | Op::I32RemainderUnsigned => {
                 ensure_jit!(
                     stack_height >= 2,
-                    "stack underflow at IR {pc}: I32Add needs two values"
+                    "stack underflow at IR {pc}: {op:?} needs two values"
                 );
 
                 stack_height -= 1;
