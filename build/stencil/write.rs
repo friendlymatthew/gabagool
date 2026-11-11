@@ -37,7 +37,6 @@ pub struct Patch {
 
 #[derive(Debug)]
 pub struct Stencil {
-    pub name: &'static str,
     pub code: &'static [u8],
     pub patches: &'static [Patch],
 }
@@ -49,13 +48,16 @@ pub struct StencilInstance<'a> {
     pub parameters: alloc::vec::Vec<u64>,
 }
 
-pub static STENCILS: &[Stencil] = &[
 "#,
     );
 
     for stencil in stencils {
-        writeln!(source, "    Stencil {{").unwrap();
-        writeln!(source, "        name: {:?},", stencil.function_name).unwrap();
+        let name = stencil
+            .function_name
+            .trim_start_matches('_')
+            .to_ascii_uppercase();
+
+        writeln!(source, "pub static STENCIL_{name}: Stencil = Stencil {{").unwrap();
         writeln!(source, "        code: &{:?},", stencil.code).unwrap();
         writeln!(source, "        patches: &[").unwrap();
 
@@ -114,10 +116,8 @@ pub static STENCILS: &[Stencil] = &[
             .unwrap();
         }
 
-        writeln!(source, "        ],\n    }},").unwrap();
+        writeln!(source, "        ],\n}};\n").unwrap();
     }
-
-    source.push_str("];\n");
 
     fs::write(output, source).expect("failed to write generated stencils");
 }

@@ -83,19 +83,17 @@ impl Drop for CodeBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jit::{StencilInstance, STENCILS};
+    use crate::jit::{StencilInstance, STENCIL_I32_ADD, STENCIL_LOCAL_GET2, STENCIL_RETURN_VALUE};
 
     #[test]
     fn adds_values_on_memory_stack() {
-        let find = |name| STENCILS.iter().find(|s| s.name == name).unwrap();
-
         let instances = [
             StencilInstance {
-                stencil: find("_i32_add"),
+                stencil: &STENCIL_I32_ADD,
                 parameters: vec![],
             },
             StencilInstance {
-                stencil: find("_return_value"),
+                stencil: &STENCIL_RETURN_VALUE,
                 parameters: vec![],
             },
         ];
@@ -133,24 +131,17 @@ mod tests {
 
     #[test]
     fn local_get2_adds_on_memory_stack() {
-        let find = |name| {
-            STENCILS
-                .iter()
-                .find(|stencil| stencil.name == name)
-                .unwrap()
-        };
-
         let instances = [
             StencilInstance {
-                stencil: find("_local_get2"),
+                stencil: &STENCIL_LOCAL_GET2,
                 parameters: vec![2, 3],
             },
             StencilInstance {
-                stencil: find("_i32_add"),
+                stencil: &STENCIL_I32_ADD,
                 parameters: vec![],
             },
             StencilInstance {
-                stencil: find("_return_value"),
+                stencil: &STENCIL_RETURN_VALUE,
                 parameters: vec![],
             },
         ];

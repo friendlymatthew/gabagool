@@ -1,33 +1,40 @@
 use crate::{bail_jit, bail_trap, ensure_jit, ir::Op, prelude::*, Error, Result, Trap};
 
-use super::{code_buffer::CodeBuffer, code_layout::CodeLayout, StencilInstance, STENCILS};
+use super::{
+    code_buffer::CodeBuffer, code_layout::CodeLayout, Stencil, StencilInstance, STENCIL_I32_ADD,
+    STENCIL_I32_CONST, STENCIL_I32_DIV_S, STENCIL_I32_DIV_U, STENCIL_I32_EQ, STENCIL_I32_EQZ,
+    STENCIL_I32_GE_S, STENCIL_I32_GE_U, STENCIL_I32_GT_S, STENCIL_I32_GT_U, STENCIL_I32_LE_S,
+    STENCIL_I32_LE_U, STENCIL_I32_LT_S, STENCIL_I32_LT_U, STENCIL_I32_MUL, STENCIL_I32_NE,
+    STENCIL_I32_REM_S, STENCIL_I32_REM_U, STENCIL_I32_SUB, STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2,
+    STENCIL_LOCAL_SET, STENCIL_LOCAL_TEE, STENCIL_RETURN_VALUE,
+};
 
-const fn find_stencil(op: Op) -> Option<&'static str> {
+const fn find_stencil(op: Op) -> Option<&'static Stencil> {
     Some(match op {
-        Op::I32Const { .. } => "_i32_const",
-        Op::LocalGet { .. } => "_local_get",
-        Op::LocalSet { .. } => "_local_set",
-        Op::LocalTee { .. } => "_local_tee",
-        Op::LocalGet2 { .. } => "_local_get2",
-        Op::Return => "_return_value",
-        Op::I32Add => "_i32_add",
-        Op::I32Sub => "_i32_sub",
-        Op::I32Mul => "_i32_mul",
-        Op::I32DivSigned => "_i32_div_s",
-        Op::I32DivUnsigned => "_i32_div_u",
-        Op::I32RemainderSigned => "_i32_rem_s",
-        Op::I32RemainderUnsigned => "_i32_rem_u",
-        Op::I32EqZero => "_i32_eqz",
-        Op::I32Eq => "_i32_eq",
-        Op::I32Ne => "_i32_ne",
-        Op::I32LtSigned => "_i32_lt_s",
-        Op::I32LtUnsigned => "_i32_lt_u",
-        Op::I32GtSigned => "_i32_gt_s",
-        Op::I32GtUnsigned => "_i32_gt_u",
-        Op::I32LeSigned => "_i32_le_s",
-        Op::I32LeUnsigned => "_i32_le_u",
-        Op::I32GeSigned => "_i32_ge_s",
-        Op::I32GeUnsigned => "_i32_ge_u",
+        Op::I32Const { .. } => &STENCIL_I32_CONST,
+        Op::LocalGet { .. } => &STENCIL_LOCAL_GET,
+        Op::LocalSet { .. } => &STENCIL_LOCAL_SET,
+        Op::LocalTee { .. } => &STENCIL_LOCAL_TEE,
+        Op::LocalGet2 { .. } => &STENCIL_LOCAL_GET2,
+        Op::Return => &STENCIL_RETURN_VALUE,
+        Op::I32Add => &STENCIL_I32_ADD,
+        Op::I32Sub => &STENCIL_I32_SUB,
+        Op::I32Mul => &STENCIL_I32_MUL,
+        Op::I32DivSigned => &STENCIL_I32_DIV_S,
+        Op::I32DivUnsigned => &STENCIL_I32_DIV_U,
+        Op::I32RemainderSigned => &STENCIL_I32_REM_S,
+        Op::I32RemainderUnsigned => &STENCIL_I32_REM_U,
+        Op::I32EqZero => &STENCIL_I32_EQZ,
+        Op::I32Eq => &STENCIL_I32_EQ,
+        Op::I32Ne => &STENCIL_I32_NE,
+        Op::I32LtSigned => &STENCIL_I32_LT_S,
+        Op::I32LtUnsigned => &STENCIL_I32_LT_U,
+        Op::I32GtSigned => &STENCIL_I32_GT_S,
+        Op::I32GtUnsigned => &STENCIL_I32_GT_U,
+        Op::I32LeSigned => &STENCIL_I32_LE_S,
+        Op::I32LeUnsigned => &STENCIL_I32_LE_U,
+        Op::I32GeSigned => &STENCIL_I32_GE_S,
+        Op::I32GeUnsigned => &STENCIL_I32_GE_U,
         _ => return None,
     })
 }
@@ -126,7 +133,7 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
     let mut required_locals = 0_u64;
 
     for (pc, &op) in ops.iter().enumerate() {
-        let name = find_stencil(op)
+        let stencil = find_stencil(op)
             .ok_or_else(|| Error::jit(format!("unsupported operation at IR {pc}: {op:?}")))?;
 
         let parameters = match op {
@@ -214,11 +221,6 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
         };
 
         max_stack_height = max_stack_height.max(stack_height);
-
-        let stencil = STENCILS
-            .iter()
-            .find(|stencil| stencil.name == name)
-            .ok_or_else(|| Error::jit(format!("missing stencil {name} at IR {pc}")))?;
 
         instances.push(StencilInstance {
             stencil,
