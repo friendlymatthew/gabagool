@@ -26,5 +26,6 @@ typedef struct VMContext {
 #define F64_TO_BITS(value) __builtin_bit_cast(uint64_t, (double)(value))
 
 extern void _JIT_CONTINUE(VMContext *ctx);
+extern void _JIT_TARGET(VMContext *ctx);
 
 #endif

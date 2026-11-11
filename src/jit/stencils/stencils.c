@@ -5,6 +5,23 @@
 extern unsigned char _JIT_PARAM_0;
 extern unsigned char _JIT_PARAM_1;
 
+void jump(VMContext *ctx) { __attribute__((musttail)) return _JIT_TARGET(ctx); }
+
+void jump_with_drop(VMContext *ctx) {
+  uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+  uint64_t source = ctx->stack_height - keep;
+  uint64_t destination = source - drop;
+
+  for (uint64_t i = 0; i < keep; i++) {
+    ctx->stack[destination + i] = ctx->stack[source + i];
+  }
+
+  ctx->stack_height -= drop;
+
+  __attribute__((musttail)) return _JIT_TARGET(ctx);
+}
+
 void return_value(VMContext *ctx) { (void)ctx; }
 
 void local_get(VMContext *ctx) {

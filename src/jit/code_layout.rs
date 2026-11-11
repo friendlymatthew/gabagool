@@ -18,10 +18,13 @@ pub struct CodeLayout {
 
 impl CodeLayout {
     pub fn try_new(instances: &[StencilInstance<'_>]) -> Result<Self> {
-        let code_len: usize = instances
-            .iter()
-            .map(|instance| instance.stencil.code.len())
-            .sum();
+        let mut code_offsets = Vec::with_capacity(instances.len());
+        let mut code_len = 0;
+
+        for instance in instances {
+            code_offsets.push(code_len);
+            code_len += instance.stencil.code.len();
+        }
 
         let slots_start = (code_len + 7) & !7;
         let mut data = Vec::new();
@@ -34,7 +37,7 @@ impl CodeLayout {
                 .iter()
                 .filter_map(|patch| match patch.value {
                     PatchValue::Parameter(index) => Some(index + 1),
-                    PatchValue::Continue => None,
+                    PatchValue::Continue | PatchValue::Target => None,
                 })
                 .max()
                 .unwrap_or(0);
@@ -58,7 +61,6 @@ impl CodeLayout {
             let stencil = instance.stencil;
             let start_offset = code.len();
             code.extend_from_slice(stencil.code);
-            let next_start_offset = code.len();
 
             for patch in stencil.patches {
                 ensure_jit!(
@@ -91,27 +93,41 @@ impl CodeLayout {
                     continue;
                 }
 
-                ensure_jit!(i + 1 < instances.len(), "another stencil must follow");
+                let destination = match patch.value {
+                    PatchValue::Continue => {
+                        ensure_jit!(i + 1 < instances.len(), "another stencil must follow");
+                        code_offsets[i + 1]
+                    }
+                    PatchValue::Target => {
+                        let target = instance
+                            .target
+                            .ok_or_else(|| crate::Error::jit("jump stencil needs a target"))?;
+
+                        *code_offsets
+                            .get(target)
+                            .ok_or_else(|| crate::Error::jit("jump target is outside function"))?
+                    }
+                    PatchValue::Parameter(_) => unreachable!(),
+                };
 
                 ensure_jit!(
                     matches!(patch.encoding, PatchEncoding::Branch26),
                     "encoding must be branch26"
                 );
+
                 let branch_position = start_offset + patch.offset;
+                let distance = destination as i128 - branch_position as i128;
 
-                let distance = next_start_offset - branch_position;
+                ensure_jit!(distance % 4 == 0, "distance must be divisible by 4");
 
-                ensure_jit!(
-                    distance.is_multiple_of(4),
-                    "distance must be divisible by 4"
-                );
+                let words = distance / 4;
 
                 ensure_jit!(
-                    distance / 4 < (1 << 25),
+                    (-(1_i128 << 25)..(1_i128 << 25)).contains(&words),
                     "branch distance exceeds signed 26-bit range"
                 );
 
-                let instruction = 0x1400_0000_u32 | (distance / 4) as u32;
+                let instruction = 0x1400_0000_u32 | (words as u32 & 0x03ff_ffff);
 
                 code[branch_position..branch_position + 4]
                     .copy_from_slice(&instruction.to_le_bytes());

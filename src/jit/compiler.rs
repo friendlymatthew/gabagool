@@ -34,8 +34,9 @@ use super::{
     STENCIL_I64_ROTR, STENCIL_I64_SHL, STENCIL_I64_SHR_S, STENCIL_I64_SHR_U, STENCIL_I64_SUB,
     STENCIL_I64_TRUNC_F32_S, STENCIL_I64_TRUNC_F32_U, STENCIL_I64_TRUNC_F64_S,
     STENCIL_I64_TRUNC_F64_U, STENCIL_I64_TRUNC_SAT_F32_S, STENCIL_I64_TRUNC_SAT_F32_U,
-    STENCIL_I64_TRUNC_SAT_F64_S, STENCIL_I64_TRUNC_SAT_F64_U, STENCIL_I64_XOR, STENCIL_LOCAL_GET,
-    STENCIL_LOCAL_GET2, STENCIL_LOCAL_SET, STENCIL_LOCAL_TEE, STENCIL_RETURN_VALUE,
+    STENCIL_I64_TRUNC_SAT_F64_S, STENCIL_I64_TRUNC_SAT_F64_U, STENCIL_I64_XOR, STENCIL_JUMP,
+    STENCIL_JUMP_WITH_DROP, STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2, STENCIL_LOCAL_SET,
+    STENCIL_LOCAL_TEE, STENCIL_RETURN_VALUE,
 };
 
 const fn find_stencil(op: Op) -> Option<&'static Stencil> {
@@ -46,6 +47,8 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::LocalTee { .. } => &STENCIL_LOCAL_TEE,
         Op::LocalGet2 { .. } => &STENCIL_LOCAL_GET2,
         Op::Return => &STENCIL_RETURN_VALUE,
+        Op::Jump { drop: 0, .. } => &STENCIL_JUMP,
+        Op::Jump { .. } => &STENCIL_JUMP_WITH_DROP,
         Op::I32Add => &STENCIL_I32_ADD,
         Op::I32Sub => &STENCIL_I32_SUB,
         Op::I32Mul => &STENCIL_I32_MUL,
@@ -271,16 +274,13 @@ pub fn supports(ops: &[Op]) -> bool {
     ops.iter().all(|&op| find_stencil(op).is_some())
 }
 
-pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
-    ensure_jit!(
-        matches!(ops.last(), Some(Op::Return)),
-        "function must end with Return"
-    );
-
+pub fn compile(
+    ops: &[Op],
+    max_stack_height: usize,
+    result_count: usize,
+) -> Result<JitCompiledFunction> {
     let mut instances = Vec::with_capacity(ops.len());
 
-    let mut stack_height = 0_usize;
-    let mut max_stack_height = 0;
     let mut required_locals = 0_u64;
 
     for (pc, &op) in ops.iter().enumerate() {
@@ -288,49 +288,11 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
             .ok_or_else(|| Error::jit(format!("unsupported operation at IR {pc}: {op:?}")))?;
 
         let parameters = match op {
-            Op::I32Const { value } => {
-                stack_height += 1;
-
-                vec![u64::from(value as u32)]
-            }
-            Op::I64Const { value } => {
-                stack_height += 1;
-
-                vec![value as u64]
-            }
-            Op::F32Const { value } => {
-                stack_height += 1;
-
-                vec![u64::from(value.to_bits())]
-            }
-            Op::F64Const { value } => {
-                stack_height += 1;
-
-                vec![value.to_bits()]
-            }
-            Op::LocalGet { local_i } => {
-                required_locals = required_locals.max(u64::from(local_i) + 1);
-                stack_height += 1;
-
-                vec![u64::from(local_i)]
-            }
-            Op::LocalSet { local_i } => {
-                ensure_jit!(
-                    stack_height >= 1,
-                    "stack underflow at IR {pc}: LocalSet needs one value"
-                );
-
-                required_locals = required_locals.max(u64::from(local_i) + 1);
-                stack_height -= 1;
-
-                vec![u64::from(local_i)]
-            }
-            Op::LocalTee { local_i } => {
-                ensure_jit!(
-                    stack_height >= 1,
-                    "stack underflow at IR {pc}: LocalTee needs one value"
-                );
-
+            Op::I32Const { value } => vec![u64::from(value as u32)],
+            Op::I64Const { value } => vec![value as u64],
+            Op::F32Const { value } => vec![u64::from(value.to_bits())],
+            Op::F64Const { value } => vec![value.to_bits()],
+            Op::LocalGet { local_i } | Op::LocalSet { local_i } | Op::LocalTee { local_i } => {
                 required_locals = required_locals.max(u64::from(local_i) + 1);
 
                 vec![u64::from(local_i)]
@@ -340,175 +302,24 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
                 local_i_b,
             } => {
                 required_locals = required_locals.max(u64::from(local_i_a.max(local_i_b)) + 1);
-                stack_height += 2;
+
                 vec![u64::from(local_i_a), u64::from(local_i_b)]
             }
-            Op::I32EqZero
-            | Op::I32CountLeadingZeros
-            | Op::I32CountTrailingZeros
-            | Op::I32PopCount
-            | Op::I64CountLeadingZeros
-            | Op::I64CountTrailingZeros
-            | Op::I64PopCount
-            | Op::I64EqZero
-            | Op::F32Abs
-            | Op::F32Neg
-            | Op::F32Ceil
-            | Op::F32Floor
-            | Op::F32Trunc
-            | Op::F32Nearest
-            | Op::F32Sqrt
-            | Op::F64Abs
-            | Op::F64Neg
-            | Op::F64Ceil
-            | Op::F64Floor
-            | Op::F64Trunc
-            | Op::F64Nearest
-            | Op::F64Sqrt
-            | Op::I32WrapI64
-            | Op::I64ExtendI32Signed
-            | Op::I64ExtendI32Unsigned
-            | Op::I32ReinterpretF32
-            | Op::I64ReinterpretF64
-            | Op::F32ReinterpretI32
-            | Op::F64ReinterpretI64
-            | Op::I32Extend8Signed
-            | Op::I32Extend16Signed
-            | Op::I64Extend8Signed
-            | Op::I64Extend16Signed
-            | Op::I64Extend32Signed
-            | Op::F32ConvertI32Signed
-            | Op::F32ConvertI32Unsigned
-            | Op::F32ConvertI64Signed
-            | Op::F32ConvertI64Unsigned
-            | Op::F64ConvertI32Signed
-            | Op::F64ConvertI32Unsigned
-            | Op::F64ConvertI64Signed
-            | Op::F64ConvertI64Unsigned
-            | Op::F32DemoteF64
-            | Op::F64PromoteF32
-            | Op::I32TruncF32Signed
-            | Op::I32TruncSaturatedF32Signed
-            | Op::I32TruncF32Unsigned
-            | Op::I32TruncSaturatedF32Unsigned
-            | Op::I32TruncF64Signed
-            | Op::I32TruncSaturatedF64Signed
-            | Op::I32TruncF64Unsigned
-            | Op::I32TruncSaturatedF64Unsigned
-            | Op::I64TruncF32Signed
-            | Op::I64TruncSaturatedF32Signed
-            | Op::I64TruncF32Unsigned
-            | Op::I64TruncSaturatedF32Unsigned
-            | Op::I64TruncF64Signed
-            | Op::I64TruncSaturatedF64Signed
-            | Op::I64TruncF64Unsigned
-            | Op::I64TruncSaturatedF64Unsigned => {
-                ensure_jit!(
-                    stack_height >= 1,
-                    "stack underflow at IR {pc}: {op:?} needs one value"
-                );
-
-                Vec::new()
+            Op::Jump { keep, drop, .. } if drop != 0 => {
+                vec![u64::from(keep), u64::from(drop)]
             }
-            Op::I32Add
-            | Op::I32And
-            | Op::I32Or
-            | Op::I32Xor
-            | Op::I32Shl
-            | Op::I32ShrUnsigned
-            | Op::I32RotateLeft
-            | Op::I32RotateRight
-            | Op::I32ShrSigned
-            | Op::I64And
-            | Op::I64Or
-            | Op::I64Xor
-            | Op::I64Shl
-            | Op::I64ShrUnsigned
-            | Op::I64RotateLeft
-            | Op::I64RotateRight
-            | Op::I64ShrSigned
-            | Op::I64Add
-            | Op::I64Sub
-            | Op::I64Mul
-            | Op::I64DivSigned
-            | Op::I64DivUnsigned
-            | Op::I64RemainderSigned
-            | Op::I64RemainderUnsigned
-            | Op::I64Eq
-            | Op::I64Ne
-            | Op::I64LtSigned
-            | Op::I64LtUnsigned
-            | Op::I64GtSigned
-            | Op::I64GtUnsigned
-            | Op::I64LeSigned
-            | Op::I64LeUnsigned
-            | Op::I64GeSigned
-            | Op::I64GeUnsigned
-            | Op::F32Add
-            | Op::F32Sub
-            | Op::F32Mul
-            | Op::F32Div
-            | Op::F32Eq
-            | Op::F32Ne
-            | Op::F32Lt
-            | Op::F32Gt
-            | Op::F32Le
-            | Op::F32Ge
-            | Op::F32Min
-            | Op::F32Max
-            | Op::F32CopySign
-            | Op::F64Add
-            | Op::F64Sub
-            | Op::F64Mul
-            | Op::F64Div
-            | Op::F64Eq
-            | Op::F64Ne
-            | Op::F64Lt
-            | Op::F64Gt
-            | Op::F64Le
-            | Op::F64Ge
-            | Op::F64Min
-            | Op::F64Max
-            | Op::F64CopySign
-            | Op::I32Sub
-            | Op::I32Mul
-            | Op::I32DivSigned
-            | Op::I32DivUnsigned
-            | Op::I32RemainderSigned
-            | Op::I32RemainderUnsigned
-            | Op::I32Eq
-            | Op::I32Ne
-            | Op::I32LtSigned
-            | Op::I32LtUnsigned
-            | Op::I32GtSigned
-            | Op::I32GtUnsigned
-            | Op::I32LeSigned
-            | Op::I32LeUnsigned
-            | Op::I32GeSigned
-            | Op::I32GeUnsigned => {
-                ensure_jit!(
-                    stack_height >= 2,
-                    "stack underflow at IR {pc}: {op:?} needs two values"
-                );
-
-                stack_height -= 1;
-                Vec::new()
-            }
-            Op::Return => {
-                ensure_jit!(
-                    pc + 1 == ops.len(),
-                    "instructions after Return at IR {pc} are not supported"
-                );
-                Vec::new()
-            }
-            _ => unreachable!("unsupported operations were rejected above"),
+            _ => Vec::new(),
         };
 
-        max_stack_height = max_stack_height.max(stack_height);
+        let target = match op {
+            Op::Jump { target, .. } => Some(target as usize),
+            _ => None,
+        };
 
         instances.push(StencilInstance {
             stencil,
             parameters,
+            target,
         });
     }
 
@@ -518,13 +329,126 @@ pub fn compile(ops: &[Op]) -> Result<JitCompiledFunction> {
         code: CodeBuffer::new(&layout)?,
         required_locals,
         max_stack_height,
-        result_count: stack_height,
+        result_count,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jump_skips_unreachable_instructions() {
+        let ops = [
+            Op::I32Const { value: 20 },
+            Op::Jump {
+                target: 4,
+                keep: 1,
+                drop: 0,
+            },
+            Op::I32Add,
+            Op::LocalSet { local_i: 0 },
+            Op::I32Const { value: 22 },
+            Op::I32Add,
+            Op::Return,
+        ];
+
+        assert!(supports(&ops));
+
+        let function = compile(&ops, 2, 1).unwrap();
+        let mut locals = [99];
+        let mut stack = [0; 2];
+
+        assert_eq!(function.max_stack_height, 2);
+        assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+        assert_eq!(stack[0], 42);
+        assert_eq!(locals[0], 99);
+    }
+
+    #[test]
+    fn jump_can_target_an_earlier_instruction() {
+        let ops = [
+            Op::Jump {
+                target: 3,
+                keep: 0,
+                drop: 0,
+            },
+            Op::LocalGet { local_i: 0 },
+            Op::Return,
+            Op::I32Const { value: 42 },
+            Op::LocalSet { local_i: 0 },
+            Op::Jump {
+                target: 1,
+                keep: 0,
+                drop: 0,
+            },
+            Op::Return,
+        ];
+
+        let function = compile(&ops, 1, 1).unwrap();
+        let mut locals = [0];
+        let mut stack = [0];
+
+        assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+        assert_eq!(stack[0], 42);
+    }
+
+    #[test]
+    fn jump_preserves_kept_values_when_dropping_stack_entries() {
+        let ops = [
+            Op::I32Const { value: 100 },
+            Op::I32Const { value: 200 },
+            Op::I32Const { value: 10 },
+            Op::I32Const { value: 20 },
+            Op::I32Const { value: 30 },
+            Op::Jump {
+                target: 7,
+                keep: 3,
+                drop: 2,
+            },
+            Op::I32Const { value: 99 },
+            Op::I32Add,
+            Op::I32Add,
+            Op::Return,
+        ];
+
+        let function = compile(&ops, 5, 1).unwrap();
+        let mut stack = [0; 5];
+
+        assert_eq!(function.execute(&mut [], &mut stack).unwrap(), 1);
+        assert_eq!(stack[0], 60);
+    }
+
+    #[test]
+    fn rejects_invalid_jump_target() {
+        let ops = [
+            Op::Jump {
+                target: 2,
+                keep: 0,
+                drop: 0,
+            },
+            Op::Return,
+        ];
+
+        assert!(matches!(compile(&ops, 0, 0), Err(Error::Jit(_))));
+    }
+
+    #[test]
+    fn uses_metadata_without_requiring_a_reachable_return() {
+        let ops = [
+            Op::Jump {
+                target: 0,
+                keep: 0,
+                drop: 0,
+            },
+            Op::Return,
+        ];
+
+        let function = compile(&ops, 0, 1).unwrap();
+
+        assert_eq!(function.max_stack_height, 0);
+        assert_eq!(function.result_count(), 1);
+    }
 
     #[test]
     fn executes_i32_comparisons() {
@@ -553,7 +477,7 @@ mod tests {
 
             assert!(supports(&ops));
 
-            let function = compile(&ops).unwrap();
+            let function = compile(&ops, 2, 1).unwrap();
 
             assert_eq!(function.result_count(), 1);
 
@@ -573,7 +497,7 @@ mod tests {
 
         assert!(supports(&ops));
 
-        let function = compile(&ops).unwrap();
+        let function = compile(&ops, 1, 1).unwrap();
 
         assert_eq!(function.max_stack_height, 1);
 
@@ -596,7 +520,7 @@ mod tests {
         ];
         assert!(supports(&ops));
 
-        let function = compile(&ops).unwrap();
+        let function = compile(&ops, 1, 1).unwrap();
 
         assert_eq!(function.required_locals, 4);
         assert_eq!(function.max_stack_height, 1);
@@ -621,7 +545,7 @@ mod tests {
 
             assert!(supports(&ops));
 
-            let function = compile(&ops).unwrap();
+            let function = compile(&ops, 2, 1).unwrap();
 
             let mut stack = [0_u64; 2];
 

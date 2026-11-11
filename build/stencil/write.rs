@@ -11,12 +11,13 @@ pub(super) fn generate(stencils: &[Stencil<'_>], output: &Path) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchValue {
     Continue,
+    Target,
     Parameter(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchEncoding {
-    /// changes a jump so it goes to the next stencil.
+    /// changes a jump so it goes to its destination.
     Branch26,
 
     /// finds the memory page containing our data slot
@@ -46,6 +47,7 @@ pub struct Stencil {
 pub struct StencilInstance<'a> {
     pub stencil: &'a Stencil,
     pub parameters: alloc::vec::Vec<u64>,
+    pub target: Option<usize>,
 }
 
 "#,
@@ -72,6 +74,8 @@ pub struct StencilInstance<'a> {
                 format!("Parameter({index})")
             } else if patch.symbol == "__JIT_CONTINUE" {
                 String::from("Continue")
+            } else if patch.symbol == "__JIT_TARGET" {
+                String::from("Target")
             } else {
                 panic!("unsupported stencil placeholder {}", patch.symbol);
             };

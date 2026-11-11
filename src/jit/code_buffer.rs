@@ -91,10 +91,12 @@ mod tests {
             StencilInstance {
                 stencil: &STENCIL_I32_ADD,
                 parameters: vec![],
+                target: None,
             },
             StencilInstance {
                 stencil: &STENCIL_RETURN_VALUE,
                 parameters: vec![],
+                target: None,
             },
         ];
 
@@ -135,14 +137,17 @@ mod tests {
             StencilInstance {
                 stencil: &STENCIL_LOCAL_GET2,
                 parameters: vec![2, 3],
+                target: None,
             },
             StencilInstance {
                 stencil: &STENCIL_I32_ADD,
                 parameters: vec![],
+                target: None,
             },
             StencilInstance {
                 stencil: &STENCIL_RETURN_VALUE,
                 parameters: vec![],
+                target: None,
             },
         ];
 

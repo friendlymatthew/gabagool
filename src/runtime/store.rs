@@ -1736,7 +1736,8 @@ impl Store {
         let key = (frame.module_i, frame.compiled_func_i);
 
         if !self.jit_functions.contains_key(&key) {
-            let ops = &self.instances[key.0 as usize].code.compiled_funcs[key.1 as usize].ops;
+            let function = &self.instances[key.0 as usize].code.compiled_funcs[key.1 as usize];
+            let ops = &function.ops;
 
             assert!(
                 jit::supports(ops),
@@ -1745,7 +1746,8 @@ impl Store {
                 key.0,
             );
 
-            let compiled = jit::compile(ops)?;
+            let compiled =
+                jit::compile(ops, function.max_stack_height as usize, frame.arity)?;
 
             self.jit_functions.insert(key, compiled);
         }
