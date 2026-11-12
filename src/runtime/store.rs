@@ -1725,11 +1725,14 @@ impl Store {
 
     #[cfg(feature = "jit")]
     fn try_run_jit(&mut self, depth: usize) -> Result<bool> {
-        use crate::{ensure_jit, jit};
+        use crate::{
+            ensure_jit,
+            jit::{self, JitExit},
+        };
 
         let frame = &self.call_stack[depth];
 
-        if self.fuel.is_some() || frame.pc != 0 || self.stack.len() != frame.stack_base {
+        if self.fuel.is_some() {
             return Ok(false);
         }
 
@@ -1769,14 +1772,32 @@ impl Store {
             element_segments: &mut self.element_segments,
         };
 
-        let count = function.execute_vm(
+        let stack_height = self.stack.len() - base;
+        let exit = function.execute_vm(
             &mut self.locals[locals],
-            self.stack.spare_mut(),
+            self.stack.jit_frame_mut(base),
             &mut runtime,
+            frame.pc,
+            stack_height,
         )?;
 
-        self.stack.truncate(base + count);
-        self.do_return(depth);
+        match exit {
+            JitExit::Returned { stack_height } => {
+                self.stack.truncate(base + stack_height);
+                self.do_return(depth);
+            }
+            JitExit::Call {
+                stack_height,
+                function,
+                resume_pc,
+            } => {
+                self.stack.truncate(base + stack_height);
+                self.call_stack[depth].pc = resume_pc;
+
+                let address = self.instances[key.0 as usize].function_addrs[function as usize];
+                self.push_function_call(address)?;
+            }
+        }
 
         Ok(true)
     }
@@ -1791,6 +1812,10 @@ impl Store {
 
             #[cfg(feature = "jit")]
             if self.try_run_jit(depth)? {
+                if self.pending_suspension.is_some() {
+                    return Ok(RunOutcome::Suspended);
+                }
+
                 continue;
             }
 

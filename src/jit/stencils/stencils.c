@@ -2365,3 +2365,9 @@ void global_set(VMContext *ctx) {
 void unreachable(VMContext *ctx) {
   ctx->trap = JIT_TRAP_UNREACHABLE;
 }
+
+void call(VMContext *ctx) {
+  ctx->call_function = (uintptr_t)&_JIT_PARAM_0;
+  ctx->resume_pc = (uintptr_t)&_JIT_PARAM_1;
+  ctx->exit_reason = JIT_EXIT_CALL;
+}

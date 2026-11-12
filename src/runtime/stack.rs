@@ -159,7 +159,7 @@ impl ValueStack {
     }
 
     #[cfg(feature = "jit")]
-    pub(crate) fn spare_mut(&mut self) -> &mut [RawValue] {
-        &mut self.inner[self.cursor..]
+    pub(crate) fn jit_frame_mut(&mut self, base: usize) -> &mut [RawValue] {
+        &mut self.inner[base..]
     }
 }

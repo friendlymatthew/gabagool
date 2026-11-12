@@ -10,7 +10,7 @@ core::cfg_select! {
         mod compiler;
         mod runtime;
 
-        pub(crate) use compiler::{compile, supports, JitCompiledFunction};
+        pub(crate) use compiler::{compile, supports, JitCompiledFunction, JitExit};
         pub(crate) use runtime::RuntimeContext;
     }
     _ => {

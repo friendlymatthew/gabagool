@@ -13,6 +13,7 @@ pub struct DataSlotPatch {
 pub struct CodeLayout {
     pub bytes: Vec<u8>,
     pub code_len: usize,
+    pub code_offsets: Vec<usize>,
     pub data_slot_patches: Vec<DataSlotPatch>,
 }
 
@@ -142,6 +143,7 @@ impl CodeLayout {
         Ok(Self {
             bytes: code,
             code_len,
+            code_offsets,
             data_slot_patches,
         })
     }

@@ -4,7 +4,7 @@ use super::{
     code_buffer::CodeBuffer,
     code_layout::CodeLayout,
     runtime::{self, BulkOperation, MemoryView, RuntimeContext},
-    Stencil, StencilInstance, STENCIL_DATA_DROP, STENCIL_ELEM_DROP, STENCIL_F32_ABS,
+    Stencil, StencilInstance, STENCIL_CALL, STENCIL_DATA_DROP, STENCIL_ELEM_DROP, STENCIL_F32_ABS,
     STENCIL_F32_ADD, STENCIL_F32_CEIL, STENCIL_F32_CONST, STENCIL_F32_CONVERT_I32_S,
     STENCIL_F32_CONVERT_I32_U, STENCIL_F32_CONVERT_I64_S, STENCIL_F32_CONVERT_I64_U,
     STENCIL_F32_COPYSIGN, STENCIL_F32_DEMOTE_F64, STENCIL_F32_DIV, STENCIL_F32_EQ,
@@ -58,6 +58,7 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::LocalTee { .. } => &STENCIL_LOCAL_TEE,
         Op::LocalGet2 { .. } => &STENCIL_LOCAL_GET2,
         Op::Return => &STENCIL_RETURN_VALUE,
+        Op::Call { .. } => &STENCIL_CALL,
         Op::GlobalGet { .. } => &STENCIL_GLOBAL_GET,
         Op::GlobalSet { .. } => &STENCIL_GLOBAL_SET,
         Op::Unreachable => &STENCIL_UNREACHABLE,
@@ -247,6 +248,7 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
 
 pub struct JitCompiledFunction {
     code: CodeBuffer,
+    code_offsets: Vec<usize>,
     required_locals: u64,
     max_stack_height: usize,
     result_count: usize,
@@ -262,6 +264,20 @@ struct VMContext {
     bulk_operation: BulkOperation,
     memories: *const MemoryView,
     globals: *const *mut u64,
+    exit_reason: u64,
+    call_function: u64,
+    resume_pc: u64,
+}
+
+pub(crate) enum JitExit {
+    Returned {
+        stack_height: usize,
+    },
+    Call {
+        stack_height: usize,
+        function: u32,
+        resume_pc: usize,
+    },
 }
 
 impl JitCompiledFunction {
@@ -274,7 +290,9 @@ impl JitCompiledFunction {
         locals: &mut [crate::RawValue],
         stack: &mut [crate::RawValue],
         runtime: &mut RuntimeContext<'_>,
-    ) -> Result<usize> {
+        pc: usize,
+        stack_height: usize,
+    ) -> Result<JitExit> {
         unsafe {
             let locals =
                 core::slice::from_raw_parts_mut(locals.as_mut_ptr().cast::<u64>(), locals.len());
@@ -282,13 +300,16 @@ impl JitCompiledFunction {
             let stack =
                 core::slice::from_raw_parts_mut(stack.as_mut_ptr().cast::<u64>(), stack.len());
 
-            self.execute_with_runtime(locals, stack, Some(runtime))
+            self.execute_with_runtime(locals, stack, Some(runtime), pc, stack_height)
         }
     }
 
     #[cfg(test)]
     pub(super) fn execute(&self, locals: &mut [u64], stack: &mut [u64]) -> Result<usize> {
-        self.execute_with_runtime(locals, stack, None)
+        match self.execute_with_runtime(locals, stack, None, 0, 0)? {
+            JitExit::Returned { stack_height } => Ok(stack_height),
+            JitExit::Call { .. } => bail_jit!("calls must be coordinated by the store"),
+        }
     }
 
     fn execute_with_runtime(
@@ -296,7 +317,9 @@ impl JitCompiledFunction {
         locals: &mut [u64],
         stack: &mut [u64],
         runtime: Option<&mut RuntimeContext<'_>>,
-    ) -> Result<usize> {
+        pc: usize,
+        stack_height: usize,
+    ) -> Result<JitExit> {
         ensure_jit!(
             locals.len() as u64 >= self.required_locals,
             "not enough locals"
@@ -350,7 +373,7 @@ impl JitCompiledFunction {
         let mut context = VMContext {
             locals: locals.as_mut_ptr(),
             stack: stack.as_mut_ptr(),
-            stack_height: 0,
+            stack_height: stack_height as u64,
             trap: 0,
             runtime: runtime.map_or(core::ptr::null_mut(), |context| {
                 (context as *mut RuntimeContext<'_>).cast()
@@ -358,12 +381,20 @@ impl JitCompiledFunction {
             bulk_operation: runtime::bulk_operation,
             memories,
             globals,
+            exit_reason: 0,
+            call_function: 0,
+            resume_pc: 0,
         };
 
         type Entry = unsafe extern "C" fn(*mut VMContext);
 
+        let offset = *self
+            .code_offsets
+            .get(pc)
+            .ok_or_else(|| Error::jit("native resume PC is outside function"))?;
+
         unsafe {
-            let entry: Entry = core::mem::transmute(self.code.as_ptr());
+            let entry: Entry = core::mem::transmute(self.code.as_ptr().add(offset));
             entry(&mut context);
         }
 
@@ -379,12 +410,17 @@ impl JitCompiledFunction {
             code => bail_jit!("unknown trap code {code}"),
         }
 
-        ensure_jit!(
-            context.stack_height as usize == self.result_count,
-            "unexpected result stack height"
-        );
+        let stack_height = context.stack_height as usize;
 
-        Ok(self.result_count)
+        match context.exit_reason {
+            0 => Ok(JitExit::Returned { stack_height }),
+            1 => Ok(JitExit::Call {
+                stack_height,
+                function: context.call_function as u32,
+                resume_pc: context.resume_pc as usize,
+            }),
+            code => bail_jit!("unknown native exit reason {code}"),
+        }
     }
 }
 
@@ -406,6 +442,7 @@ pub fn compile(
             .ok_or_else(|| Error::jit(format!("unsupported operation at IR {pc}: {op:?}")))?;
 
         let parameters = match op {
+            Op::Call { func_i } => vec![u64::from(func_i), (pc + 1) as u64],
             Op::GlobalGet { global_i } | Op::GlobalSet { global_i } => {
                 vec![u64::from(global_i)]
             }
@@ -527,6 +564,7 @@ pub fn compile(
 
     Ok(JitCompiledFunction {
         code: CodeBuffer::new(&layout)?,
+        code_offsets: layout.code_offsets,
         required_locals,
         max_stack_height,
         result_count,

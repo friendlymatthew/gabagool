@@ -14,6 +14,11 @@ enum {
 };
 
 enum {
+    JIT_EXIT_RETURN = 0,
+    JIT_EXIT_CALL = 1,
+};
+
+enum {
     JIT_BULK_MEMORY_INIT = 0,
     JIT_BULK_DATA_DROP = 1,
     JIT_BULK_TABLE_INIT = 2,
@@ -42,6 +47,10 @@ typedef struct VMContext {
     BulkOperation bulk_operation;
     const MemoryView *memories;
     uint64_t *const *globals;
+
+    uint64_t exit_reason;
+    uint64_t call_function;
+    uint64_t resume_pc;
 } VMContext;
 
 static __attribute__((always_inline)) inline uint8_t *memory_address(
