@@ -2371,3 +2371,35 @@ void call(VMContext *ctx) {
   ctx->resume_pc = (uintptr_t)&_JIT_PARAM_1;
   ctx->exit_reason = JIT_EXIT_CALL;
 }
+
+void drop(VMContext *ctx) {
+  ctx->stack_height--;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void select_value(VMContext *ctx) {
+  uint32_t condition = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint64_t second = ctx->stack[--ctx->stack_height];
+  uint64_t first = ctx->stack[--ctx->stack_height];
+
+  ctx->stack[ctx->stack_height++] = condition != 0 ? first : second;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void local_get_local_set(VMContext *ctx) {
+  uintptr_t source = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t destination = (uintptr_t)&_JIT_PARAM_1;
+
+  ctx->locals[destination] = ctx->locals[source];
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void local_get_return(VMContext *ctx) {
+  uintptr_t index = (uintptr_t)&_JIT_PARAM_0;
+  uint64_t value = ctx->locals[index];
+
+  ctx->stack[ctx->stack_height++] = value;
+}

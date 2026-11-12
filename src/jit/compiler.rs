@@ -4,22 +4,22 @@ use super::{
     code_buffer::CodeBuffer,
     code_layout::CodeLayout,
     runtime::{self, BulkOperation, MemoryView, RuntimeContext},
-    Stencil, StencilInstance, STENCIL_CALL, STENCIL_DATA_DROP, STENCIL_ELEM_DROP, STENCIL_F32_ABS,
-    STENCIL_F32_ADD, STENCIL_F32_CEIL, STENCIL_F32_CONST, STENCIL_F32_CONVERT_I32_S,
-    STENCIL_F32_CONVERT_I32_U, STENCIL_F32_CONVERT_I64_S, STENCIL_F32_CONVERT_I64_U,
-    STENCIL_F32_COPYSIGN, STENCIL_F32_DEMOTE_F64, STENCIL_F32_DIV, STENCIL_F32_EQ,
-    STENCIL_F32_FLOOR, STENCIL_F32_GE, STENCIL_F32_GT, STENCIL_F32_LE, STENCIL_F32_LT,
-    STENCIL_F32_MAX, STENCIL_F32_MIN, STENCIL_F32_MUL, STENCIL_F32_NE, STENCIL_F32_NEAREST,
-    STENCIL_F32_NEG, STENCIL_F32_REINTERPRET_I32, STENCIL_F32_SQRT, STENCIL_F32_SUB,
-    STENCIL_F32_TRUNC, STENCIL_F64_ABS, STENCIL_F64_ADD, STENCIL_F64_CEIL, STENCIL_F64_CONST,
-    STENCIL_F64_CONVERT_I32_S, STENCIL_F64_CONVERT_I32_U, STENCIL_F64_CONVERT_I64_S,
-    STENCIL_F64_CONVERT_I64_U, STENCIL_F64_COPYSIGN, STENCIL_F64_DIV, STENCIL_F64_EQ,
-    STENCIL_F64_FLOOR, STENCIL_F64_GE, STENCIL_F64_GT, STENCIL_F64_LE, STENCIL_F64_LT,
-    STENCIL_F64_MAX, STENCIL_F64_MIN, STENCIL_F64_MUL, STENCIL_F64_NE, STENCIL_F64_NEAREST,
-    STENCIL_F64_NEG, STENCIL_F64_PROMOTE_F32, STENCIL_F64_REINTERPRET_I64, STENCIL_F64_SQRT,
-    STENCIL_F64_SUB, STENCIL_F64_TRUNC, STENCIL_GLOBAL_GET, STENCIL_GLOBAL_SET, STENCIL_I32_ADD,
-    STENCIL_I32_AND, STENCIL_I32_CLZ, STENCIL_I32_CONST, STENCIL_I32_CTZ, STENCIL_I32_DIV_S,
-    STENCIL_I32_DIV_U, STENCIL_I32_EQ, STENCIL_I32_EQZ, STENCIL_I32_EXTEND16_S,
+    Stencil, StencilInstance, STENCIL_CALL, STENCIL_DATA_DROP, STENCIL_DROP, STENCIL_ELEM_DROP,
+    STENCIL_F32_ABS, STENCIL_F32_ADD, STENCIL_F32_CEIL, STENCIL_F32_CONST,
+    STENCIL_F32_CONVERT_I32_S, STENCIL_F32_CONVERT_I32_U, STENCIL_F32_CONVERT_I64_S,
+    STENCIL_F32_CONVERT_I64_U, STENCIL_F32_COPYSIGN, STENCIL_F32_DEMOTE_F64, STENCIL_F32_DIV,
+    STENCIL_F32_EQ, STENCIL_F32_FLOOR, STENCIL_F32_GE, STENCIL_F32_GT, STENCIL_F32_LE,
+    STENCIL_F32_LT, STENCIL_F32_MAX, STENCIL_F32_MIN, STENCIL_F32_MUL, STENCIL_F32_NE,
+    STENCIL_F32_NEAREST, STENCIL_F32_NEG, STENCIL_F32_REINTERPRET_I32, STENCIL_F32_SQRT,
+    STENCIL_F32_SUB, STENCIL_F32_TRUNC, STENCIL_F64_ABS, STENCIL_F64_ADD, STENCIL_F64_CEIL,
+    STENCIL_F64_CONST, STENCIL_F64_CONVERT_I32_S, STENCIL_F64_CONVERT_I32_U,
+    STENCIL_F64_CONVERT_I64_S, STENCIL_F64_CONVERT_I64_U, STENCIL_F64_COPYSIGN, STENCIL_F64_DIV,
+    STENCIL_F64_EQ, STENCIL_F64_FLOOR, STENCIL_F64_GE, STENCIL_F64_GT, STENCIL_F64_LE,
+    STENCIL_F64_LT, STENCIL_F64_MAX, STENCIL_F64_MIN, STENCIL_F64_MUL, STENCIL_F64_NE,
+    STENCIL_F64_NEAREST, STENCIL_F64_NEG, STENCIL_F64_PROMOTE_F32, STENCIL_F64_REINTERPRET_I64,
+    STENCIL_F64_SQRT, STENCIL_F64_SUB, STENCIL_F64_TRUNC, STENCIL_GLOBAL_GET, STENCIL_GLOBAL_SET,
+    STENCIL_I32_ADD, STENCIL_I32_AND, STENCIL_I32_CLZ, STENCIL_I32_CONST, STENCIL_I32_CTZ,
+    STENCIL_I32_DIV_S, STENCIL_I32_DIV_U, STENCIL_I32_EQ, STENCIL_I32_EQZ, STENCIL_I32_EXTEND16_S,
     STENCIL_I32_EXTEND8_S, STENCIL_I32_GE_S, STENCIL_I32_GE_U, STENCIL_I32_GT_S, STENCIL_I32_GT_U,
     STENCIL_I32_LE_S, STENCIL_I32_LE_U, STENCIL_I32_LOAD, STENCIL_I32_LOAD16_S,
     STENCIL_I32_LOAD16_U, STENCIL_I32_LOAD8_S, STENCIL_I32_LOAD8_U, STENCIL_I32_LT_S,
@@ -46,8 +46,9 @@ use super::{
     STENCIL_I64_XOR, STENCIL_JUMP, STENCIL_JUMP_IF, STENCIL_JUMP_IF_NOT,
     STENCIL_JUMP_IF_NOT_WITH_DROP, STENCIL_JUMP_IF_WITH_DROP, STENCIL_JUMP_WITH_DROP,
     STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2, STENCIL_LOCAL_GET_I32_LOAD, STENCIL_LOCAL_GET_I32_STORE,
-    STENCIL_LOCAL_GET_I64_LOAD, STENCIL_LOCAL_GET_I64_STORE, STENCIL_LOCAL_SET, STENCIL_LOCAL_TEE,
-    STENCIL_MEMORY_INIT, STENCIL_RETURN_VALUE, STENCIL_TABLE_INIT, STENCIL_UNREACHABLE,
+    STENCIL_LOCAL_GET_I64_LOAD, STENCIL_LOCAL_GET_I64_STORE, STENCIL_LOCAL_GET_LOCAL_SET,
+    STENCIL_LOCAL_GET_RETURN, STENCIL_LOCAL_SET, STENCIL_LOCAL_TEE, STENCIL_MEMORY_INIT,
+    STENCIL_RETURN_VALUE, STENCIL_SELECT_VALUE, STENCIL_TABLE_INIT, STENCIL_UNREACHABLE,
 };
 
 const fn find_stencil(op: Op) -> Option<&'static Stencil> {
@@ -58,6 +59,10 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::LocalTee { .. } => &STENCIL_LOCAL_TEE,
         Op::LocalGet2 { .. } => &STENCIL_LOCAL_GET2,
         Op::Return => &STENCIL_RETURN_VALUE,
+        Op::Drop => &STENCIL_DROP,
+        Op::Select => &STENCIL_SELECT_VALUE,
+        Op::LocalGetLocalSet { .. } => &STENCIL_LOCAL_GET_LOCAL_SET,
+        Op::LocalGetReturn { .. } => &STENCIL_LOCAL_GET_RETURN,
         Op::Call { .. } => &STENCIL_CALL,
         Op::GlobalGet { .. } => &STENCIL_GLOBAL_GET,
         Op::GlobalSet { .. } => &STENCIL_GLOBAL_SET,
@@ -523,10 +528,21 @@ pub fn compile(
             Op::I64Const { value } => vec![value as u64],
             Op::F32Const { value } => vec![u64::from(value.to_bits())],
             Op::F64Const { value } => vec![value.to_bits()],
-            Op::LocalGet { local_i } | Op::LocalSet { local_i } | Op::LocalTee { local_i } => {
+            Op::LocalGet { local_i }
+            | Op::LocalSet { local_i }
+            | Op::LocalTee { local_i }
+            | Op::LocalGetReturn { local_i } => {
                 required_locals = required_locals.max(u64::from(local_i) + 1);
 
                 vec![u64::from(local_i)]
+            }
+            Op::LocalGetLocalSet {
+                local_get_i,
+                local_set_i,
+            } => {
+                required_locals = required_locals.max(u64::from(local_get_i.max(local_set_i)) + 1);
+
+                vec![u64::from(local_get_i), u64::from(local_set_i)]
             }
             Op::LocalGet2 {
                 local_i_a,
@@ -574,6 +590,122 @@ pub fn compile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drop_removes_only_the_top_value() {
+        let ops = [
+            Op::I32Const { value: 10 },
+            Op::I32Const { value: 999 },
+            Op::Drop,
+            Op::I32Const { value: 32 },
+            Op::I32Add,
+            Op::Return,
+        ];
+
+        assert!(supports(&ops));
+
+        let function = compile(&ops, 2, 1).unwrap();
+        let mut stack = [0; 2];
+
+        assert_eq!(function.execute(&mut [], &mut stack).unwrap(), 1);
+        assert_eq!(stack[0], 42);
+    }
+
+    #[test]
+    fn select_preserves_bits_and_uses_an_i32_condition() {
+        let ops = [
+            Op::LocalGet2 {
+                local_i_a: 0,
+                local_i_b: 1,
+            },
+            Op::LocalGet { local_i: 2 },
+            Op::Select,
+            Op::Return,
+        ];
+
+        assert!(supports(&ops));
+
+        let function = compile(&ops, 3, 1).unwrap();
+
+        for condition in [0_u64, 1, u32::MAX as u64, 1_u64 << 32] {
+            let first = 0x7ff8_0000_0000_1234;
+            let second = 0x8000_0000_0000_0000;
+            let mut locals = [first, second, condition];
+            let mut stack = [0; 3];
+
+            assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+            assert_eq!(stack[0], if condition as u32 != 0 { first } else { second });
+        }
+    }
+
+    #[test]
+    fn fused_local_copy_leaves_operand_stack_unchanged() {
+        for destination in [1, 3] {
+            let ops = [
+                Op::I32Const { value: 42 },
+                Op::LocalGetLocalSet {
+                    local_get_i: 1,
+                    local_set_i: destination,
+                },
+                Op::Return,
+            ];
+
+            assert!(supports(&ops));
+
+            let function = compile(&ops, 1, 1).unwrap();
+            let value = 0x89ab_cdef_0123_4567;
+            let mut locals = [0, value, 0, 0];
+            let mut stack = [0];
+
+            assert_eq!(function.required_locals, u64::from(destination.max(1)) + 1);
+            assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 1);
+            assert_eq!(stack[0], 42);
+            assert_eq!(locals[destination as usize], value);
+        }
+    }
+
+    #[test]
+    fn fused_local_return_exits_immediately() {
+        let ops = [
+            Op::I32Const { value: 99 },
+            Op::LocalGetReturn { local_i: 3 },
+            Op::I32Const { value: 777 },
+            Op::Return,
+        ];
+
+        assert!(supports(&ops));
+
+        let function = compile(&ops, 2, 1).unwrap();
+        let mut locals = [0, 0, 0, 42];
+        let mut stack = [0; 2];
+
+        // The store's normal return handling keeps the result and drops the 99.
+        assert_eq!(function.execute(&mut locals, &mut stack).unwrap(), 2);
+        assert_eq!(stack, [99, 42]);
+    }
+
+    #[test]
+    fn fused_local_return_works_as_a_callee() {
+        let bytes = wat::parse_str(
+            r#"
+            (module
+                (func $identity (param i32) (result i32) local.get 0)
+                (func (export "run") (result i32)
+                    i32.const 10 i32.const 32 call $identity i32.add))
+        "#,
+        )
+        .unwrap();
+        let module = crate::Module::try_new(&bytes).unwrap();
+        let mut store = crate::Store::new();
+        let instance = store.instantiate(&module, vec![]).unwrap();
+        let output = store
+            .invoke_no_args(instance, "run")
+            .unwrap()
+            .into_completed()
+            .unwrap();
+
+        assert_eq!(output[0].as_i32(), 42);
+    }
 
     #[test]
     fn conditional_jumps_take_target_or_continue() {
