@@ -4,6 +4,7 @@
 // for example, local_get uses param 0 as an index, i32_const uses it as a value
 extern unsigned char _JIT_PARAM_0;
 extern unsigned char _JIT_PARAM_1;
+extern unsigned char _JIT_PARAM_2;
 
 void jump(VMContext *ctx) { __attribute__((musttail)) return _JIT_TARGET(ctx); }
 
@@ -1858,6 +1859,487 @@ void i64_trunc_sat_f64_u(VMContext *ctx) {
   }
 
   ctx->stack[ctx->stack_height++] = result;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void memory_init(VMContext *ctx) {
+  uint32_t length = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t source = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint64_t offset = ctx->stack[--ctx->stack_height];
+
+  uint32_t segment = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
+  uint32_t destination = (uint32_t)(uintptr_t)&_JIT_PARAM_1;
+
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_MEMORY_INIT, segment,
+                                  destination, offset, source, length);
+
+  if (ctx->trap != JIT_TRAP_NONE) {
+    return;
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void data_drop(VMContext *ctx) {
+  uint32_t segment = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
+
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_DATA_DROP, segment,
+                                  0, 0, 0, 0);
+
+  if (ctx->trap != JIT_TRAP_NONE) {
+    return;
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void table_init(VMContext *ctx) {
+  uint32_t length = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t source = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint64_t offset = ctx->stack[--ctx->stack_height];
+
+  uint32_t segment = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
+  uint32_t destination = (uint32_t)(uintptr_t)&_JIT_PARAM_1;
+
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_TABLE_INIT, segment,
+                                  destination, offset, source, length);
+
+  if (ctx->trap != JIT_TRAP_NONE) {
+    return;
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void elem_drop(VMContext *ctx) {
+  uint32_t segment = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
+
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_ELEM_DROP, segment,
+                                  0, 0, 0, 0);
+
+  if (ctx->trap != JIT_TRAP_NONE) {
+    return;
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_load(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint32_t value;
+  __builtin_memcpy(&value, address, 4);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_load8_s(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 1);
+
+  if (address == 0) {
+    return;
+  }
+
+  int8_t value;
+  __builtin_memcpy(&value, address, 1);
+
+  ctx->stack[ctx->stack_height++] = (uint32_t)(int32_t)value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_load8_u(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 1);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint8_t value;
+  __builtin_memcpy(&value, address, 1);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_load16_s(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 2);
+
+  if (address == 0) {
+    return;
+  }
+
+  int16_t value;
+  __builtin_memcpy(&value, address, 2);
+
+  ctx->stack[ctx->stack_height++] = (uint32_t)(int32_t)value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_load16_u(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 2);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint16_t value;
+  __builtin_memcpy(&value, address, 2);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_store(VMContext *ctx) {
+  uint32_t value = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 4);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_store8(VMContext *ctx) {
+  uint8_t value = (uint8_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 1);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 1);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_store16(VMContext *ctx) {
+  uint16_t value = (uint16_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 2);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 2);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void local_get_i32_load(VMContext *ctx) {
+  uint64_t base = ctx->locals[(uintptr_t)&_JIT_PARAM_2];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint32_t value;
+  __builtin_memcpy(&value, address, 4);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void local_get_i32_store(VMContext *ctx) {
+  uint32_t value = (uint32_t)ctx->locals[(uintptr_t)&_JIT_PARAM_2];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 4);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 8);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint64_t value;
+  __builtin_memcpy(&value, address, 8);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load8_s(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 1);
+
+  if (address == 0) {
+    return;
+  }
+
+  int8_t value;
+  __builtin_memcpy(&value, address, 1);
+
+  ctx->stack[ctx->stack_height++] = (uint64_t)(int64_t)value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load8_u(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 1);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint8_t value;
+  __builtin_memcpy(&value, address, 1);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load16_s(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 2);
+
+  if (address == 0) {
+    return;
+  }
+
+  int16_t value;
+  __builtin_memcpy(&value, address, 2);
+
+  ctx->stack[ctx->stack_height++] = (uint64_t)(int64_t)value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load16_u(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 2);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint16_t value;
+  __builtin_memcpy(&value, address, 2);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load32_s(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  int32_t value;
+  __builtin_memcpy(&value, address, 4);
+
+  ctx->stack[ctx->stack_height++] = (uint64_t)(int64_t)value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_load32_u(VMContext *ctx) {
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint32_t value;
+  __builtin_memcpy(&value, address, 4);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_store(VMContext *ctx) {
+  uint64_t value = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 8);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 8);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_store8(VMContext *ctx) {
+  uint8_t value = (uint8_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 1);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 1);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_store16(VMContext *ctx) {
+  uint16_t value = (uint16_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 2);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 2);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_store32(VMContext *ctx) {
+  uint32_t value = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 4);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 4);
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void local_get_i64_load(VMContext *ctx) {
+  uint64_t base = ctx->locals[(uintptr_t)&_JIT_PARAM_2];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 8);
+
+  if (address == 0) {
+    return;
+  }
+
+  uint64_t value;
+  __builtin_memcpy(&value, address, 8);
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void local_get_i64_store(VMContext *ctx) {
+  uint64_t value = (uint64_t)ctx->locals[(uintptr_t)&_JIT_PARAM_2];
+  uint64_t base = ctx->stack[--ctx->stack_height];
+  uintptr_t memory = (uintptr_t)&_JIT_PARAM_0;
+  uintptr_t offset = (uintptr_t)&_JIT_PARAM_1;
+
+  uint8_t *address = memory_address(ctx, memory, base, offset, 8);
+
+  if (address == 0) {
+    return;
+  }
+
+  __builtin_memcpy(address, &value, 8);
 
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }

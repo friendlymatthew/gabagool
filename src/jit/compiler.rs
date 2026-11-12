@@ -1,7 +1,10 @@
 use crate::{bail_jit, bail_trap, ensure_jit, ir::Op, prelude::*, Error, Result, Trap};
 
 use super::{
-    code_buffer::CodeBuffer, code_layout::CodeLayout, Stencil, StencilInstance, STENCIL_F32_ABS,
+    code_buffer::CodeBuffer,
+    code_layout::CodeLayout,
+    runtime::{self, BulkOperation, MemoryView, RuntimeContext},
+    Stencil, StencilInstance, STENCIL_DATA_DROP, STENCIL_ELEM_DROP, STENCIL_F32_ABS,
     STENCIL_F32_ADD, STENCIL_F32_CEIL, STENCIL_F32_CONST, STENCIL_F32_CONVERT_I32_S,
     STENCIL_F32_CONVERT_I32_U, STENCIL_F32_CONVERT_I64_S, STENCIL_F32_CONVERT_I64_U,
     STENCIL_F32_COPYSIGN, STENCIL_F32_DEMOTE_F64, STENCIL_F32_DIV, STENCIL_F32_EQ,
@@ -18,26 +21,33 @@ use super::{
     STENCIL_I32_CONST, STENCIL_I32_CTZ, STENCIL_I32_DIV_S, STENCIL_I32_DIV_U, STENCIL_I32_EQ,
     STENCIL_I32_EQZ, STENCIL_I32_EXTEND16_S, STENCIL_I32_EXTEND8_S, STENCIL_I32_GE_S,
     STENCIL_I32_GE_U, STENCIL_I32_GT_S, STENCIL_I32_GT_U, STENCIL_I32_LE_S, STENCIL_I32_LE_U,
-    STENCIL_I32_LT_S, STENCIL_I32_LT_U, STENCIL_I32_MUL, STENCIL_I32_NE, STENCIL_I32_OR,
-    STENCIL_I32_POPCNT, STENCIL_I32_REINTERPRET_F32, STENCIL_I32_REM_S, STENCIL_I32_REM_U,
-    STENCIL_I32_ROTL, STENCIL_I32_ROTR, STENCIL_I32_SHL, STENCIL_I32_SHR_S, STENCIL_I32_SHR_U,
-    STENCIL_I32_SUB, STENCIL_I32_TRUNC_F32_S, STENCIL_I32_TRUNC_F32_U, STENCIL_I32_TRUNC_F64_S,
+    STENCIL_I32_LOAD, STENCIL_I32_LOAD16_S, STENCIL_I32_LOAD16_U, STENCIL_I32_LOAD8_S,
+    STENCIL_I32_LOAD8_U, STENCIL_I32_LT_S, STENCIL_I32_LT_U, STENCIL_I32_MUL, STENCIL_I32_NE,
+    STENCIL_I32_OR, STENCIL_I32_POPCNT, STENCIL_I32_REINTERPRET_F32, STENCIL_I32_REM_S,
+    STENCIL_I32_REM_U, STENCIL_I32_ROTL, STENCIL_I32_ROTR, STENCIL_I32_SHL, STENCIL_I32_SHR_S,
+    STENCIL_I32_SHR_U, STENCIL_I32_STORE, STENCIL_I32_STORE16, STENCIL_I32_STORE8, STENCIL_I32_SUB,
+    STENCIL_I32_TRUNC_F32_S, STENCIL_I32_TRUNC_F32_U, STENCIL_I32_TRUNC_F64_S,
     STENCIL_I32_TRUNC_F64_U, STENCIL_I32_TRUNC_SAT_F32_S, STENCIL_I32_TRUNC_SAT_F32_U,
     STENCIL_I32_TRUNC_SAT_F64_S, STENCIL_I32_TRUNC_SAT_F64_U, STENCIL_I32_WRAP_I64,
     STENCIL_I32_XOR, STENCIL_I64_ADD, STENCIL_I64_AND, STENCIL_I64_CLZ, STENCIL_I64_CONST,
     STENCIL_I64_CTZ, STENCIL_I64_DIV_S, STENCIL_I64_DIV_U, STENCIL_I64_EQ, STENCIL_I64_EQZ,
     STENCIL_I64_EXTEND16_S, STENCIL_I64_EXTEND32_S, STENCIL_I64_EXTEND8_S,
     STENCIL_I64_EXTEND_I32_S, STENCIL_I64_EXTEND_I32_U, STENCIL_I64_GE_S, STENCIL_I64_GE_U,
-    STENCIL_I64_GT_S, STENCIL_I64_GT_U, STENCIL_I64_LE_S, STENCIL_I64_LE_U, STENCIL_I64_LT_S,
-    STENCIL_I64_LT_U, STENCIL_I64_MUL, STENCIL_I64_NE, STENCIL_I64_OR, STENCIL_I64_POPCNT,
-    STENCIL_I64_REINTERPRET_F64, STENCIL_I64_REM_S, STENCIL_I64_REM_U, STENCIL_I64_ROTL,
-    STENCIL_I64_ROTR, STENCIL_I64_SHL, STENCIL_I64_SHR_S, STENCIL_I64_SHR_U, STENCIL_I64_SUB,
-    STENCIL_I64_TRUNC_F32_S, STENCIL_I64_TRUNC_F32_U, STENCIL_I64_TRUNC_F64_S,
-    STENCIL_I64_TRUNC_F64_U, STENCIL_I64_TRUNC_SAT_F32_S, STENCIL_I64_TRUNC_SAT_F32_U,
-    STENCIL_I64_TRUNC_SAT_F64_S, STENCIL_I64_TRUNC_SAT_F64_U, STENCIL_I64_XOR, STENCIL_JUMP,
-    STENCIL_JUMP_IF, STENCIL_JUMP_IF_NOT, STENCIL_JUMP_IF_NOT_WITH_DROP, STENCIL_JUMP_IF_WITH_DROP,
-    STENCIL_JUMP_WITH_DROP, STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2, STENCIL_LOCAL_SET,
-    STENCIL_LOCAL_TEE, STENCIL_RETURN_VALUE,
+    STENCIL_I64_GT_S, STENCIL_I64_GT_U, STENCIL_I64_LE_S, STENCIL_I64_LE_U, STENCIL_I64_LOAD,
+    STENCIL_I64_LOAD16_S, STENCIL_I64_LOAD16_U, STENCIL_I64_LOAD32_S, STENCIL_I64_LOAD32_U,
+    STENCIL_I64_LOAD8_S, STENCIL_I64_LOAD8_U, STENCIL_I64_LT_S, STENCIL_I64_LT_U, STENCIL_I64_MUL,
+    STENCIL_I64_NE, STENCIL_I64_OR, STENCIL_I64_POPCNT, STENCIL_I64_REINTERPRET_F64,
+    STENCIL_I64_REM_S, STENCIL_I64_REM_U, STENCIL_I64_ROTL, STENCIL_I64_ROTR, STENCIL_I64_SHL,
+    STENCIL_I64_SHR_S, STENCIL_I64_SHR_U, STENCIL_I64_STORE, STENCIL_I64_STORE16,
+    STENCIL_I64_STORE32, STENCIL_I64_STORE8, STENCIL_I64_SUB, STENCIL_I64_TRUNC_F32_S,
+    STENCIL_I64_TRUNC_F32_U, STENCIL_I64_TRUNC_F64_S, STENCIL_I64_TRUNC_F64_U,
+    STENCIL_I64_TRUNC_SAT_F32_S, STENCIL_I64_TRUNC_SAT_F32_U, STENCIL_I64_TRUNC_SAT_F64_S,
+    STENCIL_I64_TRUNC_SAT_F64_U, STENCIL_I64_XOR, STENCIL_JUMP, STENCIL_JUMP_IF,
+    STENCIL_JUMP_IF_NOT, STENCIL_JUMP_IF_NOT_WITH_DROP, STENCIL_JUMP_IF_WITH_DROP,
+    STENCIL_JUMP_WITH_DROP, STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2, STENCIL_LOCAL_GET_I32_LOAD,
+    STENCIL_LOCAL_GET_I32_STORE, STENCIL_LOCAL_GET_I64_LOAD, STENCIL_LOCAL_GET_I64_STORE,
+    STENCIL_LOCAL_SET, STENCIL_LOCAL_TEE, STENCIL_MEMORY_INIT, STENCIL_RETURN_VALUE,
+    STENCIL_TABLE_INIT,
 };
 
 const fn find_stencil(op: Op) -> Option<&'static Stencil> {
@@ -48,6 +58,10 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::LocalTee { .. } => &STENCIL_LOCAL_TEE,
         Op::LocalGet2 { .. } => &STENCIL_LOCAL_GET2,
         Op::Return => &STENCIL_RETURN_VALUE,
+        Op::MemoryInit { .. } => &STENCIL_MEMORY_INIT,
+        Op::DataDrop { .. } => &STENCIL_DATA_DROP,
+        Op::TableInit { .. } => &STENCIL_TABLE_INIT,
+        Op::ElemDrop { .. } => &STENCIL_ELEM_DROP,
         Op::Jump { drop: 0, .. } => &STENCIL_JUMP,
         Op::Jump { .. } => &STENCIL_JUMP_WITH_DROP,
         Op::JumpIf { drop: 0, .. } => &STENCIL_JUMP_IF,
@@ -193,6 +207,37 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::I64TruncSaturatedF64Signed => &STENCIL_I64_TRUNC_SAT_F64_S,
         Op::I64TruncF64Unsigned => &STENCIL_I64_TRUNC_F64_U,
         Op::I64TruncSaturatedF64Unsigned => &STENCIL_I64_TRUNC_SAT_F64_U,
+        Op::I32Load { .. } => &STENCIL_I32_LOAD,
+        Op::I32Load8Signed { .. } => &STENCIL_I32_LOAD8_S,
+        Op::I32Load8Unsigned { .. } => &STENCIL_I32_LOAD8_U,
+        Op::I32Load16Signed { .. } => &STENCIL_I32_LOAD16_S,
+        Op::I32Load16Unsigned { .. } => &STENCIL_I32_LOAD16_U,
+        Op::I32Store { .. } => &STENCIL_I32_STORE,
+        Op::I32Store8 { .. } => &STENCIL_I32_STORE8,
+        Op::I32Store16 { .. } => &STENCIL_I32_STORE16,
+        Op::LocalGetI32Load { .. } => &STENCIL_LOCAL_GET_I32_LOAD,
+        Op::LocalGetI32Store { .. } => &STENCIL_LOCAL_GET_I32_STORE,
+        Op::I64Load { .. } => &STENCIL_I64_LOAD,
+        Op::I64Load8Signed { .. } => &STENCIL_I64_LOAD8_S,
+        Op::I64Load8Unsigned { .. } => &STENCIL_I64_LOAD8_U,
+        Op::I64Load16Signed { .. } => &STENCIL_I64_LOAD16_S,
+        Op::I64Load16Unsigned { .. } => &STENCIL_I64_LOAD16_U,
+        Op::I64Load32Signed { .. } => &STENCIL_I64_LOAD32_S,
+        Op::I64Load32Unsigned { .. } => &STENCIL_I64_LOAD32_U,
+        Op::I64Store { .. } => &STENCIL_I64_STORE,
+        Op::I64Store8 { .. } => &STENCIL_I64_STORE8,
+        Op::I64Store16 { .. } => &STENCIL_I64_STORE16,
+        Op::I64Store32 { .. } => &STENCIL_I64_STORE32,
+        Op::LocalGetI64Load { .. } => &STENCIL_LOCAL_GET_I64_LOAD,
+        Op::LocalGetI64Store { .. } => &STENCIL_LOCAL_GET_I64_STORE,
+        Op::F32Load { .. } => &STENCIL_I32_LOAD,
+        Op::LocalGetF32Load { .. } => &STENCIL_LOCAL_GET_I32_LOAD,
+        Op::F32Store { .. } => &STENCIL_I32_STORE,
+        Op::LocalGetF32Store { .. } => &STENCIL_LOCAL_GET_I32_STORE,
+        Op::F64Load { .. } => &STENCIL_I64_LOAD,
+        Op::LocalGetF64Load { .. } => &STENCIL_LOCAL_GET_I64_LOAD,
+        Op::F64Store { .. } => &STENCIL_I64_STORE,
+        Op::LocalGetF64Store { .. } => &STENCIL_LOCAL_GET_I64_STORE,
         _ => return None,
     })
 }
@@ -210,6 +255,9 @@ struct VMContext {
     stack: *mut u64,
     stack_height: u64,
     trap: u64,
+    runtime: *mut core::ffi::c_void,
+    bulk_operation: BulkOperation,
+    memories: *const MemoryView,
 }
 
 impl JitCompiledFunction {
@@ -221,6 +269,7 @@ impl JitCompiledFunction {
         &self,
         locals: &mut [crate::RawValue],
         stack: &mut [crate::RawValue],
+        runtime: &mut RuntimeContext<'_>,
     ) -> Result<usize> {
         unsafe {
             let locals =
@@ -229,11 +278,21 @@ impl JitCompiledFunction {
             let stack =
                 core::slice::from_raw_parts_mut(stack.as_mut_ptr().cast::<u64>(), stack.len());
 
-            self.execute(locals, stack)
+            self.execute_with_runtime(locals, stack, Some(runtime))
         }
     }
 
+    #[cfg(test)]
     pub(super) fn execute(&self, locals: &mut [u64], stack: &mut [u64]) -> Result<usize> {
+        self.execute_with_runtime(locals, stack, None)
+    }
+
+    fn execute_with_runtime(
+        &self,
+        locals: &mut [u64],
+        stack: &mut [u64],
+        runtime: Option<&mut RuntimeContext<'_>>,
+    ) -> Result<usize> {
         ensure_jit!(
             locals.len() as u64 >= self.required_locals,
             "not enough locals"
@@ -244,11 +303,40 @@ impl JitCompiledFunction {
             "operand stack is too small"
         );
 
+        // Keep the common single-memory case on the native stack. Views are
+        // rebuilt for every entry and are never persisted in code or snapshots.
+        let mut runtime = runtime;
+        let mut inline_views = [MemoryView::EMPTY];
+        let mut many_views = Vec::new();
+
+        let memories = if let Some(runtime) = runtime.as_deref_mut() {
+            match runtime.module.mem_addrs.len() {
+                0 => core::ptr::null(),
+                1 => {
+                    inline_views[0] = runtime.memory_view(0);
+                    inline_views.as_ptr()
+                }
+                count => {
+                    many_views.extend((0..count).map(|index| runtime.memory_view(index)));
+                    many_views.as_ptr()
+                }
+            }
+        } else {
+            core::ptr::null()
+        };
+
+        // Current helpers do not grow memory. Any future growth helper must
+        // refresh these views before native loads or stores resume.
         let mut context = VMContext {
             locals: locals.as_mut_ptr(),
             stack: stack.as_mut_ptr(),
             stack_height: 0,
             trap: 0,
+            runtime: runtime.map_or(core::ptr::null_mut(), |context| {
+                (context as *mut RuntimeContext<'_>).cast()
+            }),
+            bulk_operation: runtime::bulk_operation,
+            memories,
         };
 
         type Entry = unsafe extern "C" fn(*mut VMContext);
@@ -263,6 +351,9 @@ impl JitCompiledFunction {
             1 => bail_trap!(Trap::IntegerDivideByZero),
             2 => bail_trap!(Trap::IntegerOverflow),
             3 => bail_trap!(Trap::InvalidConversionToInteger),
+            4 => bail_trap!(Trap::OutOfBoundsMemoryAccess),
+            5 => bail_trap!(Trap::OutOfBoundsTableAccess),
+            255 => bail_jit!("bulk operation needs a valid runtime context"),
             code => bail_jit!("unknown trap code {code}"),
         }
 
@@ -293,6 +384,79 @@ pub fn compile(
             .ok_or_else(|| Error::jit(format!("unsupported operation at IR {pc}: {op:?}")))?;
 
         let parameters = match op {
+            Op::MemoryInit { data_i, memory_i } => vec![u64::from(data_i), u64::from(memory_i)],
+            Op::TableInit { elem_i, table_i } => vec![u64::from(elem_i), u64::from(table_i)],
+            Op::DataDrop { data_i } => vec![u64::from(data_i)],
+            Op::ElemDrop { elem_i } => vec![u64::from(elem_i)],
+            Op::I32Load { offset, memory }
+            | Op::I32Load8Signed { offset, memory }
+            | Op::I32Load8Unsigned { offset, memory }
+            | Op::I32Load16Signed { offset, memory }
+            | Op::I32Load16Unsigned { offset, memory }
+            | Op::I32Store { offset, memory }
+            | Op::I32Store8 { offset, memory }
+            | Op::I32Store16 { offset, memory }
+            | Op::I64Load { offset, memory }
+            | Op::I64Load8Signed { offset, memory }
+            | Op::I64Load8Unsigned { offset, memory }
+            | Op::I64Load16Signed { offset, memory }
+            | Op::I64Load16Unsigned { offset, memory }
+            | Op::I64Load32Signed { offset, memory }
+            | Op::I64Load32Unsigned { offset, memory }
+            | Op::I64Store { offset, memory }
+            | Op::I64Store8 { offset, memory }
+            | Op::I64Store16 { offset, memory }
+            | Op::I64Store32 { offset, memory }
+            | Op::F32Load { offset, memory }
+            | Op::F32Store { offset, memory }
+            | Op::F64Load { offset, memory }
+            | Op::F64Store { offset, memory } => {
+                vec![u64::from(memory), u64::from(offset)]
+            }
+            Op::LocalGetI32Load {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetI32Store {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetI64Load {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetI64Store {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetF32Load {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetF32Store {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetF64Load {
+                local_i,
+                offset,
+                memory,
+            }
+            | Op::LocalGetF64Store {
+                local_i,
+                offset,
+                memory,
+            } => {
+                required_locals = required_locals.max(u64::from(local_i) + 1);
+
+                vec![u64::from(memory), u64::from(offset), u64::from(local_i)]
+            }
             Op::I32Const { value } => vec![u64::from(value as u32)],
             Op::I64Const { value } => vec![value as u64],
             Op::F32Const { value } => vec![u64::from(value.to_bits())],

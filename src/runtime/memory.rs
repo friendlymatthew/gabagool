@@ -74,6 +74,11 @@ impl GuestMemory {
         self.bytes.resize(new_len, val);
     }
 
+    #[cfg(feature = "jit")]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.bytes.as_mut_ptr()
+    }
+
     pub const fn as_slice(&self) -> &[u8] {
         self.bytes.as_slice()
     }

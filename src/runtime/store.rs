@@ -1761,7 +1761,19 @@ impl Store {
 
         let locals = frame.locals.clone();
         let base = frame.stack_base;
-        let count = function.execute_vm(&mut self.locals[locals], self.stack.spare_mut())?;
+        let mut runtime = jit::RuntimeContext {
+            module: &self.instances[key.0 as usize],
+            memories: &mut self.memories,
+            tables: &mut self.tables,
+            data_segments: &mut self.data_segments,
+            element_segments: &mut self.element_segments,
+        };
+
+        let count = function.execute_vm(
+            &mut self.locals[locals],
+            self.stack.spare_mut(),
+            &mut runtime,
+        )?;
 
         self.stack.truncate(base + count);
         self.do_return(depth);

@@ -8,6 +8,10 @@ core::cfg_select! {
         mod code_buffer;
         mod code_layout;
         mod compiler;
+        mod runtime;
+
+
+        pub(crate) use runtime::RuntimeContext;
         pub(crate) use compiler::{compile, supports, JitCompiledFunction};
     }
     _ => {
