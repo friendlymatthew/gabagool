@@ -2403,3 +2403,942 @@ void local_get_return(VMContext *ctx) {
 
   ctx->stack[ctx->stack_height++] = value;
 }
+
+void i32_eqz_jump_if(VMContext *ctx) {
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a == 0) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_eqz_jump_if_with_drop(VMContext *ctx) {
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a == 0) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_eqz_jump_if_not(VMContext *ctx) {
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a != 0) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_eqz_jump_if_not_with_drop(VMContext *ctx) {
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a != 0) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_eq_jump_if(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a == b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_eq_jump_if_with_drop(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a == b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ne_jump_if(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a != b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ne_jump_if_with_drop(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a != b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_lt_s_jump_if(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_lt_s_jump_if_with_drop(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_lt_u_jump_if(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_lt_u_jump_if_with_drop(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_gt_s_jump_if(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_gt_s_jump_if_with_drop(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_gt_u_jump_if(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_gt_u_jump_if_with_drop(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_le_s_jump_if(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_le_s_jump_if_with_drop(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_le_u_jump_if(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_le_u_jump_if_with_drop(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ge_s_jump_if(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ge_s_jump_if_with_drop(VMContext *ctx) {
+  int32_t b = (int32_t)ctx->stack[--ctx->stack_height];
+  int32_t a = (int32_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ge_u_jump_if(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i32_ge_u_jump_if_with_drop(VMContext *ctx) {
+  uint32_t b = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint32_t a = (uint32_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_eqz_jump_if(VMContext *ctx) {
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a == 0) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_eqz_jump_if_with_drop(VMContext *ctx) {
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a == 0) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_eq_jump_if(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a == b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_eq_jump_if_with_drop(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a == b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_ne_jump_if(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a != b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_ne_jump_if_with_drop(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a != b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_lt_s_jump_if(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_lt_s_jump_if_with_drop(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_lt_u_jump_if(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_lt_u_jump_if_with_drop(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a < b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_gt_s_jump_if(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_gt_s_jump_if_with_drop(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_gt_u_jump_if(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_gt_u_jump_if_with_drop(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a > b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_le_s_jump_if(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_le_s_jump_if_with_drop(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_le_u_jump_if(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_le_u_jump_if_with_drop(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a <= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_ge_s_jump_if(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_ge_s_jump_if_with_drop(VMContext *ctx) {
+  int64_t b = (int64_t)ctx->stack[--ctx->stack_height];
+  int64_t a = (int64_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_ge_u_jump_if(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void i64_ge_u_jump_if_with_drop(VMContext *ctx) {
+  uint64_t b = (uint64_t)ctx->stack[--ctx->stack_height];
+  uint64_t a = (uint64_t)ctx->stack[--ctx->stack_height];
+
+  if (a >= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_eq_jump_if(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a == b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_eq_jump_if_with_drop(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a == b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_ne_jump_if(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a != b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_ne_jump_if_with_drop(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a != b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_lt_jump_if(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a < b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_lt_jump_if_with_drop(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a < b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_gt_jump_if(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a > b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_gt_jump_if_with_drop(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a > b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_le_jump_if(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a <= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_le_jump_if_with_drop(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a <= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_ge_jump_if(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a >= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f32_ge_jump_if_with_drop(VMContext *ctx) {
+  float b = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  float a = F32_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a >= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_eq_jump_if(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a == b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_eq_jump_if_with_drop(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a == b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_ne_jump_if(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a != b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_ne_jump_if_with_drop(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a != b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_lt_jump_if(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a < b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_lt_jump_if_with_drop(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a < b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_gt_jump_if(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a > b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_gt_jump_if_with_drop(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a > b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_le_jump_if(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a <= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_le_jump_if_with_drop(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a <= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_ge_jump_if(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a >= b) {
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void f64_ge_jump_if_with_drop(VMContext *ctx) {
+  double b = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+  double a = F64_FROM_BITS(ctx->stack[--ctx->stack_height]);
+
+  if (a >= b) {
+    uintptr_t keep = (uintptr_t)&_JIT_PARAM_0;
+    uintptr_t drop = (uintptr_t)&_JIT_PARAM_1;
+
+    branch_keep_top(ctx, keep, drop);
+
+    __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}

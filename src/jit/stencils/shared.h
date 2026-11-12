@@ -68,6 +68,18 @@ static __attribute__((always_inline)) inline uint8_t *memory_address(
     return memory.bytes + base + offset;
 }
 
+static __attribute__((always_inline)) inline void branch_keep_top(
+    VMContext *ctx, uintptr_t keep, uintptr_t drop) {
+    uint64_t source = ctx->stack_height - keep;
+    uint64_t destination = source - drop;
+
+    for (uint64_t i = 0; i < keep; i++) {
+        ctx->stack[destination + i] = ctx->stack[source + i];
+    }
+
+    ctx->stack_height -= drop;
+}
+
 // convert float bit patterns without changing their value or violating aliasing rules.
 #define F32_FROM_BITS(value) __builtin_bit_cast(float, (uint32_t)(value))
 #define F64_FROM_BITS(value) __builtin_bit_cast(double, (uint64_t)(value))
