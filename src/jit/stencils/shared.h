@@ -23,11 +23,13 @@ enum {
     JIT_BULK_DATA_DROP = 1,
     JIT_BULK_TABLE_INIT = 2,
     JIT_BULK_ELEM_DROP = 3,
+    JIT_BULK_MEMORY_COPY = 4,
+    JIT_BULK_MEMORY_FILL = 5,
 };
 
 typedef uint64_t (*BulkOperation)(void *runtime, uint32_t operation,
                                   uint32_t segment, uint32_t destination,
-                                  uint64_t offset, uint32_t source, uint32_t length);
+                                  uint64_t offset, uint64_t source, uint64_t length);
 
 typedef struct MemoryView {
     uint8_t *bytes;

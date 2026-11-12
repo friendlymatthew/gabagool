@@ -1884,8 +1884,8 @@ void memory_init(VMContext *ctx) {
 void data_drop(VMContext *ctx) {
   uint32_t segment = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
 
-  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_DATA_DROP, segment,
-                                  0, 0, 0, 0);
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_DATA_DROP, segment, 0,
+                                  0, 0, 0);
 
   if (ctx->trap != JIT_TRAP_NONE) {
     return;
@@ -1915,8 +1915,8 @@ void table_init(VMContext *ctx) {
 void elem_drop(VMContext *ctx) {
   uint32_t segment = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
 
-  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_ELEM_DROP, segment,
-                                  0, 0, 0, 0);
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_ELEM_DROP, segment, 0,
+                                  0, 0, 0);
 
   if (ctx->trap != JIT_TRAP_NONE) {
     return;
@@ -2362,9 +2362,7 @@ void global_set(VMContext *ctx) {
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
 
-void unreachable(VMContext *ctx) {
-  ctx->trap = JIT_TRAP_UNREACHABLE;
-}
+void unreachable(VMContext *ctx) { ctx->trap = JIT_TRAP_UNREACHABLE; }
 
 void call(VMContext *ctx) {
   ctx->call_function = (uintptr_t)&_JIT_PARAM_0;
@@ -3338,6 +3336,42 @@ void f64_ge_jump_if_with_drop(VMContext *ctx) {
     branch_keep_top(ctx, keep, drop);
 
     __attribute__((musttail)) return _JIT_TARGET(ctx);
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void memory_copy(VMContext *ctx) {
+  uint64_t length = ctx->stack[--ctx->stack_height];
+  uint64_t source = ctx->stack[--ctx->stack_height];
+  uint64_t offset = ctx->stack[--ctx->stack_height];
+
+  uint32_t source_memory = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
+  uint32_t destination_memory = (uint32_t)(uintptr_t)&_JIT_PARAM_1;
+
+  ctx->trap =
+      ctx->bulk_operation(ctx->runtime, JIT_BULK_MEMORY_COPY, source_memory,
+                          destination_memory, offset, source, length);
+
+  if (ctx->trap != JIT_TRAP_NONE) {
+    return;
+  }
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void memory_fill(VMContext *ctx) {
+  uint64_t length = ctx->stack[--ctx->stack_height];
+  uint32_t value = (uint32_t)ctx->stack[--ctx->stack_height];
+  uint64_t offset = ctx->stack[--ctx->stack_height];
+
+  uint32_t memory = (uint32_t)(uintptr_t)&_JIT_PARAM_0;
+
+  ctx->trap = ctx->bulk_operation(ctx->runtime, JIT_BULK_MEMORY_FILL, 0, memory,
+                                  offset, value, length);
+
+  if (ctx->trap != JIT_TRAP_NONE) {
+    return;
   }
 
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);

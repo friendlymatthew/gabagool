@@ -73,8 +73,8 @@ use super::{
     STENCIL_JUMP_WITH_DROP, STENCIL_LOCAL_GET, STENCIL_LOCAL_GET2, STENCIL_LOCAL_GET_I32_LOAD,
     STENCIL_LOCAL_GET_I32_STORE, STENCIL_LOCAL_GET_I64_LOAD, STENCIL_LOCAL_GET_I64_STORE,
     STENCIL_LOCAL_GET_LOCAL_SET, STENCIL_LOCAL_GET_RETURN, STENCIL_LOCAL_SET, STENCIL_LOCAL_TEE,
-    STENCIL_MEMORY_INIT, STENCIL_RETURN_VALUE, STENCIL_SELECT_VALUE, STENCIL_TABLE_INIT,
-    STENCIL_UNREACHABLE,
+    STENCIL_MEMORY_COPY, STENCIL_MEMORY_FILL, STENCIL_MEMORY_INIT, STENCIL_RETURN_VALUE,
+    STENCIL_SELECT_VALUE, STENCIL_TABLE_INIT, STENCIL_UNREACHABLE,
 };
 
 const fn find_stencil(op: Op) -> Option<&'static Stencil> {
@@ -94,6 +94,8 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::GlobalSet { .. } => &STENCIL_GLOBAL_SET,
         Op::Unreachable => &STENCIL_UNREACHABLE,
         Op::MemoryInit { .. } => &STENCIL_MEMORY_INIT,
+        Op::MemoryCopy { .. } => &STENCIL_MEMORY_COPY,
+        Op::MemoryFill { .. } => &STENCIL_MEMORY_FILL,
         Op::DataDrop { .. } => &STENCIL_DATA_DROP,
         Op::TableInit { .. } => &STENCIL_TABLE_INIT,
         Op::ElemDrop { .. } => &STENCIL_ELEM_DROP,
@@ -547,6 +549,13 @@ pub fn compile(
             Op::GlobalGet { global_i } | Op::GlobalSet { global_i } => {
                 vec![u64::from(global_i)]
             }
+            Op::MemoryCopy {
+                dst_memory_i,
+                src_memory_i,
+            } => {
+                vec![u64::from(src_memory_i), u64::from(dst_memory_i)]
+            }
+            Op::MemoryFill { memory_i } => vec![u64::from(memory_i)],
             Op::MemoryInit { data_i, memory_i } => vec![u64::from(data_i), u64::from(memory_i)],
             Op::TableInit { elem_i, table_i } => vec![u64::from(elem_i), u64::from(table_i)],
             Op::DataDrop { data_i } => vec![u64::from(data_i)],
