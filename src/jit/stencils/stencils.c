@@ -3376,3 +3376,10 @@ void memory_fill(VMContext *ctx) {
 
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
+
+void call_indirect(VMContext *ctx) {
+  ctx->call_type = (uintptr_t)&_JIT_PARAM_0;
+  ctx->call_table = (uintptr_t)&_JIT_PARAM_1;
+  ctx->resume_pc = (uintptr_t)&_JIT_PARAM_2;
+  ctx->exit_reason = JIT_EXIT_CALL_INDIRECT;
+}

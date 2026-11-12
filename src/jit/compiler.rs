@@ -4,8 +4,8 @@ use super::{
     code_buffer::CodeBuffer,
     code_layout::CodeLayout,
     runtime::{self, BulkOperation, MemoryView, RuntimeContext},
-    Stencil, StencilInstance, STENCIL_CALL, STENCIL_DATA_DROP, STENCIL_DROP, STENCIL_ELEM_DROP,
-    STENCIL_F32_ABS, STENCIL_F32_ADD, STENCIL_F32_CEIL, STENCIL_F32_CONST,
+    Stencil, StencilInstance, STENCIL_CALL, STENCIL_CALL_INDIRECT, STENCIL_DATA_DROP, STENCIL_DROP,
+    STENCIL_ELEM_DROP, STENCIL_F32_ABS, STENCIL_F32_ADD, STENCIL_F32_CEIL, STENCIL_F32_CONST,
     STENCIL_F32_CONVERT_I32_S, STENCIL_F32_CONVERT_I32_U, STENCIL_F32_CONVERT_I64_S,
     STENCIL_F32_CONVERT_I64_U, STENCIL_F32_COPYSIGN, STENCIL_F32_DEMOTE_F64, STENCIL_F32_DIV,
     STENCIL_F32_EQ, STENCIL_F32_EQ_JUMP_IF, STENCIL_F32_EQ_JUMP_IF_WITH_DROP, STENCIL_F32_FLOOR,
@@ -90,6 +90,7 @@ const fn find_stencil(op: Op) -> Option<&'static Stencil> {
         Op::LocalGetLocalSet { .. } => &STENCIL_LOCAL_GET_LOCAL_SET,
         Op::LocalGetReturn { .. } => &STENCIL_LOCAL_GET_RETURN,
         Op::Call { .. } => &STENCIL_CALL,
+        Op::CallIndirect { .. } => &STENCIL_CALL_INDIRECT,
         Op::GlobalGet { .. } => &STENCIL_GLOBAL_GET,
         Op::GlobalSet { .. } => &STENCIL_GLOBAL_SET,
         Op::Unreachable => &STENCIL_UNREACHABLE,
@@ -370,6 +371,8 @@ struct VMContext {
     exit_reason: u64,
     call_function: u64,
     resume_pc: u64,
+    call_type: u64,
+    call_table: u64,
 }
 
 pub(crate) enum JitExit {
@@ -379,6 +382,12 @@ pub(crate) enum JitExit {
     Call {
         stack_height: usize,
         function: u32,
+        resume_pc: usize,
+    },
+    CallIndirect {
+        stack_height: usize,
+        type_i: u32,
+        table_i: u32,
         resume_pc: usize,
     },
 }
@@ -411,7 +420,9 @@ impl JitCompiledFunction {
     pub(super) fn execute(&self, locals: &mut [u64], stack: &mut [u64]) -> Result<usize> {
         match self.execute_with_runtime(locals, stack, None, 0, 0)? {
             JitExit::Returned { stack_height } => Ok(stack_height),
-            JitExit::Call { .. } => bail_jit!("calls must be coordinated by the store"),
+            JitExit::Call { .. } | JitExit::CallIndirect { .. } => {
+                bail_jit!("calls must be coordinated by the store")
+            }
         }
     }
 
@@ -487,6 +498,8 @@ impl JitCompiledFunction {
             exit_reason: 0,
             call_function: 0,
             resume_pc: 0,
+            call_type: 0,
+            call_table: 0,
         };
 
         type Entry = unsafe extern "C" fn(*mut VMContext);
@@ -522,6 +535,12 @@ impl JitCompiledFunction {
                 function: context.call_function as u32,
                 resume_pc: context.resume_pc as usize,
             }),
+            2 => Ok(JitExit::CallIndirect {
+                stack_height,
+                type_i: context.call_type as u32,
+                table_i: context.call_table as u32,
+                resume_pc: context.resume_pc as usize,
+            }),
             code => bail_jit!("unknown native exit reason {code}"),
         }
     }
@@ -546,6 +565,9 @@ pub fn compile(
 
         let parameters = match op {
             Op::Call { func_i } => vec![u64::from(func_i), (pc + 1) as u64],
+            Op::CallIndirect { type_i, table_i } => {
+                vec![u64::from(type_i), u64::from(table_i), (pc + 1) as u64]
+            }
             Op::GlobalGet { global_i } | Op::GlobalSet { global_i } => {
                 vec![u64::from(global_i)]
             }

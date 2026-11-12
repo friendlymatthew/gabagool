@@ -1797,6 +1797,18 @@ impl Store {
                 let address = self.instances[key.0 as usize].function_addrs[function as usize];
                 self.push_function_call(address)?;
             }
+            JitExit::CallIndirect {
+                stack_height,
+                type_i,
+                table_i,
+                resume_pc,
+            } => {
+                self.stack.truncate(base + stack_height);
+                self.call_stack[depth].pc = resume_pc;
+
+                let address = self.resolve_indirect_call(key.0 as usize, type_i, table_i)?;
+                self.push_function_call(address)?;
+            }
         }
 
         Ok(true)
@@ -1903,34 +1915,9 @@ impl Store {
                     }
                 }
                 Op::CallIndirect { type_i, table_i } => {
-                    let table_addr = self.instances[mi].table_addrs[table_i as usize];
-                    let addr_type = self.tables[table_addr].table_type.addr_type;
+                    let address = self.resolve_indirect_call(mi, type_i, table_i)?;
 
-                    let i = self.stack.pop_address(addr_type);
-
-                    let elem = self.tables[table_addr]
-                        .elem
-                        .get(i)
-                        .ok_or(Error::Trap(Trap::UndefinedElement))?;
-
-                    let Ref::FunctionAddr(func_addr) = elem else {
-                        bail_trap!(Trap::UndefinedElement);
-                    };
-
-                    let expected =
-                        match &self.instances[mi].code.types[type_i as usize].composite_type {
-                            CompositeType::Func(ft) => ft,
-                            _ => bail_instantiation!("type index {} not a func type", type_i),
-                        };
-
-                    let actual = match &self.functions[*func_addr] {
-                        FunctionInstance::Local { function_type, .. }
-                        | FunctionInstance::Host { function_type, .. } => function_type,
-                    };
-
-                    ensure_trap!(expected == actual, Trap::IndirectCallTypeMismatch);
-
-                    if self.push_function_call(*func_addr)? {
+                    if self.push_function_call(address)? {
                         return Ok(RunOutcome::Suspended);
                     }
                 }
@@ -3228,6 +3215,41 @@ impl Store {
         if let Some(frame) = self.call_stack.pop() {
             self.locals.truncate(frame.locals.start);
         }
+    }
+
+    fn resolve_indirect_call(
+        &mut self,
+        module_i: usize,
+        type_i: u32,
+        table_i: u32,
+    ) -> Result<usize> {
+        let table_addr = self.instances[module_i].table_addrs[table_i as usize];
+        let addr_type = self.tables[table_addr].table_type.addr_type;
+
+        let i = self.stack.pop_address(addr_type);
+
+        let elem = self.tables[table_addr]
+            .elem
+            .get(i)
+            .ok_or(Error::Trap(Trap::UndefinedElement))?;
+
+        let Ref::FunctionAddr(func_addr) = elem else {
+            bail_trap!(Trap::UndefinedElement);
+        };
+
+        let expected = match &self.instances[module_i].code.types[type_i as usize].composite_type {
+            CompositeType::Func(ft) => ft,
+            _ => bail_instantiation!("type index {} not a func type", type_i),
+        };
+
+        let actual = match &self.functions[*func_addr] {
+            FunctionInstance::Local { function_type, .. }
+            | FunctionInstance::Host { function_type, .. } => function_type,
+        };
+
+        ensure_trap!(expected == actual, Trap::IndirectCallTypeMismatch);
+
+        Ok(*func_addr)
     }
 
     fn do_return(&mut self, depth: usize) {

@@ -16,6 +16,7 @@ enum {
 enum {
     JIT_EXIT_RETURN = 0,
     JIT_EXIT_CALL = 1,
+    JIT_EXIT_CALL_INDIRECT = 2,
 };
 
 enum {
@@ -53,6 +54,8 @@ typedef struct VMContext {
     uint64_t exit_reason;
     uint64_t call_function;
     uint64_t resume_pc;
+    uint64_t call_type;
+    uint64_t call_table;
 } VMContext;
 
 static __attribute__((always_inline)) inline uint8_t *memory_address(
