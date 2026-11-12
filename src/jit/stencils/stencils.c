@@ -2343,3 +2343,25 @@ void local_get_i64_store(VMContext *ctx) {
 
   __attribute__((musttail)) return _JIT_CONTINUE(ctx);
 }
+
+void global_get(VMContext *ctx) {
+  uintptr_t index = (uintptr_t)&_JIT_PARAM_0;
+  uint64_t value = *ctx->globals[index];
+
+  ctx->stack[ctx->stack_height++] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void global_set(VMContext *ctx) {
+  uintptr_t index = (uintptr_t)&_JIT_PARAM_0;
+  uint64_t value = ctx->stack[--ctx->stack_height];
+
+  *ctx->globals[index] = value;
+
+  __attribute__((musttail)) return _JIT_CONTINUE(ctx);
+}
+
+void unreachable(VMContext *ctx) {
+  ctx->trap = JIT_TRAP_UNREACHABLE;
+}

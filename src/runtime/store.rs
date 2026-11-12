@@ -1746,8 +1746,7 @@ impl Store {
                 key.0,
             );
 
-            let compiled =
-                jit::compile(ops, function.max_stack_height as usize, frame.arity)?;
+            let compiled = jit::compile(ops, function.max_stack_height as usize, frame.arity)?;
 
             self.jit_functions.insert(key, compiled);
         }
@@ -1763,6 +1762,7 @@ impl Store {
         let base = frame.stack_base;
         let mut runtime = jit::RuntimeContext {
             module: &self.instances[key.0 as usize],
+            globals: &mut self.globals,
             memories: &mut self.memories,
             tables: &mut self.tables,
             data_segments: &mut self.data_segments,

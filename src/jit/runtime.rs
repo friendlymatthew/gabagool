@@ -2,7 +2,10 @@ use core::ffi::c_void;
 
 use crate::{
     module::AddrType,
-    runtime::{DataInstance, ElementInstance, InstantiatedModule, MemoryInstance, TableInstance},
+    runtime::{
+        DataInstance, ElementInstance, GlobalInstance, InstantiatedModule, MemoryInstance,
+        TableInstance,
+    },
     Error, Result, Trap,
 };
 
@@ -23,11 +26,13 @@ impl MemoryView {
     };
 }
 
-// borrow the actual runtime resources for one native execution. Nothing is copied
-// into the code buffer, so segment drops and writes remain visible to snapshots.
+// borrow the actual runtime resources for one native execution. Nothing is
+// copied into the code buffer, so segment drops and writes remain visible to
+// snapshots.
 pub struct RuntimeContext<'a> {
     pub module: &'a InstantiatedModule,
     pub memories: &'a mut [MemoryInstance],
+    pub globals: &'a mut [GlobalInstance],
     pub tables: &'a mut [TableInstance],
     pub data_segments: &'a mut [DataInstance],
     pub element_segments: &'a mut [ElementInstance],
@@ -48,6 +53,14 @@ impl RuntimeContext<'_> {
             bytes: memory.data.as_mut_ptr(),
             length: memory.data.len() as u64,
             address64: u64::from(matches!(memory.memory_type.addr_type, AddrType::I64)),
+        }
+    }
+
+    pub fn global_values(&mut self, output: &mut [*mut u64]) {
+        let globals = self.globals.as_mut_ptr();
+
+        for (slot, &address) in output.iter_mut().zip(&self.module.global_addrs) {
+            *slot = unsafe { core::ptr::addr_of_mut!((*globals.add(address)).value).cast() };
         }
     }
 

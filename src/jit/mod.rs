@@ -10,9 +10,8 @@ core::cfg_select! {
         mod compiler;
         mod runtime;
 
-
-        pub(crate) use runtime::RuntimeContext;
         pub(crate) use compiler::{compile, supports, JitCompiledFunction};
+        pub(crate) use runtime::RuntimeContext;
     }
     _ => {
         compile_error!("the jit feature currently supports only arm64 macos sorry bruh");

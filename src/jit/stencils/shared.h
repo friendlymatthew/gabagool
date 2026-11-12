@@ -10,6 +10,7 @@ enum {
     JIT_TRAP_INVALID_CONVERSION = 3,
     JIT_TRAP_MEMORY_OUT_OF_BOUNDS = 4,
     JIT_TRAP_TABLE_OUT_OF_BOUNDS = 5,
+    JIT_TRAP_UNREACHABLE = 6,
 };
 
 enum {
@@ -40,6 +41,7 @@ typedef struct VMContext {
     void *runtime;
     BulkOperation bulk_operation;
     const MemoryView *memories;
+    uint64_t *const *globals;
 } VMContext;
 
 static __attribute__((always_inline)) inline uint8_t *memory_address(
